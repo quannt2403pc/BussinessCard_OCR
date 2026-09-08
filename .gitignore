@@ -1,24 +1,107 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
+# ============================================================
+# AI agent — skill, cấu hình, cache (KHÔNG commit vào repo)
+# ============================================================
+# Claude Code / Claude Desktop
+.claude/
+.claude.json
+.claude.local.json
+CLAUDE.local.md
+.mcp.json
 
-# Environment and secrets
+# Các AI agent / IDE-agent khác
+.cursor/
+.cursorrules
+.cursorignore
+.windsurf/
+.windsurfrules
+.aider*
+.continue/
+.codeium/
+.gemini/
+.opencode/
+.roo/
+.roomodes
+.cline/
+.clinerules
+.kilocode/
+.trae/
+.qodo/
+.amazonq/
+.augment/
+.junie/
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+
+# Chỉ mục / cache do agent sinh ra
+.gitnexus/
+.index/
+*.agent-cache
+
+# ============================================================
+# Bí mật & cấu hình môi trường
+# ============================================================
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+secrets/
+cliproxy/config.yaml
+cliproxy/auths/
 
-# Local data and tooling
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+ENV/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
-.vscode/
+.tox/
 
-# OS files
+# ============================================================
+# Dữ liệu runtime của ứng dụng
+# ============================================================
+data/
+uploads/
+media/
+*.sqlite3
+*.db
+logs/
+*.log
+
+# Ảnh danh thiếp thật (chỉ commit ảnh mẫu đã ẩn danh trong samples/)
+samples/private/
+
+# ============================================================
+# Docker
+# ============================================================
+docker-compose.override.yml
+pgdata/
+
+# ============================================================
+# IDE & hệ điều hành
+# ============================================================
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
+desktop.ini
