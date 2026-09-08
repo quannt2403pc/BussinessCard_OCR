@@ -1,0 +1,26 @@
+Lập kế hoạch và nhiệm vụ triển khai dự án và cho từng ngày cho dự án số hoá danh thiếp. 
+Chi tiết yêu cầu trong C:\FSoft\ojt\BusinessCard_OCR\requirement\reuquirement.md
+Thành viên: 2
+Thời gian triển khai dự án: 11 ngày+4 ngày dự phòng
+Các chức năng chính
+1. Số hoá danh thiếp qua ảnh: Từ danh thiếp hãy tổng hợp lại thành thông tin: Công ty, người đưa danh thiếp, chức vụ, email, sdt, địa chỉ,ngày upload,...
+2. Từ những công ty được thu thập qua danh thiếp, sử dụng LLM tìm kiếm thông tin trên internet và tổng hợp lại thông tin về công ty đó: Mã số thuế, tên công ty, quy mô, ngành nghề kinh doanh, sản phẩm, địa chỉ,... để tạo Hồ sơ doanh nghiệp đối tác
+3. Trợ lý AI hỏi đap  thông tin liên quan đên các doanh nghiệp đoi tac, cá nhân đua doanh thiep. Sử dung RAG voi Knowledg base 
+
+Sử dụng RAG với Knowledge base là các danh thiếp đã nhập liệu và các bộ hồ sơ doanh nghiệp đối tác đã tạo
+Phân công: 2 thành viên gồm Quân và Tùng
+Quân: đảm nhận phần OCR danh thiếp, trợ lý AI, tạo git, docker,…
+Tùng: đảm nhận phần hồ sơ doanh nghiệp
+Các công việc khác phát sinh bạn tự phân công
+
+Công nghệ sử dụng: Python Fast API, 
+Các chức năng liên quan đến AI kết nối qua cổng Oauth của CLIProxy  "C:\FSoft\ojt\CliProxy
+Database: PostgreSQL
+Quản lý toàn bộ dự án bằng docker
+
+1 số lưu ý khác:
+Sản phẩm demo, không cần triển khai production, chỉ để môi trường dev và chạy localhost
+Phải có giao diện nút bấm để kết nối Oauth với CliProxy
+Model sử dụng: Gemini flash
+
+Xuất ra file Plan.md cho kế hoạch dự án và Task.md cho các task từng ngày của dự án
