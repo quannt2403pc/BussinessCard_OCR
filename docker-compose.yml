@@ -1,0 +1,12 @@
+# Chu so huu: Q | Task: 1.4, hoan thien o 9.1
+# TODO(Q, task 1.4): khai bao 5 service duoi day. Khai san khoi `embedder` ngay tu D1 de T chi
+#                    viec them thu muc embedder/ ma khong phai sua file nay (xem Task.md muc
+#                    "Ba cho hai nguoi goi code cua nhau").
+#
+#   api       build .            :8000   FastAPI + Web UI
+#   db        pgvector/pgvector:pg16  :5432   PostgreSQL + extension vector
+#   cliproxy  CLIProxyAPI        :8317   Cong OAuth + gateway toi Gemini (home.enabled=false)
+#   embedder  build ./embedder   :8001   sentence-transformers, model nhung san trong image
+#   adminer   adminer            :8080   (tuy chon) xem DB khi debug
+#
+# Volumes: pgdata, uploads, cliproxy_auths

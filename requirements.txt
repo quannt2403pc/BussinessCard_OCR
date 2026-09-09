@@ -1,0 +1,19 @@
+# Stack theo Plan.md muc 9. Ghim phien ban khi dung thuc te (task 1.2, chu so huu: Q).
+fastapi
+uvicorn[standard]
+pydantic>=2
+pydantic-settings
+sqlalchemy>=2
+alembic
+psycopg[binary]
+pgvector
+httpx
+jinja2
+python-multipart
+pillow
+rapidfuzz
+
+# Test
+pytest
+pytest-asyncio
+respx

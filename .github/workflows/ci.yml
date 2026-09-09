@@ -1,0 +1,168 @@
+name: CI
+
+# Chạy trên mọi PR nhắm vào main, và trên chính main sau khi merge.
+# LƯU Ý: workflow này KHÔNG tự chặn merge. Phải bật Branch protection cho `main`
+# và đặt "CI xanh" làm required status check — xem README của thư mục này.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# PR đẩy commit mới thì huỷ lượt chạy cũ cho đỡ tốn runner.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint & format (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Cài ruff
+        run: pip install ruff==0.14.2
+      - name: ruff check (lỗi cú pháp, import thừa, thứ tự import…)
+        run: ruff check --output-format=github .
+      - name: ruff format --check (định dạng thống nhất)
+        run: ruff format --check --diff .
+
+  typecheck:
+    name: Kiểm tra kiểu (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Cài phụ thuộc
+        run: |
+          pip install -r requirements.txt
+          pip install mypy==1.18.2
+      - name: mypy
+        run: mypy app embedder scripts
+
+  test:
+    name: Test (pytest + pgvector)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bizcard
+          POSTGRES_PASSWORD: bizcard
+          POSTGRES_DB: bizcard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bizcard"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://bizcard:bizcard@localhost:5432/bizcard_test
+      # Test phải mock CLIProxy bằng respx (task 6.1) — CI không có OAuth thật.
+      CLIPROXY_BASE_URL: http://localhost:8317
+      CLIPROXY_MGMT_KEY: dummy-for-ci
+      EMBEDDER_URL: http://localhost:8001
+      EMBEDDING_DIM: "384"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Cài phụ thuộc
+        run: pip install -r requirements.txt
+      - name: Bật extension vector trong DB test
+        run: |
+          PGPASSWORD=bizcard psql -h localhost -U bizcard -d bizcard_test \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: pytest
+        run: |
+          set +e
+          pytest --tb=short
+          code=$?
+          set -e
+          # pytest trả 5 khi không thu thập được test nào. Hiện repo mới có stub test rỗng.
+          # TODO: xoá nhánh này sau khi task 6.1 (conftest + test đầu tiên) xong.
+          if [ "$code" -eq 5 ]; then
+            echo "::warning title=Chưa có test::Không thu thập được test nào. Bỏ qua tạm thời — xoá nhánh xử lý này trong ci.yml sau task 6.1."
+            exit 0
+          fi
+          exit "$code"
+
+  secrets:
+    name: Quét secret rò rỉ
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Chạy bằng image chính chủ để khỏi vướng license của gitleaks-action.
+      # Ứng với tiêu chí task 11.3 "kiểm tra không commit nhầm secret".
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest \
+            detect --source=. --config=.gitleaks.toml --redact --no-banner --verbose
+
+  migrations:
+    name: Chỉ một head Alembic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      # Ép quy ước số 5 trong Task.md: chỉ Q sinh revision. Hai người cùng sinh sẽ tạo
+      # 2 head phải merge tay — kiểm ở đây thì phát hiện ngay lúc mở PR.
+      - name: Kiểm tra số head
+        run: |
+          shopt -s nullglob
+          revisions=(alembic/versions/*.py)
+          if [ ${#revisions[@]} -eq 0 ]; then
+            echo "Chưa có revision nào — bỏ qua."
+            exit 0
+          fi
+          pip install -r requirements.txt
+          heads=$(alembic heads 2>/dev/null | grep -c "(head)" || true)
+          echo "Số head: $heads"
+          if [ "$heads" -gt 1 ]; then
+            echo "::error title=Nhiều Alembic head::Có $heads head. Chạy 'alembic merge' hoặc sinh lại revision trên đúng nhánh cha."
+            alembic heads
+            exit 1
+          fi
+
+  ci-ok:
+    name: CI xanh
+    # Đây là job duy nhất cần đặt làm required status check trong Branch protection.
+    if: always()
+    needs: [lint, typecheck, test, secrets, migrations]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tổng hợp kết quả
+        run: |
+          results='${{ join(needs.*.result, " ") }}'
+          echo "Kết quả các job: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error::Có job không thành công ($r). Không được merge."
+              exit 1
+            fi
+          done
+          echo "Tất cả job đều xanh."

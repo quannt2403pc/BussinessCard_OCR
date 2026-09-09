@@ -1,0 +1,55 @@
+[project]
+name = "businesscard-ocr"
+version = "0.1.0"
+description = "Số hoá danh thiếp & hồ sơ doanh nghiệp đối tác"
+requires-python = ">=3.12"
+
+# ---------------------------------------------------------------------------
+# ruff — lint + format. Thay cho flake8 + isort + black.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes: biến/import không dùng, tên chưa định nghĩa
+    "W",    # cảnh báo khoảng trắng
+    "I",    # isort: thứ tự import
+    "UP",   # pyupgrade: cú pháp cũ so với Python 3.12
+    "B",    # bugbear: bẫy phổ biến (mutable default, except rỗng…)
+    "C4",   # comprehension thừa
+    "SIM",  # đơn giản hoá logic
+]
+# Độ dài dòng để formatter lo, lint không cần báo lại.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+# Stub sinh từ khung xương: cho phép module rỗng.
+"app/**/__init__.py" = ["F401"]
+
+# ---------------------------------------------------------------------------
+# mypy — cố ý KHÔNG bật strict. Dự án demo 11 ngày, 2 người; strict sẽ gây ma sát
+# nhiều hơn giá trị. Bắt được lỗi kiểu rõ ràng là đủ. Siết dần sau nếu muốn.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+exclude = "alembic/versions"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"

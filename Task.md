@@ -15,10 +15,10 @@ Mỗi ngày làm việc ~8h. Ngày kết thúc khi các "Tiêu chí hoàn thành
 2. **Không sửa file thuộc quyền sở hữu của người kia.** Cần thay đổi → nhắn cho chủ file, chủ file tự sửa và commit. Ngoại lệ duy nhất: đọc/import để dùng.
 3. **Không xếp hai người vào cùng một file trong cùng một ngày.** Nếu bất khả kháng thì làm tuần tự, người sau `git pull --rebase` trước khi sửa.
 4. **`app/main.py` và `app/routers/__init__.py` được khai báo sẵn stub cho toàn bộ router ngay từ D1** (cards, companies, integration, chat, kb, stats, export) → về sau không ai phải sửa hai file này khi thêm tính năng.
-5. **Chỉ Q tạo Alembic revision.** Hai người cùng sinh revision sẽ tạo 2 head phải merge thủ công. T cần đổi schema → báo Q. Migration khởi tạo ở D1 đã tạo đủ bảng nên về sau rất ít revision mới.
+5. **Chỉ Q tạo Alembic revision.** Hai người cùng sinh revision sẽ tạo 2 head phải merge thủ công — **CI có job `Chỉ một head Alembic` bắt lỗi này ngay khi mở PR**. T cần đổi schema → báo Q. Migration khởi tạo ở D1 đã tạo đủ bảng nên về sau rất ít revision mới.
 6. **Model tách theo file**: `models/card.py`, `models/company.py`, `models/kb.py`, `models/chat.py`, `models/integration.py` — không dùng một file `models.py` chung.
 7. **Nhật ký bug tách 2 file**: `docs/bugs-f1-f3.md` (Q ghi) và `docs/bugs-f2.md` (T ghi). Ai phát hiện bug thuộc module của người kia thì báo cho chủ module, chủ module tự ghi vào file của mình.
-8. **PR nhỏ, merge trong ngày.** Branch `feat/<module>-<việc>`; rebase lên `main` trước khi merge; không để branch sống qua đêm.
+8. **PR nhỏ, merge trong ngày.** Branch `feat/<module>-<việc>`; rebase lên `main` trước khi merge; không để branch sống qua đêm. **PR phải xanh CI** — `main` bật branch protection, required check là `CI xanh` (xem `.github/workflows/README.md`).
 9. **Tài liệu API sau D1 dùng Swagger tự sinh** (`/docs`) làm nguồn chính — `docs/api.md` chỉ là bản chốt ban đầu, không cập nhật tay để tránh sửa file chung.
 
 ### Bảng sở hữu file/module
@@ -27,17 +27,19 @@ Mỗi ngày làm việc ~8h. Ngày kết thúc khi các "Tiêu chí hoàn thành
 |------|-----------|--------------|
 | Hạ tầng & khởi động | **Q** | `Dockerfile`, `docker-compose.yml`, `.env.example`, `app/main.py`, `app/core/`, `alembic/`, `scripts/seed.py`, `README.md` |
 | Kết nối CLIProxy & LLM | **Q** | `app/services/cliproxy_client.py`, `app/services/llm.py`, `app/routers/integration.py`, `templates/settings.html`, `docs/oauth-setup.md` |
-| F1 — OCR danh thiếp | **Q** | `app/services/ocr.py`, `app/services/image.py`, `app/prompts/ocr.py`, `app/routers/cards.py`, `app/models/card.py`, `templates/cards/` |
-| F3 — RAG & trợ lý AI | **Q** | `app/services/kb.py`, `app/services/retriever.py`, `app/prompts/assistant.py`, `app/routers/chat.py`, `app/routers/kb.py`, `app/models/kb.py`, `app/models/chat.py`, `templates/assistant.html` |
+| F1 — OCR danh thiếp (gồm hậu xử lý & tối ưu sau khi quét) | **Q** | `app/services/ocr.py`, `app/services/image.py`, `app/services/normalize.py`, `app/prompts/ocr.py`, `app/routers/cards.py`, `app/models/card.py`, `templates/cards/`, `docs/accuracy.md` |
+| F3 — RAG & trợ lý AI | **Q** | `app/services/embeddings.py` (client gọi `embedder`), `app/services/kb.py`, `app/services/retriever.py`, `app/prompts/assistant.py`, `app/routers/chat.py`, `app/routers/kb.py`, `app/models/kb.py`, `app/models/chat.py`, `templates/assistant.html` |
 | Khung giao diện dùng chung | **Q** | `templates/base.html`, `static/` |
-| Test hạ tầng & F1/F3 | **Q** | `tests/conftest.py`, `tests/test_ocr*.py`, `tests/test_card*.py`, `tests/test_rag*.py` |
-| F2 — Hồ sơ doanh nghiệp | **T** | `app/services/enrichment.py`, `app/services/normalize.py`, `app/services/company_matching.py`, `app/prompts/enrichment.py`, `app/routers/companies.py`, `app/repositories/company.py`, `app/schemas/company.py`, `app/models/company.py`, `templates/companies/` |
+| Test hạ tầng & F1/F3 | **Q** | `tests/conftest.py`, `tests/test_ocr*.py`, `tests/test_card*.py`, `tests/test_normalize.py`, `tests/test_rag*.py` |
+| F2 — Hồ sơ doanh nghiệp | **T** | `app/services/enrichment.py`, `app/services/normalize_company.py`, `app/services/company_matching.py`, `app/prompts/enrichment.py`, `app/routers/companies.py`, `app/repositories/company.py`, `app/schemas/company.py`, `app/models/company.py`, `templates/companies/` |
+| Service embedding (RAG) | **T** | `embedder/` (Dockerfile + FastAPI + model), `scripts/spike_embedding.py`, `docs/adr-embedding.md` |
 | Dashboard & export | **T** | `app/routers/stats.py`, `app/routers/export.py`, `templates/dashboard.html` |
-| Tài liệu & dữ liệu mẫu | **T** | `docs/` (trừ `oauth-setup.md`, `bugs-f1-f3.md`), `samples/`, `scripts/spike_*.py` |
-| Test F2 | **T** | `tests/test_normalize.py`, `tests/test_company*.py`, `tests/test_enrichment.py`, `tests/test_export.py` |
+| Tài liệu & dữ liệu mẫu | **T** | `docs/` (trừ `oauth-setup.md`, `bugs-f1-f3.md`, `accuracy.md`), `samples/`, `scripts/spike_*.py` |
+| Test F2 | **T** | `tests/test_normalize_company.py`, `tests/test_company*.py`, `tests/test_enrichment.py`, `tests/test_export.py` |
 
-> Hai chỗ hai người **gọi** code của nhau (không sửa file của nhau) — chữ ký hàm phải chốt trong buổi họp D2:
-> `cards.confirm` (Q) → gọi `company_matching.upsert_company()` (T) · `enrichment` (T) → gọi `kb.ingest_company_profile()` (Q).
+> Ba chỗ hai người **gọi** code của nhau (không sửa file của nhau) — chữ ký hàm/hợp đồng phải chốt trong buổi họp D2:
+> `cards.confirm` (Q) → gọi `company_matching.upsert_company()` (T) · `enrichment` (T) → gọi `kb.ingest_company_profile()` (Q) · `services/embeddings.py` (Q) → gọi HTTP tới service `embedder` (T), hợp đồng `POST /embed` đã chốt sẵn ở Plan.md mục 2.6.
+> Riêng service `embedder`: **T dựng thư mục `embedder/`, Q khai báo sẵn khối service trong `docker-compose.yml` ngay từ D1** (task 1.4) → về sau không ai phải sửa file của người kia.
 
 ### Họp đồng bộ *(không phải task, không có owner)*
 
@@ -82,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 0 / 99 task (D1–D11) hoàn thành (0%) · Cập nhật lần cuối: _(chưa cập nhật)_
+**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · Cập nhật lần cuối: _(chưa cập nhật)_
 
 ---
 
@@ -95,9 +97,9 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 1.1 | Khởi tạo Git repo, `.gitignore`, `README.md` sơ bộ, quy ước branch/commit | Q | M | 0.5h | ⬜ Chưa làm |
 | 1.2 | Skeleton FastAPI: `app/main.py`, `app/core/config.py`, `GET /health` + **khai báo sẵn stub toàn bộ router** (cards, companies, integration, chat, kb, stats, export) để về sau không ai phải sửa `main.py` | Q | M | 2h | ⬜ Chưa làm |
 | 1.3 | `templates/base.html`: layout, nav (Danh thiếp / Doanh nghiệp / Trợ lý AI / Cài đặt), Tailwind CDN | Q | M | 1h | ⬜ Chưa làm |
-| 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer) | Q | M | 2h | ⬜ Chưa làm |
+| 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer + **khai báo sẵn khối service `embedder`** build từ `./embedder`, port 8001, biến `EMBEDDING_MODEL`, healthcheck) — khai trước để T chỉ việc thêm thư mục `embedder/`, không phải sửa compose của Q | Q | M | 2h | ⬜ Chưa làm |
 | 1.5 | ERD chi tiết → `docs/erd.md` (T review qua PR, không sửa trực tiếp) | Q | M | 1h | ⬜ Chưa làm |
-| 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | ⬜ Chưa làm |
+| 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, `kb_chunks.embedding = vector(384)` (theo mặc định đề xuất ở Plan.md mục 2.6), tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | ⬜ Chưa làm |
 | 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | ⬜ Chưa làm |
 | 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | ⬜ Chưa làm |
 | 1.9 | Khảo sát CLIProxyAPI: chạy thử container, đọc `config.example.yaml`, xác định management key & provider OAuth cho Gemini → `docs/cliproxy-notes.md` | T | M | 2h | ⬜ Chưa làm |
@@ -119,12 +121,12 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 2.3 | `services/llm.py`: `generate_text()`, `generate_vision()`, `embed()` gọi qua CLIProxy, model `gemini-flash-latest`, retry/backoff — **file dùng chung, chỉ Q sửa** | Q | M | 2h | ⬜ Chưa làm |
 | 2.4 | `routers/integration.py`: `connect` / `status` (cache vào `integration_status`) / `disconnect` / `test` | Q | M | 1.5h | ⬜ Chưa làm |
 | 2.5 | `templates/settings.html`: **nút "Kết nối CLIProxy (OAuth)"**, badge trạng thái, poll 2s, nút Kiểm tra kết nối & Ngắt kết nối; test tay đầu–cuối và ghi `docs/oauth-setup.md` | Q | M | 2h | ⬜ Chưa làm |
-| 2.6 | Spike embedding qua CLIProxy (`scripts/spike_embedding.py`) → chốt phương án, ghi `docs/adr-embedding.md` (rủi ro R2 trong Plan.md) | T | M | 1.5h | ⬜ Chưa làm |
+| 2.6 | **Chốt model embedding cho RAG** (CLIProxy không có endpoint embedding — đã kiểm chứng, xem Plan.md 2.6). Chạy `scripts/spike_embedding.py` so sánh `multilingual-e5-small` (384d) vs `bge-m3` (1024d) trên ~20 đoạn mô tả công ty + 10 truy vấn tự soạn, đủ 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung. **Bắt buộc test cả có và không có tiền tố `query:`/`passage:`.** Ghi `docs/adr-embedding.md`: model chốt, số chiều, thời gian nhúng/đoạn, dung lượng image. **Đạt** = top-3 chứa đoạn đúng ở ≥ 8/10 truy vấn và < 200ms/đoạn trên CPU → chọn e5-small; trượt → `bge-m3`; cả hai trượt → báo Q chuyển RAG sang `tsvector`. **Nếu chốt model khác 384 chiều phải báo Q ngay trong ngày** để sinh revision đổi kiểu cột trước D6 | T | M | 2h | ⬜ Chưa làm |
 | 2.7 | Spike khả năng tìm kiếm Internet của Gemini Flash qua CLIProxy (`scripts/spike_websearch.py`) → chốt cách gọi, ghi `docs/adr-websearch.md` | T | M | 2h | ⬜ Chưa làm |
 | 2.8 | `schemas/company.py`: `CompanyProfileSchema` + `SourceRef` (mỗi trường kèm nguồn) | T | M | 1.5h | ⬜ Chưa làm |
 | 2.9 | `prompts/enrichment.py`: prompt sinh hồ sơ DN — tra cứu Internet, trả JSON, **mọi trường phải kèm URL nguồn, không có nguồn thì để null** | T | M | 2.5h | ⬜ Chưa làm |
 
-**Tiêu chí hoàn thành:** Từ UI bấm 1 nút hoàn tất OAuth; badge chuyển "Đã kết nối"; nút "Kiểm tra kết nối" trả về text do Gemini Flash sinh; phương án embedding & web search đã chốt bằng ADR.
+**Tiêu chí hoàn thành:** Từ UI bấm 1 nút hoàn tất OAuth; badge chuyển "Đã kết nối"; nút "Kiểm tra kết nối" trả về text do Gemini Flash sinh; phương án embedding & web search đã chốt bằng ADR (ADR embedding phải nêu rõ model, số chiều và kết quả đo).
 
 ---
 
@@ -139,12 +141,13 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 3.3 | `prompts/ocr.py`: prompt trích xuất danh thiếp (JSON schema cố định, `confidence` từng trường, `language_detected`, cấm suy đoán) | Q | M | 2h | ⬜ Chưa làm |
 | 3.4 | `services/ocr.py`: gọi Gemini Flash Vision, parse & validate bằng Pydantic, xử lý khi LLM trả JSON hỏng | Q | M | 2h | ⬜ Chưa làm |
 | 3.5 | Lưu `business_cards` (`ocr_raw_json`, `status = needs_review`) + log thời gian xử lý | Q | M | 1h | ⬜ Chưa làm |
-| 3.6 | `services/normalize.py`: chuẩn hoá SĐT (E.164), email lowercase, bỏ khoảng trắng thừa, tách nhiều SĐT — Q import dùng, không sửa | T | M | 1.5h | ⬜ Chưa làm |
-| 3.7 | `services/normalize.py`: `normalize_company_name()` — bỏ hậu tố pháp lý đa ngôn ngữ (Co., Ltd, JSC, Cty, 株式会社, 주식회사…), lowercase, bỏ dấu | T | M | 2h | ⬜ Chưa làm |
-| 3.8 | `services/company_matching.py`: `upsert_company()` + so khớp mờ (rapidfuzz) chống trùng — chữ ký đã chốt ở họp D2 | T | M | 2.5h | ⬜ Chưa làm |
+| 3.6 | `services/normalize.py`: chuẩn hoá SĐT (E.164), email lowercase, bỏ khoảng trắng thừa, tách nhiều SĐT — hậu xử lý ngay sau khi quét, gọi trong `ocr.py` | Q | M | 1.5h | ⬜ Chưa làm |
+| 3.7 | `services/normalize_company.py`: `normalize_company_name()` — bỏ hậu tố pháp lý đa ngôn ngữ (Co., Ltd, JSC, Cty, 株式会社, 주식회사…), lowercase, bỏ dấu (**file riêng** để giữ quy ước 1 chủ sở hữu/file) | T | M | 2h | ⬜ Chưa làm |
+| 3.8 | `services/company_matching.py`: `upsert_company()` + so khớp mờ (rapidfuzz) chống trùng, dùng `normalize_company.normalize_company_name()` — chữ ký đã chốt ở họp D2 | T | M | 2.5h | ⬜ Chưa làm |
 | 3.9 | Hoàn tất bộ 30 ảnh mẫu (Anh/Việt/Hàn/Nhật/Trung) + `samples/expected.json` để đo độ chính xác | T | S | 1.5h | ⬜ Chưa làm |
+| 3.10 | Dựng `embedder/`: Dockerfile + FastAPI `POST /embed` & `GET /health` theo hợp đồng ở Plan.md 2.6, model từ `docs/adr-embedding.md` (task 2.6) **tải lúc build, không tải lúc chạy**. DoD: `docker build` xong, **rút mạng** vẫn `curl localhost:8001/health` ra đúng `model` + `dim` | T | M | 1.5h | ⬜ Chưa làm |
 
-**Tiêu chí hoàn thành:** `curl` upload 1 ảnh → response trả về đủ 7 trường bắt buộc; bản ghi có trong DB; upload lại cùng ảnh không tạo bản ghi trùng.
+**Tiêu chí hoàn thành:** `curl` upload 1 ảnh → response trả về đủ 7 trường bắt buộc; bản ghi có trong DB; upload lại cùng ảnh không tạo bản ghi trùng; service `embedder` trả vector đúng số chiều đã chốt.
 
 ---
 
@@ -156,13 +159,14 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 |---|------|-------|---------|----------|--------|
 | 4.1 | `routers/cards.py` — `GET /api/cards`: phân trang, tìm kiếm theo tên/công ty/email, lọc theo status | Q | M | 1.5h | ⬜ Chưa làm |
 | 4.2 | `routers/cards.py` — `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` | Q | M | 1.5h | ⬜ Chưa làm |
-| 4.3 | `routers/cards.py` — `POST /{id}/confirm`: chuyển `confirmed`, gắn `company_id` bằng `company_matching.upsert_company()` của T, kích hoạt enrich nền | Q | M | 1h | ⬜ Chưa làm |
+| 4.3 | `routers/cards.py` — `POST /{id}/confirm`: chuyển `confirmed`, gắn `company_id` bằng `company_matching.upsert_company()` của T. **Không kích hoạt enrich** — hồ sơ DN chỉ sinh khi người dùng bấm nút ở màn hình Doanh nghiệp | Q | M | 1h | ⬜ Chưa làm |
 | 4.4 | `templates/cards/list.html`: bảng danh sách + ô tìm kiếm + bộ lọc + badge trạng thái | Q | M | 2h | ⬜ Chưa làm |
 | 4.5 | `templates/cards/upload.html`: kéo–thả ảnh, `<input capture>` để chụp từ điện thoại, hiển thị tiến trình | Q | M | 1.5h | ⬜ Chưa làm |
 | 4.6 | `repositories/company.py`: repository cho `companies` + `company_profiles` | T | M | 2h | ⬜ Chưa làm |
 | 4.7 | `services/enrichment.py`: `enrich_company(name, hints)` — hints lấy từ danh thiếp (website, địa chỉ, quốc gia); gọi LLM + web search theo ADR | T | M | 3h | ⬜ Chưa làm |
 | 4.8 | Parse & validate kết quả LLM: loại bỏ trường không có nguồn, gắn nhãn `unverified` | T | M | 1.5h | ⬜ Chưa làm |
-| 4.9 | `tests/test_normalize.py` + `tests/test_company_matching.py` | T | S | 1.5h | ⬜ Chưa làm |
+| 4.9 | `tests/test_normalize_company.py` + `tests/test_company_matching.py` | T | S | 1h | ⬜ Chưa làm |
+| 4.10 | `tests/test_normalize.py`: chuẩn hoá SĐT/email đa định dạng & đa quốc gia (hậu xử lý F1) | Q | S | 0.5h | ⬜ Chưa làm |
 
 **Tiêu chí hoàn thành:** Danh sách danh thiếp hiển thị & lọc được trên UI; gọi `enrich_company()` từ script trả về JSON hồ sơ có nguồn.
 
@@ -177,12 +181,12 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 5.1 | `templates/cards/detail.html`: ảnh gốc bên trái, form các trường bên phải, tô vàng trường `confidence` thấp, nút Lưu / Xác nhận | Q | M | 2.5h | ⬜ Chưa làm |
 | 5.2 | `POST /api/cards/batch-upload` (nhiều file) + hàng đợi xử lý nền, giới hạn đồng thời, retry có backoff | Q | S | 3h | ⬜ Chưa làm |
 | 5.3 | `templates/cards/batch.html`: theo dõi tiến trình batch (đã xử lý / đang xử lý / lỗi) | Q | S | 2h | ⬜ Chưa làm |
-| 5.4 | `routers/companies.py` — `POST /{id}/enrich`: chạy nền, cập nhật `company_profiles.status` (draft → generated), chống chạy trùng | T | M | 2h | ⬜ Chưa làm |
+| 5.4 | `routers/companies.py` — `POST /{id}/enrich` enrich 1 công ty (primitive để 5.8 gọi lại): chạy nền, cập nhật `company_profiles.status` (draft → generated), chống chạy trùng | T | M | 2h | ⬜ Chưa làm |
 | 5.5 | `routers/companies.py` — `GET /api/companies`, `GET /{id}` (kèm hồ sơ + danh sách liên hệ từ danh thiếp) | T | M | 1.5h | ⬜ Chưa làm |
 | 5.6 | Xử lý lỗi enrich: không tìm thấy thông tin, LLM timeout, kết quả rỗng → trạng thái rõ ràng trả về cho UI | T | M | 1.5h | ⬜ Chưa làm |
-| 5.7 | `tests/test_enrichment.py`: mock LLM, kiểm tra loại bỏ trường không nguồn & gắn `unverified` | T | M | 2h | ⬜ Chưa làm |
+| 5.8 | `routers/companies.py` — **`POST /api/companies/enrich-batch`**: nhận `company_ids[]`, tạo job trong DB, chạy nền qua hàng đợi, **giới hạn đồng thời + retry có backoff** (rủi ro R5), bỏ qua công ty đang chạy dở, trả `job_id`. Kèm `GET /api/companies/enrich-jobs/{job_id}` trả tiến trình từng công ty (chờ / đang chạy / xong / lỗi kèm thông báo) | T | M | 2h | ⬜ Chưa làm |
 
-**Tiêu chí hoàn thành:** Trên trình duyệt: chọn ảnh → xem kết quả trích xuất → sửa → Xác nhận → hiện trong danh sách. Gọi enrich cho 3 công ty thật → mỗi hồ sơ có ≥ 5 trường kèm URL nguồn kiểm chứng được.
+**Tiêu chí hoàn thành:** Trên trình duyệt: chọn ảnh → xem kết quả trích xuất → sửa → Xác nhận → hiện trong danh sách. Gọi enrich cho 3 công ty thật → mỗi hồ sơ có ≥ 5 trường kèm URL nguồn kiểm chứng được; `POST /api/companies/enrich-batch` với 3 id chạy được cả 3 và `enrich-jobs/{job_id}` phản ánh đúng tiến trình.
 
 ---
 
@@ -195,13 +199,13 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 6.1 | `tests/conftest.py` + fixtures (DB test, mock CLIProxy bằng respx) + `tests/test_ocr.py` | Q | M | 2h | ⬜ Chưa làm |
 | 6.2 | `services/kb.py`: chunk + serialize danh thiếp và hồ sơ DN thành văn bản; export hàm `ingest_card()` / `ingest_company_profile()` cho T gọi | Q | M | 2h | ⬜ Chưa làm |
 | 6.3 | Repository `kb_chunks` + migration tạo index `ivfflat` (cosine) | Q | M | 1.5h | ⬜ Chưa làm |
-| 6.4 | Sinh embedding theo `docs/adr-embedding.md` + `POST /api/kb/reindex` index lại toàn bộ | Q | M | 2.5h | ⬜ Chưa làm |
-| 6.5 | `templates/companies/list.html`: danh sách công ty + số liên hệ + trạng thái hồ sơ | T | M | 2h | ⬜ Chưa làm |
+| 6.4 | `services/embeddings.py` gọi service `embedder` (batch, timeout, retry) + `POST /api/kb/reindex` index lại toàn bộ. **Thêm tiền tố `passage:` khi index và `query:` khi truy vấn** theo `docs/adr-embedding.md` | Q | M | 2.5h | ⬜ Chưa làm |
+| 6.5 | `templates/companies/list.html` — **màn hình lập hồ sơ đối tác**: danh sách công ty + số liên hệ + trạng thái hồ sơ; **checkbox từng dòng + “chọn tất cả”**, bộ lọc “chưa có hồ sơ”, thanh hành động hiện số đã chọn kèm nút **“Tạo hồ sơ doanh nghiệp”** gọi `enrich-batch` (theo dõi tiến trình làm ở 7.10) | T | M | 2.5h | ⬜ Chưa làm |
 | 6.6 | `templates/companies/detail.html`: hồ sơ đầy đủ (MST, quy mô, ngành nghề, sản phẩm, địa chỉ, mô tả) + khối "Nguồn tham khảo" có link | T | M | 3h | ⬜ Chưa làm |
-| 6.7 | Nút "Tạo lại hồ sơ" / "Cập nhật hồ sơ" + hiển thị trạng thái đang xử lý | T | M | 1.5h | ⬜ Chưa làm |
+| 6.7 | Nút “Tạo lại hồ sơ” trên trang chi tiết — gọi lại `enrich-batch` với đúng 1 id, không dựng luồng riêng | T | M | 0.5h | ⬜ Chưa làm |
 | 6.8 | `PATCH /api/companies/{id}/profile` + form chỉnh sửa thủ công, đánh dấu `verified` | T | M | 2h | ⬜ Chưa làm |
 
-**Tiêu chí hoàn thành:** Trên UI xem được hồ sơ DN đầy đủ có nguồn và sửa/lưu được; `POST /api/kb/reindex` index toàn bộ card + profile không lỗi.
+**Tiêu chí hoàn thành:** Xác nhận danh thiếp xong mà **chưa** bấm nút thì không hồ sơ nào được sinh; vào màn hình Doanh nghiệp tích chọn 3 công ty → bấm “Tạo hồ sơ doanh nghiệp” → cả 3 chạy nền và xem được hồ sơ (badge tiến trình hoàn thiện ở 7.10); trên UI xem được hồ sơ DN đầy đủ có nguồn và sửa/lưu được; `POST /api/kb/reindex` index toàn bộ card + profile không lỗi; `docker compose up` từ máy **ngắt mạng** vẫn khởi động được `embedder` (chứng minh model đã nằm trong image).
 
 ---
 
@@ -218,10 +222,11 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 7.5 | Gọi `kb.ingest_company_profile()` ở cuối luồng enrich (trong `enrichment.py`) | T | M | 0.5h | ⬜ Chưa làm |
 | 7.6 | `routers/export.py`: export CSV/JSON danh thiếp + hồ sơ DN (router riêng, không đụng `cards.py`) | T | S | 2h | ⬜ Chưa làm |
 | 7.7 | `routers/stats.py` + `templates/dashboard.html`: tổng danh thiếp, đã xác nhận, số công ty, số hồ sơ, tỉ lệ cần review | T | S | 2.5h | ⬜ Chưa làm |
-| 7.8 | Đo độ chính xác OCR trên 30 ảnh mẫu, so với `samples/expected.json` → `docs/accuracy.md` | T | M | 2h | ⬜ Chưa làm |
+| 7.8 | Đo độ chính xác OCR trên 30 ảnh mẫu (do T chuẩn bị ở 3.9), so với `samples/expected.json` → `docs/accuracy.md` | Q | M | 2h | ⬜ Chưa làm |
 | 7.9 | `templates/companies/detail.html`: danh sách người liên hệ từ danh thiếp + link ngược card ↔ company | T | M | 1.5h | ⬜ Chưa làm |
+| 7.10 | Theo dõi tiến trình lập hồ sơ trên `templates/companies/list.html`: badge mỗi dòng (⏳ đang xử lý / ✅ xong / ❌ lỗi) poll `enrich-jobs/{job_id}` bằng HTMX, xong thì bấm vào xem hồ sơ; lỗi thì hiện lý do và cho chạy lại riêng dòng đó | T | M | 1.5h | ⬜ Chưa làm |
 
-**Tiêu chí hoàn thành:** Truy vấn "công ty làm về logistics" trả về đúng chunk liên quan; báo cáo độ chính xác OCR đã có số liệu.
+**Tiêu chí hoàn thành:** Truy vấn "công ty làm về logistics" trả về đúng chunk liên quan; báo cáo độ chính xác OCR đã có số liệu; tích chọn 3 công ty rồi bấm tạo hồ sơ thì badge từng dòng chạy đúng từ ⏳ sang ✅/❌ mà không cần tải lại trang.
 
 ---
 
@@ -240,7 +245,8 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 8.7 | `docs/qa-testset.md`: 10 câu hỏi kiểm thử + đáp án kỳ vọng | T | M | 1.5h | ⬜ Chưa làm |
 | 8.8 | Rà soát UI/UX các trang F2 + dashboard, sửa lỗi hiển thị (chỉ file của T; cần đổi `base.html` → báo Q) | T | S | 2.5h | ⬜ Chưa làm |
 | 8.9 | `tests/test_company_api.py`: test API companies (list, detail, patch profile) | T | S | 1.5h | ⬜ Chưa làm |
-| 8.10 | Gộp công ty trùng thủ công (chọn 2 công ty → gộp) trong `companies.py` + `templates/companies/` | T | C | 2h | ⬜ Chưa làm |
+| 8.10 | ~~Gộp công ty trùng thủ công (chọn 2 công ty → gộp)~~ | T | C | 2h | ❌ Cắt — nhường giờ cho màn hình lập hồ sơ đối tác (5.8 + 6.5, ưu tiên M). `company_matching` ở 3.8 đã tự chống trùng nên đây chỉ là lưới an toàn thủ công |
+| 8.11 | `tests/test_enrichment.py`: mock LLM, kiểm tra loại bỏ trường không nguồn & gắn `unverified` *(dời từ D5 để cân tải; enrichment vẫn được kiểm tay ở tiêu chí D5)* | T | M | 2h | ⬜ Chưa làm |
 
 **Tiêu chí hoàn thành:** Chat trả lời đúng ≥ 7/10 câu trong `docs/qa-testset.md`, mỗi câu trả lời có trích dẫn bấm được.
 
@@ -281,7 +287,8 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 10.5 | `docs/test-scenarios.md`: 10 kịch bản test đầu–cuối (upload → review → confirm → enrich → chat → export) | T | M | 1.5h | ⬜ Chưa làm |
 | 10.6 | Chạy kịch bản test nhóm F2, ghi bug vào `docs/bugs-f2.md`; bug thuộc F1/F3 thì báo Q tại daily | T | M | 2h | ⬜ Chưa làm |
 | 10.7 | Sửa bug nhóm F2 | T | M | 3h | ⬜ Chưa làm |
-| 10.8 | Đo lại độ chính xác OCR & chất lượng hồ sơ DN sau khi tinh chỉnh prompt, cập nhật `docs/accuracy.md` | T | M | 1.5h | ⬜ Chưa làm |
+| 10.8 | Đo lại độ chính xác OCR sau khi tinh chỉnh `prompts/ocr.py` (task 9.3), cập nhật `docs/accuracy.md` | Q | M | 1h | ⬜ Chưa làm |
+| 10.9 | Đánh giá lại chất lượng hồ sơ DN sau khi tinh chỉnh prompt enrichment → `docs/profile-quality.md` (file riêng, tránh đụng `accuracy.md` của Q) | T | M | 1h | ⬜ Chưa làm |
 
 **Tiêu chí hoàn thành:** Không còn bug mức Blocker/Critical trong cả hai file bug log; toàn bộ test xanh.
 
@@ -351,14 +358,14 @@ Không phải task bắt buộc, chỉ là việc lấp chỗ trống để gi�
 | Ngày | Quân (Q) | Tùng (T) |
 |------|----------|----------|
 | D1 | Repo, skeleton + router stub, `base.html`, Docker, ERD, migration khởi tạo | Biên bản phạm vi, API spec, khảo sát CLIProxy, bảng sở hữu file, ảnh mẫu |
-| D2 | Service cliproxy, `cliproxy_client.py`, `llm.py`, router integration, trang settings + **nút OAuth** | Spike embedding & web search (ADR), schema hồ sơ DN, prompt enrichment |
-| D3 | Upload + tiền xử lý ảnh + prompt OCR + `ocr.py` + lưu DB | `normalize.py` (liên hệ + tên công ty), `company_matching.py`, bộ ảnh mẫu |
-| D4 | API danh sách/chi tiết/confirm + trang list & upload | Repository company, `enrichment.py`, validate nguồn, test normalize |
-| D5 | Trang review danh thiếp, batch upload + trang tiến trình | API companies (enrich/list/detail), xử lý lỗi enrich, test enrichment |
-| D6 | conftest + test OCR, `kb.py`, repo `kb_chunks`, embedding + reindex | Trang danh sách & chi tiết công ty, nút tạo lại hồ sơ, sửa hồ sơ tay |
-| D7 | `retriever.py`, hybrid search, auto-ingest phía card, test retrieval | Gọi ingest ở enrich, export, dashboard, báo cáo độ chính xác, danh sách liên hệ |
-| D8 | Prompt trợ lý, API chat, lịch sử hội thoại, trang assistant, lọc metadata, (SSE – C) | Bộ câu hỏi kiểm thử, rà soát UI F2, test API companies, gộp công ty (C) |
+| D2 | Service cliproxy, `cliproxy_client.py`, `llm.py`, router integration, trang settings + **nút OAuth** | Chốt model embedding + spike web search (2 ADR), schema hồ sơ DN, prompt enrichment |
+| D3 | Upload + tiền xử lý ảnh + prompt OCR + `ocr.py` + lưu DB + `normalize.py` (chuẩn hoá SĐT/email) | `normalize_company.py` (chuẩn hoá tên công ty), `company_matching.py`, bộ ảnh mẫu, **service `embedder`** |
+| D4 | API danh sách/chi tiết/confirm (không auto-enrich) + trang list & upload, test normalize | Repository company, `enrichment.py`, validate nguồn, test normalize tên công ty |
+| D5 | Trang review danh thiếp, batch upload + trang tiến trình | API companies (enrich đơn + **enrich-batch** + job tiến trình), xử lý lỗi enrich |
+| D6 | conftest + test OCR, `kb.py`, repo `kb_chunks`, client `embeddings.py` + reindex | **Màn hình lập hồ sơ đối tác (tích chọn nhiều + nút tạo)**, trang chi tiết công ty, sửa hồ sơ tay |
+| D7 | `retriever.py`, hybrid search, auto-ingest phía card, test retrieval, đo độ chính xác OCR | Gọi ingest ở enrich, export, dashboard, danh sách liên hệ, **badge tiến trình lập hồ sơ** |
+| D8 | Prompt trợ lý, API chat, lịch sử hội thoại, trang assistant, lọc metadata, (SSE – C) | Bộ câu hỏi kiểm thử, rà soát UI F2, test API companies, test enrichment *(gộp công ty đã cắt)* |
 | D9 | Hoàn thiện Docker, entrypoint + seed, đa ngôn ngữ, xử lý lỗi, logging | Mở rộng test, nâng chất lượng hồ sơ DN, đề xuất index, dọn code F2, kiểm thử lại F2 |
-| D10 | Chạy & sửa bug F1/F3, test biên, pytest xanh | Kịch bản test, chạy & sửa bug F2, đo lại độ chính xác |
+| D10 | Chạy & sửa bug F1/F3, test biên, pytest xanh, đo lại độ chính xác OCR | Kịch bản test, chạy & sửa bug F2, đánh giá lại chất lượng hồ sơ DN |
 | D11 | README, seed dữ liệu demo, tag release, video, sửa điểm vấp phần Q | User guide, runbook + dữ liệu demo, chủ trì tổng duyệt, slide |
 | D12–D15 | *Không có task đặt trước* — kiểm thử hồi quy, sửa bug & việc phát sinh | *Không có task đặt trước* — kiểm thử hồi quy, sửa bug & việc phát sinh |

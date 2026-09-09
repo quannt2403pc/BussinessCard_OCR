@@ -1,0 +1,19 @@
+# Cấu hình quét secret cho CI.
+# Kế thừa toàn bộ luật mặc định của gitleaks rồi thêm allowlist riêng của dự án.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Giá trị giữ chỗ và tài liệu — không phải secret thật"
+paths = [
+    '''\.env\.example$''',      # chỉ chứa giá trị change-me
+    '''\.gitleaks\.toml$''',
+    '''^docs/''',               # tài liệu có thể trích ví dụ cấu hình
+    '''^Plan\.md$''',
+    '''^Task\.md$''',
+]
+regexes = [
+    '''change-me''',
+    '''dummy-for-ci''',
+    '''AIzaSy\.\.\.''',         # placeholder trong ví dụ cấu hình CLIProxy
+]
