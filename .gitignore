@@ -2,7 +2,12 @@
 # AI agent — skill, cấu hình, cache (KHÔNG commit vào repo)
 # ============================================================
 # Claude Code / Claude Desktop
-.claude/
+# Dùng .claude/* (không phải .claude/) để git còn đi vào trong mà xét ngoại lệ bên dưới.
+.claude/*
+# Ràng buộc quy trình cho AI agent PHẢI được commit, nếu không mỗi máy một kiểu.
+!.claude/settings.json
+!.claude/hooks/
+.claude/settings.local.json
 .claude.json
 .claude.local.json
 CLAUDE.local.md

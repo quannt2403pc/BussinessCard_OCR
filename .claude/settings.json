@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for c in python3 python py; do \"$c\" -c \"\" >/dev/null 2>&1 && PY=\"$c\" && break; done; [ -z \"$PY\" ] || \"$PY\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_digest.py\"",
+            "timeout": 15,
+            "statusMessage": "Nạp tình trạng task..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for c in python3 python py; do \"$c\" -c \"\" >/dev/null 2>&1 && PY=\"$c\" && break; done; [ -z \"$PY\" ] || \"$PY\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/require_plan_read.py\"",
+            "timeout": 15,
+            "statusMessage": "Kiểm tra đã đọc Plan.md và Task.md chưa..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for c in python3 python py; do \"$c\" -c \"\" >/dev/null 2>&1 && PY=\"$c\" && break; done; [ -z \"$PY\" ] || \"$PY\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/require_task_update.py\"",
+            "timeout": 30,
+            "statusMessage": "Kiểm tra đã cập nhật trạng thái task chưa..."
+          }
+        ]
+      }
+    ]
+  }
+}
