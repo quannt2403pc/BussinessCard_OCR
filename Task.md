@@ -71,7 +71,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 
 | Ngày | Giai đoạn | Trạng thái ngày | Ghi chú |
 |------|-----------|-----------------|---------|
-| D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **chưa commit**. T: 1.7/1.8/1.10 xong, 1.9 xong phần đọc mã nguồn (chạy container dời sang 2.1), 1.11 mới có cấu trúc — **chưa commit** |
+| D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **đã merge vào `main`** (PR #1–#4), Q tự cập nhật ✅ khi xác nhận DoD. T: 1.7/1.8/1.10 ✅ (merge PR #3/#4), 1.9 còn phần chạy container (dời sang 2.1), 1.11 mới có cấu trúc, chưa có ảnh |
 | D2 | P1 — Nền tảng AI | ⬜ Chưa làm | |
 | D3 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D4 | P2 — F1 OCR | ⬜ Chưa làm | |
@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 11 task đang dở (1.1–1.11) · Cập nhật lần cuối: 2026-09-10
+**Tổng quan:** 3 / 103 task (D1–D11) hoàn thành (3%) — 1.7, 1.8, 1.10 · 8 task đang dở (1.1–1.6, 1.9, 1.11) · Cập nhật lần cuối: 2026-09-10
 
 ### Nhật ký vấn đề đang mở
 
@@ -117,10 +117,10 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 | 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer + **khai báo sẵn khối service `embedder`** build từ `./embedder`, port 8001, biến `EMBEDDING_MODEL`, healthcheck) — khai trước để T chỉ việc thêm thư mục `embedder/`, không phải sửa compose của Q | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
 | 1.5 | ERD chi tiết → `docs/erd.md` (T review qua PR, không sửa trực tiếp) | Q | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
 | 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, `kb_chunks.embedding = vector(384)` (theo mặc định đề xuất ở Plan.md mục 2.6), tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
-| 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
-| 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | ✅ Xong — merge vào `main` qua PR #3/#4 |
+| 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | ✅ Xong — merge vào `main` qua PR #3/#4 |
 | 1.9 | Khảo sát CLIProxyAPI: chạy thử container, đọc `config.example.yaml`, xác định management key & provider OAuth cho Gemini → `docs/cliproxy-notes.md` | T | M | 2h | 🔄 Đang làm — 85%, khảo sát mã nguồn xong (4 phát hiện chặn D2, xem `docs/cliproxy-notes.md`); phần **chạy thử container** dời sang task 2.1 |
-| 1.10 | `docs/ownership.md`: chốt bảng sở hữu file/module + quy ước chống xung đột | T | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.10 | `docs/ownership.md`: chốt bảng sở hữu file/module + quy ước chống xung đột | T | M | 1h | ✅ Xong — merge vào `main` qua PR #3/#4 |
 | 1.11 | Tạo `samples/`, bắt đầu thu thập ảnh danh thiếp mẫu (mục tiêu 30 ảnh, ≥3 ngôn ngữ) | T | S | 1h | 🔄 Đang làm — 40%, đã có cấu trúc `samples/` + quy ước đặt tên/ẩn danh + khung `expected.json`; **chưa có ảnh nào** (cần người thu thập, hoàn tất ở 3.9) |
 
 **Tiêu chí hoàn thành:** `docker compose up -d` → `curl localhost:8000/health` trả `{"status":"ok"}`; `alembic upgrade head` tạo đủ bảng; ERD + API spec + bảng sở hữu file đã commit.
