@@ -1,12 +1,113 @@
-# Chu so huu: Q | Task: 1.4, hoan thien o 9.1
-# TODO(Q, task 1.4): khai bao 5 service duoi day. Khai san khoi `embedder` ngay tu D1 de T chi
-#                    viec them thu muc embedder/ ma khong phai sua file nay (xem Task.md muc
-#                    "Ba cho hai nguoi goi code cua nhau").
+# Chủ sở hữu: Q | Task: 1.4, hoàn thiện ở 9.1
 #
-#   api       build .            :8000   FastAPI + Web UI
-#   db        pgvector/pgvector:pg16  :5432   PostgreSQL + extension vector
-#   cliproxy  CLIProxyAPI        :8317   Cong OAuth + gateway toi Gemini (home.enabled=false)
-#   embedder  build ./embedder   :8001   sentence-transformers, model nhung san trong image
-#   adminer   adminer            :8080   (tuy chon) xem DB khi debug
+#   api       build .                :8000   FastAPI + Web UI
+#   db        pgvector/pgvector:pg16 :5432   PostgreSQL + extension vector
+#   embedder  build ./embedder       :8001   sentence-transformers (T dựng ở task 3.10)
+#   adminer   adminer                :8080   xem DB khi debug
 #
-# Volumes: pgdata, uploads, cliproxy_auths
+# Service `cliproxy` (:8317) được thêm ở task 2.1 — chưa khai ở đây để `up` không đòi
+# config.yaml chưa tồn tại.
+#
+# Chạy:
+#   cp .env.example .env         # điền CLIPROXY_MGMT_KEY
+#   docker compose up -d
+#   docker compose exec api alembic upgrade head
+#   curl localhost:8000/health   -> {"status":"ok"}
+
+name: businesscard-ocr
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bizcard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-bizcard}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bizcard} -d ${POSTGRES_DB:-bizcard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://bizcard:change-me@db:5432/bizcard}
+      CLIPROXY_BASE_URL: ${CLIPROXY_BASE_URL:-http://cliproxy:8317}
+      CLIPROXY_MGMT_KEY: ${CLIPROXY_MGMT_KEY:-}
+      CLIPROXY_AUTH_PROVIDER: ${CLIPROXY_AUTH_PROVIDER:-antigravity}
+      LLM_MODEL: ${LLM_MODEL:-gemini-flash-latest}
+      EMBEDDER_URL: ${EMBEDDER_URL:-http://embedder:8001}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/data/uploads
+      # Bind mount cho môi trường dev: sửa code là uvicorn --reload nạp lại, khỏi rebuild.
+      - ./app:/app/app
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  embedder:
+    # T dựng thư mục `embedder/` ở task 3.10; khối này khai sẵn từ D1 để T không phải sửa file
+    # của Q (Task.md, mục "Ba chỗ hai người gọi code của nhau").
+    #
+    # TODO(Q): `embedder/Dockerfile` hiện còn là stub nên service tạm nằm trong profile — không
+    # thì `docker compose up -d` sẽ hỏng ở bước build và trượt tiêu chí D1. Task 3.10 xong thì Q
+    # xoá 2 dòng `profiles` bên dưới; từ đó `up` chạy luôn cả embedder.
+    # Trong lúc chờ, bật riêng bằng: docker compose --profile embedder up -d embedder
+    profiles: ["embedder"]
+    build: ./embedder
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Nạp model sentence-transformers lần đầu mất vài chục giây.
+      start_period: 60s
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
+  # Token OAuth của CLIProxy — giữ lại giữa các lần restart (rủi ro R1). Service dùng nó
+  # được thêm ở task 2.1.
+  cliproxy_auths:

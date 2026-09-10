@@ -1,0 +1,27 @@
+# Giảm build context của image `api`. Chủ sở hữu: Q | Task: 1.4
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.claude
+docs
+samples
+tests
+requirement
+embedder
+data
+uploads
+pgdata
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+Dockerfile
+.dockerignore

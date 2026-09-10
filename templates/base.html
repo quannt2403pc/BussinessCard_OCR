@@ -1,3 +1,90 @@
 {# Layout + nav (Danh thiếp / Doanh nghiệp / Trợ lý AI / Cài đặt) + Tailwind CDN. #}
 {# Chủ sở hữu: Q | Task: 1.3 | xem Task.md #}
-{# TODO(Q, task 1.3): chưa triển khai. #}
+{#
+  Trang con kế thừa file này:
+      {% extends "base.html" %}
+      {% block title %}Danh thiếp{% endblock %}
+      {% block content %} ... {% endblock %}
+  Biến `active_nav` (cards | companies | assistant | settings) để tô sáng mục nav đang mở.
+  Cần đổi file này → báo Q, đừng tự sửa (quy ước chống xung đột số 2, Task.md).
+#}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Trang chủ{% endblock %} · BusinessCard OCR</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
+
+  {% set nav_items = [
+    ('cards',     'Danh thiếp',  '/cards'),
+    ('companies', 'Doanh nghiệp','/companies'),
+    ('assistant', 'Trợ lý AI',   '/assistant'),
+    ('settings',  'Cài đặt',     '/settings')
+  ] %}
+
+  <header class="border-b border-slate-200 bg-white">
+    <nav class="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
+      <a href="/" class="text-lg font-semibold tracking-tight text-slate-900">
+        BusinessCard<span class="text-sky-600">OCR</span>
+      </a>
+
+      <ul class="flex items-center gap-1 text-sm">
+        {% for key, label, href in nav_items %}
+        <li>
+          <a href="{{ href }}"
+             class="rounded-md px-3 py-1.5 transition
+                    {% if active_nav == key %}bg-sky-50 font-medium text-sky-700
+                    {% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
+            {{ label }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+
+      <div class="ml-auto flex items-center gap-3 text-sm">
+        {# Badge trạng thái OAuth CLIProxy được thay bằng nội dung thật ở task 2.5. #}
+        {% block nav_status %}
+        <a href="/settings" class="text-slate-400 hover:text-slate-600">Trạng thái kết nối</a>
+        {% endblock %}
+        <a href="/docs" class="text-slate-400 hover:text-slate-600">API</a>
+      </div>
+    </nav>
+  </header>
+
+  {% block flash %}{% endblock %}
+
+  <main class="mx-auto max-w-6xl px-6 py-8">
+    {% block content %}
+    {# Nội dung mặc định: trang chủ D1. Các trang thật sẽ ghi đè block này. #}
+    <h1 class="text-2xl font-semibold text-slate-900">Số hoá danh thiếp &amp; hồ sơ doanh nghiệp</h1>
+    <p class="mt-2 max-w-2xl text-slate-600">
+      Bản demo chạy localhost. Khung dự án đã dựng xong (D1); các màn hình bên dưới được
+      triển khai dần theo <code class="rounded bg-slate-100 px-1">Task.md</code>.
+    </p>
+
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {% for key, label, href in nav_items %}
+      <a href="{{ href }}"
+         class="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-sky-300 hover:shadow-sm">
+        <div class="font-medium text-slate-900">{{ label }}</div>
+        <div class="mt-1 text-sm text-slate-500">{{ href }}</div>
+      </a>
+      {% endfor %}
+    </div>
+    {% endblock %}
+  </main>
+
+  <footer class="mx-auto max-w-6xl px-6 pb-10 text-xs text-slate-400">
+    BusinessCard_OCR · bản demo nội bộ ·
+    <a href="/health" class="hover:text-slate-600">/health</a>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

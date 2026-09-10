@@ -1,0 +1,7 @@
+/* Tuỳ biến nhỏ ngoài Tailwind CDN. Chủ sở hữu: Q | Task: 1.3 */
+[x-cloak] { display: none !important; }
+
+/* Chỉ báo đang tải của HTMX (dùng lại ở các trang có poll: settings, batch, companies). */
+.htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { opacity: 1; }

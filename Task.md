@@ -71,7 +71,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 
 | Ngày | Giai đoạn | Trạng thái ngày | Ghi chú |
 |------|-----------|-----------------|---------|
-| D1 | P0 — Khởi động | ⬜ Chưa làm | |
+| D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **chưa commit**. T: 1.7–1.11 chưa bắt đầu |
 | D2 | P1 — Nền tảng AI | ⬜ Chưa làm | |
 | D3 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D4 | P2 — F1 OCR | ⬜ Chưa làm | |
@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · Cập nhật lần cuối: _(chưa cập nhật)_
+**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 6 task đang dở (1.1–1.6) · Cập nhật lần cuối: 2026-09-10
 
 ---
 
@@ -94,12 +94,12 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 
 | # | Task | Người | Ưu tiên | Ước tính | Trạng thái |
 |---|------|-------|---------|----------|--------|
-| 1.1 | Khởi tạo Git repo, `.gitignore`, `README.md` sơ bộ, quy ước branch/commit | Q | M | 0.5h | ⬜ Chưa làm |
-| 1.2 | Skeleton FastAPI: `app/main.py`, `app/core/config.py`, `GET /health` + **khai báo sẵn stub toàn bộ router** (cards, companies, integration, chat, kb, stats, export) để về sau không ai phải sửa `main.py` | Q | M | 2h | ⬜ Chưa làm |
-| 1.3 | `templates/base.html`: layout, nav (Danh thiếp / Doanh nghiệp / Trợ lý AI / Cài đặt), Tailwind CDN | Q | M | 1h | ⬜ Chưa làm |
-| 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer + **khai báo sẵn khối service `embedder`** build từ `./embedder`, port 8001, biến `EMBEDDING_MODEL`, healthcheck) — khai trước để T chỉ việc thêm thư mục `embedder/`, không phải sửa compose của Q | Q | M | 2h | ⬜ Chưa làm |
-| 1.5 | ERD chi tiết → `docs/erd.md` (T review qua PR, không sửa trực tiếp) | Q | M | 1h | ⬜ Chưa làm |
-| 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, `kb_chunks.embedding = vector(384)` (theo mặc định đề xuất ở Plan.md mục 2.6), tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | ⬜ Chưa làm |
+| 1.1 | Khởi tạo Git repo, `.gitignore`, `README.md` sơ bộ, quy ước branch/commit | Q | M | 0.5h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.2 | Skeleton FastAPI: `app/main.py`, `app/core/config.py`, `GET /health` + **khai báo sẵn stub toàn bộ router** (cards, companies, integration, chat, kb, stats, export) để về sau không ai phải sửa `main.py` | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.3 | `templates/base.html`: layout, nav (Danh thiếp / Doanh nghiệp / Trợ lý AI / Cài đặt), Tailwind CDN | Q | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer + **khai báo sẵn khối service `embedder`** build từ `./embedder`, port 8001, biến `EMBEDDING_MODEL`, healthcheck) — khai trước để T chỉ việc thêm thư mục `embedder/`, không phải sửa compose của Q | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.5 | ERD chi tiết → `docs/erd.md` (T review qua PR, không sửa trực tiếp) | Q | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, `kb_chunks.embedding = vector(384)` (theo mặc định đề xuất ở Plan.md mục 2.6), tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
 | 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | ⬜ Chưa làm |
 | 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | ⬜ Chưa làm |
 | 1.9 | Khảo sát CLIProxyAPI: chạy thử container, đọc `config.example.yaml`, xác định management key & provider OAuth cho Gemini → `docs/cliproxy-notes.md` | T | M | 2h | ⬜ Chưa làm |
