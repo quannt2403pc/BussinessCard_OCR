@@ -157,7 +157,9 @@ jobs:
     steps:
       - name: Tổng hợp kết quả
         run: |
-          results='${{ join(needs.*.result, " ") }}'
+          # Chuỗi trong biểu thức ${{ }} phải dùng NHÁY ĐƠN. Dùng nháy kép thì GitHub báo
+          # "Invalid workflow file" và huỷ cả workflow trước khi tạo job nào.
+          results='${{ join(needs.*.result, ' ') }}'
           echo "Kết quả các job: $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
