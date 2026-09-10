@@ -71,7 +71,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 
 | Ngày | Giai đoạn | Trạng thái ngày | Ghi chú |
 |------|-----------|-----------------|---------|
-| D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **chưa commit**. T: 1.7–1.11 chưa bắt đầu |
+| D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **chưa commit**. T: 1.7/1.8/1.10 xong, 1.9 xong phần đọc mã nguồn (chạy container dời sang 2.1), 1.11 mới có cấu trúc — **chưa commit** |
 | D2 | P1 — Nền tảng AI | ⬜ Chưa làm | |
 | D3 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D4 | P2 — F1 OCR | ⬜ Chưa làm | |
@@ -84,7 +84,24 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 6 task đang dở (1.1–1.6) · Cập nhật lần cuối: 2026-09-10
+**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 11 task đang dở (1.1–1.11) · Cập nhật lần cuối: 2026-09-10
+
+### Nhật ký vấn đề đang mở
+
+Vấn đề phát hiện trong lúc làm, **chưa xử lý**, có thể làm hỏng task của người khác.
+Ai phát hiện thì ghi vào đây; **người gỡ là chủ sở hữu file liên quan**, không phải người phát hiện.
+Xử lý xong thì đổi trạng thái sang ✅ kèm ngày, không xoá dòng.
+
+| Mã | Vấn đề | Phát hiện | Người gỡ | Chặn task | Trạng thái |
+|----|--------|-----------|----------|-----------|------------|
+| **I-01** | `remote-management.allow-remote: false` của CLIProxy **chặn container `api`**. Mã nguồn coi "localhost" đúng nghĩa đen `127.0.0.1`/`::1` (`handler.go:273,337`); `api` gọi qua mạng Docker nhận `403 remote management disabled` dù gửi đúng key → `config.yaml` bắt buộc `allow-remote: true` | T (1.9) | **Q** | 2.1 | ⬜ Chưa xử lý |
+| **I-02** | `get-auth-status` **không dùng được cho badge trạng thái**. Không truyền `state` thì trả `{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ → badge sẽ luôn xanh (lỗi âm thầm). Badge phải đọc `GET /auth-files`; `get-auth-status?state=…` chỉ để poll trong lúc chờ đồng ý. **Plan.md mục 2.4 đang ghi sai** | T (1.9) | **Q** | 2.4, 2.5 | ⬜ Chưa xử lý |
+| **I-03** | `LLM_MODEL=gemini-flash-latest` **không tồn tại** trong provider `antigravity` (model đó thuộc channel `aistudio`/`gemini`, cần API key). Antigravity chỉ có `gemini-3-flash`, `gemini-3.6-flash-high`, `gemini-3.1-flash-lite`… Chốt tên model thật bằng `GET /v0/management/model-definitions/antigravity` sau khi container chạy | T (1.9) | **Q** | 2.3 | ⬜ Chưa xử lý |
+| **I-04** | Compose phải publish thêm **cổng 51121** (callback OAuth của Antigravity, `internal/auth/antigravity/constants.go:8`). Thiếu thì bấm nút OAuth đi tới Google xong, trình duyệt quay về `localhost:51121` và chết — token không bao giờ được lưu | T (1.9) | **Q** | 2.1 | ⬜ Chưa xử lý |
+| **I-05** | Sai management key **5 lần → ban IP 30 phút** (`handler.go:301-302`, đếm theo IP, cả container `api` chung một IP). Client CLIProxy **không được retry khi gặp 401/403**, chỉ retry lỗi mạng và 5xx. Gỡ ban sớm: `docker compose restart cliproxy` | T (1.9) | **Q** | 2.2 | ⬜ Chưa xử lý |
+| **I-06** | Đường dẫn mã nguồn CLIProxy trong Plan.md mục 2.4 (`C:\FSoft\ojt\CliProxy`) **không tồn tại**; thực tế ở `C:\Users\pc\source\repos\CLIProxyAPI`, commit đã chuyển từ `ecc9aa72` sang `7fac6b15` (kết luận cũ vẫn đúng, đã kiểm lại) | T (1.9) | **Q** | — | ⬜ Chưa xử lý |
+
+Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`](./docs/cliproxy-notes.md).
 
 ---
 
@@ -100,11 +117,11 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | 1.4 | `Dockerfile` backend + `docker-compose.yml` (api + db pgvector + adminer + **khai báo sẵn khối service `embedder`** build từ `./embedder`, port 8001, biến `EMBEDDING_MODEL`, healthcheck) — khai trước để T chỉ việc thêm thư mục `embedder/`, không phải sửa compose của Q | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
 | 1.5 | ERD chi tiết → `docs/erd.md` (T review qua PR, không sửa trực tiếp) | Q | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
 | 1.6 | Alembic + migration khởi tạo **đủ 6 nhóm bảng**, bật extension `vector`, `kb_chunks.embedding = vector(384)` (theo mặc định đề xuất ở Plan.md mục 2.6), tách model theo file (`card/company/kb/chat/integration`) | Q | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
-| 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | ⬜ Chưa làm |
-| 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | ⬜ Chưa làm |
-| 1.9 | Khảo sát CLIProxyAPI: chạy thử container, đọc `config.example.yaml`, xác định management key & provider OAuth cho Gemini → `docs/cliproxy-notes.md` | T | M | 2h | ⬜ Chưa làm |
-| 1.10 | `docs/ownership.md`: chốt bảng sở hữu file/module + quy ước chống xung đột | T | M | 1h | ⬜ Chưa làm |
-| 1.11 | Tạo `samples/`, bắt đầu thu thập ảnh danh thiếp mẫu (mục tiêu 30 ảnh, ≥3 ngôn ngữ) | T | S | 1h | ⬜ Chưa làm |
+| 1.7 | Ghi biên bản chốt phạm vi + danh sách trường dữ liệu cần trích xuất vào `docs/scope.md` (sau họp đầu ngày) | T | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.8 | `docs/api.md`: spec endpoint + schema request/response (bản chốt ban đầu, sau D1 dùng Swagger tự sinh) | T | M | 2h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.9 | Khảo sát CLIProxyAPI: chạy thử container, đọc `config.example.yaml`, xác định management key & provider OAuth cho Gemini → `docs/cliproxy-notes.md` | T | M | 2h | 🔄 Đang làm — 85%, khảo sát mã nguồn xong (4 phát hiện chặn D2, xem `docs/cliproxy-notes.md`); phần **chạy thử container** dời sang task 2.1 |
+| 1.10 | `docs/ownership.md`: chốt bảng sở hữu file/module + quy ước chống xung đột | T | M | 1h | 🔄 Đang làm — 100%, chờ commit/merge vào `main` |
+| 1.11 | Tạo `samples/`, bắt đầu thu thập ảnh danh thiếp mẫu (mục tiêu 30 ảnh, ≥3 ngôn ngữ) | T | S | 1h | 🔄 Đang làm — 40%, đã có cấu trúc `samples/` + quy ước đặt tên/ẩn danh + khung `expected.json`; **chưa có ảnh nào** (cần người thu thập, hoàn tất ở 3.9) |
 
 **Tiêu chí hoàn thành:** `docker compose up -d` → `curl localhost:8000/health` trả `{"status":"ok"}`; `alembic upgrade head` tạo đủ bảng; ERD + API spec + bảng sở hữu file đã commit.
 
@@ -116,11 +133,11 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 
 | # | Task | Người | Ưu tiên | Ước tính | Trạng thái |
 |---|------|-------|---------|----------|--------|
-| 2.1 | Thêm service `cliproxy` vào docker-compose (port 8317, volume `cliproxy_auths`, `config.yaml` có management key, `home.enabled: false`) | Q | M | 1.5h | ⬜ Chưa làm |
-| 2.2 | `services/cliproxy_client.py`: httpx async client cho Management API (auth-url, get-auth-status, auth-files, oauth-session), xử lý lỗi & timeout | Q | M | 1.5h | ⬜ Chưa làm |
-| 2.3 | `services/llm.py`: `generate_text()`, `generate_vision()`, `embed()` gọi qua CLIProxy, model `gemini-flash-latest`, retry/backoff — **file dùng chung, chỉ Q sửa** | Q | M | 2h | ⬜ Chưa làm |
-| 2.4 | `routers/integration.py`: `connect` / `status` (cache vào `integration_status`) / `disconnect` / `test` | Q | M | 1.5h | ⬜ Chưa làm |
-| 2.5 | `templates/settings.html`: **nút "Kết nối CLIProxy (OAuth)"**, badge trạng thái, poll 2s, nút Kiểm tra kết nối & Ngắt kết nối; test tay đầu–cuối và ghi `docs/oauth-setup.md` | Q | M | 2h | ⬜ Chưa làm |
+| 2.1 | Thêm service `cliproxy` vào docker-compose (port 8317, volume `cliproxy_auths`, `config.yaml` có management key, `home.enabled: false`) — ⚠️ **đọc I-01 + I-04 trước**: bắt buộc `allow-remote: true` và publish thêm cổng `51121`. (`home` không có trong `config.example.yaml`, mặc định `false` nên không phải khai) | Q | M | 1.5h | ⬜ Chưa làm |
+| 2.2 | `services/cliproxy_client.py`: httpx async client cho Management API (auth-url, get-auth-status, auth-files, oauth-session), xử lý lỗi & timeout — ⚠️ **I-05**: không retry khi 401/403 | Q | M | 1.5h | ⬜ Chưa làm |
+| 2.3 | `services/llm.py`: `generate_text()`, `generate_vision()`, `embed()` gọi qua CLIProxy, model `gemini-flash-latest`, retry/backoff — **file dùng chung, chỉ Q sửa** — ⚠️ **I-03**: `gemini-flash-latest` không có trong provider `antigravity`, phải đổi tên model | Q | M | 2h | ⬜ Chưa làm |
+| 2.4 | `routers/integration.py`: `connect` / `status` (cache vào `integration_status`) / `disconnect` / `test` — ⚠️ **I-02**: `status` phải đọc `GET /auth-files`, không phải `get-auth-status` | Q | M | 1.5h | ⬜ Chưa làm |
+| 2.5 | `templates/settings.html`: **nút "Kết nối CLIProxy (OAuth)"**, badge trạng thái, poll 2s, nút Kiểm tra kết nối & Ngắt kết nối; test tay đầu–cuối và ghi `docs/oauth-setup.md` — ⚠️ **I-02**: poll dùng `get-auth-status?state=…`, badge dùng `auth-files` | Q | M | 2h | ⬜ Chưa làm |
 | 2.6 | **Chốt model embedding cho RAG** (CLIProxy không có endpoint embedding — đã kiểm chứng, xem Plan.md 2.6). Chạy `scripts/spike_embedding.py` so sánh `multilingual-e5-small` (384d) vs `bge-m3` (1024d) trên ~20 đoạn mô tả công ty + 10 truy vấn tự soạn, đủ 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung. **Bắt buộc test cả có và không có tiền tố `query:`/`passage:`.** Ghi `docs/adr-embedding.md`: model chốt, số chiều, thời gian nhúng/đoạn, dung lượng image. **Đạt** = top-3 chứa đoạn đúng ở ≥ 8/10 truy vấn và < 200ms/đoạn trên CPU → chọn e5-small; trượt → `bge-m3`; cả hai trượt → báo Q chuyển RAG sang `tsvector`. **Nếu chốt model khác 384 chiều phải báo Q ngay trong ngày** để sinh revision đổi kiểu cột trước D6 | T | M | 2h | ⬜ Chưa làm |
 | 2.7 | Spike khả năng tìm kiếm Internet của Gemini Flash qua CLIProxy (`scripts/spike_websearch.py`) → chốt cách gọi, ghi `docs/adr-websearch.md` | T | M | 2h | ⬜ Chưa làm |
 | 2.8 | `schemas/company.py`: `CompanyProfileSchema` + `SourceRef` (mỗi trường kèm nguồn) | T | M | 1.5h | ⬜ Chưa làm |

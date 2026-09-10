@@ -1,0 +1,32 @@
+{
+  "_readme": "Ket qua ky vong cua tung anh trong samples/cards/. Chu so huu: T | Task 1.11 -> hoan tat o 3.9. Quy tac dien: xem samples/README.md muc 5. Truong khong co tren danh thiep -> null, khong bia. Ghi nguyen van nhu in, ke ca sai chinh ta.",
+  "_fields": {
+    "file": "Ten file trong samples/cards/, dat theo quy uoc <lang>-<NN>-<do kho>.<ext>",
+    "language_detected": "en | vi | ko | ja | zh",
+    "difficulty": "clear | blur | angle | lowlight | dense",
+    "full_name": "Ho ten nhu in, khong dao thu tu",
+    "job_title": "Chuc vu, giu nguyen ngon ngu goc, khong dich",
+    "company_name_raw": "Ten cong ty nguyen van nhu in",
+    "email": "Dang tho nhu in tren thiep",
+    "phone": "Dang tho nhu in tren thiep",
+    "phone_alt": "So thu hai neu co, bo qua fax",
+    "address": "Gop nhieu dong thanh mot chuoi, ngan bang ', '",
+    "website": "Nhu in, khong tu them https://"
+  },
+  "cards": [
+    {
+      "_comment": "VI DU MAU - xoa muc nay khi bat dau dien du lieu that o task 3.9",
+      "file": "vi-01-clear.jpg",
+      "language_detected": "vi",
+      "difficulty": "clear",
+      "full_name": "Nguyen Van An",
+      "job_title": "Giam doc Kinh doanh",
+      "company_name_raw": "Cong ty TNHH Thuong mai ABC",
+      "email": "an.nguyen@example.com",
+      "phone": "0901 234 567",
+      "phone_alt": "028 3822 0000",
+      "address": "Tang 5, 123 Le Loi, Quan 1, TP. Ho Chi Minh",
+      "website": "www.example.com"
+    }
+  ]
+}
