@@ -72,7 +72,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | Ngày | Giai đoạn | Trạng thái ngày | Ghi chú |
 |------|-----------|-----------------|---------|
 | D1 | P0 — Khởi động | 🔄 Đang làm | Q: 1.1–1.6 code xong, `docker compose up -d` + `alembic upgrade head` chạy OK, ruff/mypy xanh — **chưa commit**. T: 1.7/1.8/1.10 xong, 1.9 xong phần đọc mã nguồn (chạy container dời sang 2.1), 1.11 mới có cấu trúc — **chưa commit** |
-| D2 | P1 — Nền tảng AI | ⬜ Chưa làm | |
+| D2 | P1 — Nền tảng AI | 🔄 Đang làm | T: 2.6/2.8/2.9 xong (chờ merge), 2.7 ⏸️ chờ Q mở đường. Q: 2.1–2.5 chưa bắt đầu |
 | D3 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D4 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D5 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 11 task đang dở (1.1–1.11) · Cập nhật lần cuối: 2026-09-10
+**Tổng quan:** 0 / 103 task (D1–D11) hoàn thành (0%) · 14 task đang dở (1.1–1.11, 2.6, 2.8, 2.9) · 1 task tạm dừng (2.7) · Cập nhật lần cuối: 2026-09-10
 
 ### Nhật ký vấn đề đang mở
 
@@ -100,6 +100,8 @@ Xử lý xong thì đổi trạng thái sang ✅ kèm ngày, không xoá dòng.
 | **I-04** | Compose phải publish thêm **cổng 51121** (callback OAuth của Antigravity, `internal/auth/antigravity/constants.go:8`). Thiếu thì bấm nút OAuth đi tới Google xong, trình duyệt quay về `localhost:51121` và chết — token không bao giờ được lưu | T (1.9) | **Q** | 2.1 | ⬜ Chưa xử lý |
 | **I-05** | Sai management key **5 lần → ban IP 30 phút** (`handler.go:301-302`, đếm theo IP, cả container `api` chung một IP). Client CLIProxy **không được retry khi gặp 401/403**, chỉ retry lỗi mạng và 5xx. Gỡ ban sớm: `docker compose restart cliproxy` | T (1.9) | **Q** | 2.2 | ⬜ Chưa xử lý |
 | **I-06** | Đường dẫn mã nguồn CLIProxy trong Plan.md mục 2.4 (`C:\FSoft\ojt\CliProxy`) **không tồn tại**; thực tế ở `C:\Users\pc\source\repos\CLIProxyAPI`, commit đã chuyển từ `ecc9aa72` sang `7fac6b15` (kết luận cũ vẫn đúng, đã kiểm lại) | T (1.9) | **Q** | — | ⬜ Chưa xử lý |
+| **I-07** | ⚠️ **Chưa biết model nào tra cứu được Internet.** `supports_web_search` KHÔNG nằm trong `models.json` tĩnh — CLIProxy nạp lúc chạy từ `fetchAvailableModels.webSearchModelIds` (`model_registry.go:65-67`), tức **chỉ đọc được sau khi OAuth xong**. Nếu `gemini-3-flash` không hỗ trợ thì **F2 không có nguồn URL → trượt tiêu chí A5**. Kiểm ngay khi 2.1+2.5 xong: `python scripts/spike_websearch.py --list-models` | T (2.7) | **T** (sau khi Q mở đường) | 2.7, 4.7 | ⏸️ Chờ 2.1 + 2.5 |
+| **I-08** | `services/llm.py` (task 2.3) phải cho **truyền `tools` xuống `generateContent`**. Nếu hàm chỉ nhận mỗi prompt thì F2 không bật được `googleSearch` → enrichment mất khả năng tra cứu Internet. Chốt chữ ký hàm ở daily sync | T (2.7) | **Q** | 2.3, 4.7 | ⬜ Chưa xử lý |
 
 Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`](./docs/cliproxy-notes.md).
 
@@ -138,10 +140,10 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 | 2.3 | `services/llm.py`: `generate_text()`, `generate_vision()`, `embed()` gọi qua CLIProxy, model `gemini-flash-latest`, retry/backoff — **file dùng chung, chỉ Q sửa** — ⚠️ **I-03**: `gemini-flash-latest` không có trong provider `antigravity`, phải đổi tên model | Q | M | 2h | ⬜ Chưa làm |
 | 2.4 | `routers/integration.py`: `connect` / `status` (cache vào `integration_status`) / `disconnect` / `test` — ⚠️ **I-02**: `status` phải đọc `GET /auth-files`, không phải `get-auth-status` | Q | M | 1.5h | ⬜ Chưa làm |
 | 2.5 | `templates/settings.html`: **nút "Kết nối CLIProxy (OAuth)"**, badge trạng thái, poll 2s, nút Kiểm tra kết nối & Ngắt kết nối; test tay đầu–cuối và ghi `docs/oauth-setup.md` — ⚠️ **I-02**: poll dùng `get-auth-status?state=…`, badge dùng `auth-files` | Q | M | 2h | ⬜ Chưa làm |
-| 2.6 | **Chốt model embedding cho RAG** (CLIProxy không có endpoint embedding — đã kiểm chứng, xem Plan.md 2.6). Chạy `scripts/spike_embedding.py` so sánh `multilingual-e5-small` (384d) vs `bge-m3` (1024d) trên ~20 đoạn mô tả công ty + 10 truy vấn tự soạn, đủ 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung. **Bắt buộc test cả có và không có tiền tố `query:`/`passage:`.** Ghi `docs/adr-embedding.md`: model chốt, số chiều, thời gian nhúng/đoạn, dung lượng image. **Đạt** = top-3 chứa đoạn đúng ở ≥ 8/10 truy vấn và < 200ms/đoạn trên CPU → chọn e5-small; trượt → `bge-m3`; cả hai trượt → báo Q chuyển RAG sang `tsvector`. **Nếu chốt model khác 384 chiều phải báo Q ngay trong ngày** để sinh revision đổi kiểu cột trước D6 | T | M | 2h | ⬜ Chưa làm |
-| 2.7 | Spike khả năng tìm kiếm Internet của Gemini Flash qua CLIProxy (`scripts/spike_websearch.py`) → chốt cách gọi, ghi `docs/adr-websearch.md` | T | M | 2h | ⬜ Chưa làm |
-| 2.8 | `schemas/company.py`: `CompanyProfileSchema` + `SourceRef` (mỗi trường kèm nguồn) | T | M | 1.5h | ⬜ Chưa làm |
-| 2.9 | `prompts/enrichment.py`: prompt sinh hồ sơ DN — tra cứu Internet, trả JSON, **mọi trường phải kèm URL nguồn, không có nguồn thì để null** | T | M | 2.5h | ⬜ Chưa làm |
+| 2.6 | **Chốt model embedding cho RAG** (CLIProxy không có endpoint embedding — đã kiểm chứng, xem Plan.md 2.6). Chạy `scripts/spike_embedding.py` so sánh `multilingual-e5-small` (384d) vs `bge-m3` (1024d) trên ~20 đoạn mô tả công ty + 10 truy vấn tự soạn, đủ 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung. **Bắt buộc test cả có và không có tiền tố `query:`/`passage:`.** Ghi `docs/adr-embedding.md`: model chốt, số chiều, thời gian nhúng/đoạn, dung lượng image. **Đạt** = top-3 chứa đoạn đúng ở ≥ 8/10 truy vấn và < 200ms/đoạn trên CPU → chọn e5-small; trượt → `bge-m3`; cả hai trượt → báo Q chuyển RAG sang `tsvector`. **Nếu chốt model khác 384 chiều phải báo Q ngay trong ngày** để sinh revision đổi kiểu cột trước D6 | T | M | 2h | 🔄 Đang làm — 100%, chờ merge vào `main`. Đã đo cả 2 model × có/không tiền tố → **chốt `multilingual-e5-small` 384d** (10/10 top-3, ~12ms/đoạn, 471MB). **384 chiều khớp migration `0001` → KHÔNG cần Q sinh revision.** Xem `docs/adr-embedding.md` |
+| 2.7 | Spike khả năng tìm kiếm Internet của Gemini Flash qua CLIProxy (`scripts/spike_websearch.py`) → chốt cách gọi, ghi `docs/adr-websearch.md` | T | M | 2h | ⏸️ **Tạm dừng — chờ Q xong task 2.1 + 2.5** (chưa có service `cliproxy`, chưa OAuth nên không gọi thật được). Đã viết sẵn script + ADR phần khảo sát mã nguồn; **phát sinh I-07**, xem nhật ký vấn đề |
+| 2.8 | `schemas/company.py`: `CompanyProfileSchema` + `SourceRef` (mỗi trường kèm nguồn) | T | M | 1.5h | 🔄 Đang làm — 100%, chờ merge vào `main` |
+| 2.9 | `prompts/enrichment.py`: prompt sinh hồ sơ DN — tra cứu Internet, trả JSON, **mọi trường phải kèm URL nguồn, không có nguồn thì để null** | T | M | 2.5h | 🔄 Đang làm — 100%, chờ merge vào `main`. Ví dụ JSON trong prompt đã kiểm: parse được bằng `CompanyProfileSchema`, đúng 5 trường có nguồn (đạt ngưỡng A5) |
 
 **Tiêu chí hoàn thành:** Từ UI bấm 1 nút hoàn tất OAuth; badge chuyển "Đã kết nối"; nút "Kiểm tra kết nối" trả về text do Gemini Flash sinh; phương án embedding & web search đã chốt bằng ADR (ADR embedding phải nêu rõ model, số chiều và kết quả đo).
 
