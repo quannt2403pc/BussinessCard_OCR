@@ -100,38 +100,56 @@ sequenceDiagram
 |---------|---------------|------|---------|
 | `api` | build từ `./backend` (python:3.12-slim) | 8000 | FastAPI: REST API + phục vụ Web UI |
 | `db` | `pgvector/pgvector:pg16` | 5432 | PostgreSQL + extension `vector` |
-| `cliproxy` | build/pull CLIProxyAPI | 8317 | Cổng OAuth + gateway tới Gemini |
+| `cliproxy` | `eceasy/cli-proxy-api` (image công khai, **không build từ mã nguồn**) | 8317 + 51121 | Cổng OAuth + gateway tới Gemini. Cấu hình từ `cliproxy/config.example.yaml`; 51121 là callback OAuth của Antigravity |
 | `embedder` | build từ `./embedder` (python:3.12-slim + sentence-transformers) | 8001 | Sinh vector embedding cho RAG — **model nhúng sẵn trong image lúc build**, chạy CPU, không cần mạng lúc chạy (xem mục 2.6) |
 | `adminer` *(tuỳ chọn)* | `adminer` | 8080 | Xem DB khi debug |
 
 Volumes: `pgdata` (DB), `uploads` (ảnh danh thiếp), `cliproxy_auths` (token OAuth — giữ lại giữa các lần restart).
 
-### 2.4 Tích hợp CLIProxyAPI (đã khảo sát mã nguồn tại `C:\FSoft\ojt\CliProxy`)
+### 2.4 Tích hợp CLIProxyAPI
+
+> **Nguồn khảo sát:** `github.com/router-for-me/CLIProxyAPI` — commit `ecc9aa72` (bản đầu, Q) và
+> `7fac6b15` (T kiểm lại ở task 1.9). **Không ghi đường dẫn tuyệt đối trên máy vào tài liệu**:
+> mỗi người clone một chỗ, đường dẫn của người này luôn sai với người kia.
+> Bản clone chỉ là tư liệu đọc mã nguồn — **không phải phụ thuộc lúc chạy**, service `cliproxy`
+> dùng image công khai (mục 2.3).
 
 | Việc | Endpoint | Ghi chú |
 |------|----------|---------|
 | Lấy URL đăng nhập OAuth | `GET http://cliproxy:8317/v0/management/{provider}-auth-url` | Route được sinh động theo provider; provider built-in gồm `anthropic`, `codex`, `antigravity`, `kimi`, `xai`; Gemini nạp qua plugin auth (`ServePluginAuthURL`) |
 | Callback OAuth | `GET/POST /v0/management/oauth-callback` | CLIProxyAPI tự xử lý, lưu token vào thư mục `auths/` |
-| Kiểm tra trạng thái đăng nhập | `GET /v0/management/get-auth-status` | dùng để hiển thị badge "Đã kết nối / Chưa kết nối" |
-| Liệt kê tài khoản đã auth | `GET /v0/management/auth-files` | |
+| **Badge "Đã kết nối / Chưa kết nối"** | `GET /v0/management/auth-files` | **Nguồn sự thật duy nhất** cho trạng thái. Mảng rỗng `{"files":[]}` = chưa kết nối |
+| Poll trong lúc chờ người dùng đồng ý | `GET /v0/management/get-auth-status?state=…` | **CHỈ dùng cho việc này.** ⚠️ I-02: không truyền `state` thì trả `{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ → dùng cho badge là lỗi âm thầm, badge sẽ luôn xanh |
 | Huỷ phiên OAuth | `DELETE /v0/management/oauth-session` | |
-| Gọi model (Gemini native) | `POST /v1beta/models/gemini-flash-latest:generateContent` | dùng cho vision + text |
+| Ngắt kết nối (xoá credential) | `DELETE /v0/management/auth-files` | |
+| Danh mục model của channel | `GET /v0/management/model-definitions/antigravity` | Chốt tên model thật cho `LLM_MODEL`; danh mục tự cập nhật từ xa nên **không hardcode theo tài liệu** |
+| Gọi model (Gemini native) | `POST /v1beta/models/<LLM_MODEL>:generateContent` | dùng cho vision + text |
 | Gọi model (OpenAI-compatible) | `POST /v1/chat/completions` | phương án thay thế |
 | Embedding | **Không tồn tại** — đã kiểm chứng trong mã nguồn | Route `/v1beta/models/*action` chỉ nhận `generateContent`, `streamGenerateContent`, `countTokens`; cũng không có `/v1/embeddings`. Embedding do service `embedder` cục bộ đảm nhiệm — xem mục 2.6 |
 
-> Các route `/v0/management/*` yêu cầu **management key** (khai trong `config.yaml` của CLIProxyAPI, truyền vào backend qua biến môi trường `CLIPROXY_MGMT_KEY`) và chỉ bật khi `home.enabled = false`. Backend đóng vai trò proxy để Web UI chỉ cần bấm 1 nút.
+> Các route `/v0/management/*` yêu cầu **management key** (khai ở `remote-management.secret-key`
+> trong `config.yaml` của CLIProxyAPI, truyền vào backend qua biến `CLIPROXY_MGMT_KEY` — hai giá
+> trị phải trùng nhau). Backend đóng vai trò proxy để Web UI chỉ cần bấm 1 nút.
+>
+> Ba ràng buộc bắt buộc, đã kiểm chứng bằng container thật (xem `cliproxy/config.example.yaml`):
+> - **`allow-remote: true`** — CLIProxy hiểu "localhost" đúng nghĩa đen `127.0.0.1`/`::1`; container `api` gọi qua mạng bridge nên để `false` là nhận `403 remote management disabled` dù gửi đúng key (I-01).
+> - **Publish cổng `51121`** — callback OAuth của Antigravity; thiếu thì token không bao giờ được lưu (I-04).
+> - **Không retry khi 401/403** — sai key 5 lần là ban IP 30 phút, cả container `api` chung một IP (I-05).
+>
+> `secret-key` để rỗng = tắt hẳn Management API, mọi route trả **404** chứ không phải 401.
+> *(Khoá `home` không tồn tại trong `config.example.yaml` của CLIProxy — không phải khai gì.)*
 
 ### 2.5 Nút bấm kết nối OAuth (yêu cầu bắt buộc)
 
 Trang `/settings` gồm:
-1. Badge trạng thái: **Chưa kết nối / Đã kết nối** (kèm tài khoản, danh sách model khả dụng).
-2. Nút **"Kết nối CLIProxy (OAuth)"** → backend gọi `…-auth-url` → mở tab mới tới URL OAuth của Google.
-3. Người dùng đồng ý → CLIProxy nhận callback → UI **poll** `get-auth-status` mỗi 2 giây → badge tự chuyển sang "Đã kết nối".
+1. Badge trạng thái: **Chưa kết nối / Đã kết nối** (kèm tài khoản, danh sách model khả dụng) — đọc từ **`auth-files`**.
+2. Nút **"Kết nối CLIProxy (OAuth)"** → backend gọi `…-auth-url`, nhận về `url` + `state` → mở tab mới tới URL OAuth của Google.
+3. Người dùng đồng ý → CLIProxy nhận callback ở cổng `51121` → UI **poll `get-auth-status?state=<state vừa nhận>`** mỗi 2 giây cho tới khi `{"status":"ok"}` → **rồi mới gọi lại `auth-files`** để vẽ badge. ⚠️ Poll mà quên `state` thì lần nào cũng "ok" ngay lập tức (I-02).
 4. Nút **"Kiểm tra kết nối"** (gọi thử 1 prompt ngắn tới Gemini Flash) và nút **"Ngắt kết nối"**.
 
 ### 2.6 Phương án embedding cho RAG
 
-**Kết luận khảo sát mã nguồn CLIProxyAPI (commit `ecc9aa72`): CLIProxy KHÔNG có endpoint embedding.**
+**Kết luận khảo sát mã nguồn CLIProxyAPI (commit `ecc9aa72`, T kiểm lại ở `7fac6b15`): CLIProxy KHÔNG có endpoint embedding.**
 - Không tồn tại route `/v1/embeddings` (kiểu OpenAI).
 - Route Gemini native `/v1beta/models/*action` chỉ nhận `generateContent`, `streamGenerateContent`, `countTokens` (`sdk/api/handlers/gemini/gemini_handlers.go:155`). Không có `embedContent`.
 - Cảnh báo: `switch` này **không có nhánh `default`** → gọi `:embedContent` trả HTTP 200 rỗng chứ không phải 404, rất dễ hiểu nhầm là "gọi được nhưng parse lỗi".

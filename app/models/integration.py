@@ -3,7 +3,9 @@
 Chủ sở hữu: Q | Task: 1.6 | xem Task.md
 
 Chỉ là **cache** để UI hiện badge ngay mà không phải gọi CLIProxy mỗi lần tải trang.
-Nguồn sự thật vẫn là `GET /v0/management/get-auth-status` (Plan.md mục 2.4, task 2.4).
+Nguồn sự thật là `GET /v0/management/auth-files` — mảng rỗng nghĩa là chưa kết nối
+(Plan.md mục 2.4, task 2.4). **Không** dùng `get-auth-status`: thiếu tham số `state` thì nó trả
+`{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ, badge sẽ xanh vĩnh viễn (I-02 trong Task.md).
 """
 
 from datetime import datetime

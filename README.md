@@ -7,9 +7,10 @@ Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác. Bản demo
 - Chỉ mục tài liệu: [docs/README.md](./docs/README.md)
 - Quy ước cho AI agent: [AGENTS.md](./AGENTS.md)
 
-> **Trạng thái: xong D1 phần khung (task 1.1–1.6).** `docker compose up -d` khởi động được
-> `api` + `db` + `adminer`, `alembic upgrade head` tạo đủ 6 nhóm bảng. Các màn hình và API
-> nghiệp vụ (F1/F2/F3) vẫn là stub — xem `Task.md` để biết thứ tự triển khai.
+> **Trạng thái: xong D1 (task 1.1–1.10), đang vào D2.** `docker compose up -d` khởi động
+> `api` + `db` + `cliproxy` + `adminer`, `alembic upgrade head` tạo đủ 6 nhóm bảng. Đăng nhập
+> OAuth và client LLM (task 2.2–2.5) chưa làm; các màn hình và API nghiệp vụ (F1/F2/F3) vẫn là
+> stub — xem `Task.md` để biết thứ tự triển khai.
 
 ## Ba chức năng
 
@@ -20,21 +21,35 @@ Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác. Bản demo
 ## Chạy
 
 ```bash
-cp .env.example .env      # điền CLIPROXY_MGMT_KEY
+cp .env.example .env                                   # điền CLIPROXY_MGMT_KEY
+cp cliproxy/config.example.yaml cliproxy/config.yaml   # secret-key đặt TRÙNG key trên
 docker compose up -d
 docker compose exec api alembic upgrade head   # tự động hoá ở task 9.2
 
 curl localhost:8000/health   # -> {"status":"ok"}
 ```
 
+Cần đúng hai lệnh `cp` đó, không cần gì thêm — **không phải cài Go, không phải clone
+CLIProxyAPI về máy**: `cliproxy` chạy bằng image công khai `eceasy/cli-proxy-api`, Docker tự pull.
+
+> ⚠️ Bỏ lệnh `cp` thứ hai thì Docker thấy đường dẫn bind mount không tồn tại và **tạo một thư
+> mục** tên `config.yaml`, `cliproxy` khởi động lỗi với thông báo rất khó đoán. `api` và `db`
+> vẫn lên bình thường, chỉ phần OAuth là chết.
+>
+> `cliproxy/config.yaml` **không commit** (đã nằm trong `.gitignore`) vì chứa management key.
+> CLIProxy băm key đó lúc khởi động rồi ghi đè lại chính file — sau lần `up` đầu tiên thấy giá
+> trị biến thành chuỗi hash là bình thường.
+
 | Địa chỉ | Là gì |
 |---------|-------|
 | http://localhost:8000 | Web UI |
 | http://localhost:8000/docs | Swagger tự sinh — tài liệu API chính sau D1 |
 | http://localhost:8080 | Adminer, xem DB khi debug (server `db`) |
+| http://localhost:8317 | CLIProxyAPI — Management API + gateway tới Gemini |
+| localhost:51121 | Callback OAuth của Antigravity; không mở tay, trình duyệt tự quay về |
 
 Service `embedder` (:8001) đang nằm trong profile vì `embedder/` chưa dựng (task 3.10):
-`docker compose --profile embedder up -d embedder`. Service `cliproxy` (:8317) được thêm ở task 2.1.
+`docker compose --profile embedder up -d embedder`.
 
 ## Phát triển ở máy (không qua Docker)
 
