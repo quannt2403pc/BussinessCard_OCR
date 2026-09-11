@@ -1,0 +1,44 @@
+# Cau hinh CLIProxyAPI cho BusinessCard_OCR.
+# Chu so huu: Q | Task: 2.1
+#
+# KHONG sua truc tiep file nay. Sao chep roi dien secret-key:
+#
+#     cp cliproxy/config.example.yaml cliproxy/config.yaml
+#
+# `cliproxy/config.yaml` da nam trong .gitignore vi no chua management key.
+#
+# LUU Y: CLIProxy BAM `secret-key` luc khoi dong roi GHI DE lai chinh file config.yaml.
+# Sau lan `up` dau tien, gia tri trong file se thanh chuoi hash - dung tuong la hong.
+# Doi key thi dien lai plaintext roi `docker compose restart cliproxy`.
+#
+# Doi chieu day du: docs/cliproxy-notes.md (khao sat cua T, task 1.9).
+
+# Bind moi interface trong mang Docker. Cong 8317 chi publish ra localhost cua may dev.
+host: ""
+port: 8317
+
+remote-management:
+  # BAT BUOC true - xem I-01 trong Task.md.
+  # CLIProxy hieu "localhost" dung nghia den 127.0.0.1 / ::1 (handler.go:273,337).
+  # Container `api` goi qua mang bridge Docker (172.x.x.x) nen bi coi la remote:
+  # de false thi moi request /v0/management deu tra 403 "remote management disabled",
+  # KE CA khi gui dung key.
+  allow-remote: true
+
+  # Dat TRUNG voi CLIPROXY_MGMT_KEY trong .env.
+  # De rong = tat han Management API, moi route /v0/management tra 404 (khong phai 401).
+  #
+  # BAY: sai key 5 lan -> ban IP 30 phut (handler.go:301-302). Bo dem theo IP, ma ca
+  # container `api` dung chung mot IP. Xem I-05. Go ban som: docker compose restart cliproxy
+  secret-key: "change-me"
+
+  disable-control-panel: false
+
+# Khop voi volume `cliproxy_auths` mount trong docker-compose.yml.
+# Token OAuth phai song qua restart, neu khong moi lan up lai phai dang nhap lai (rui ro R1).
+auth-dir: "/root/.cli-proxy-api"
+
+# Khong dung: ta goi CLIProxy qua mang noi bo Docker, khong phat hanh API key cho client ngoai.
+api-keys: []
+
+debug: false
