@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     cliproxy_base_url: str = "http://cliproxy:8317"
     cliproxy_mgmt_key: str = ""
     cliproxy_auth_provider: str = "antigravity"
-    llm_model: str = "gemini-flash-latest"
+    #: Phải là model CÓ THẬT trong channel `antigravity` — kiểm bằng
+    #: `GET /v0/management/model-definitions/antigravity`. `gemini-flash-latest` thuộc channel
+    #: `aistudio`/`gemini` (cần API key), gọi qua `antigravity` sẽ không chạy. Xem I-03.
+    llm_model: str = "gemini-3-flash"
 
     # --- Embedding: KHÔNG đi qua CLIProxy, xem Plan.md mục 2.6 ---
     embedder_url: str = "http://embedder:8001"

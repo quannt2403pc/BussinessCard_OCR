@@ -2,17 +2,19 @@
 #
 #   api       build .                :8000   FastAPI + Web UI
 #   db        pgvector/pgvector:pg16 :5432   PostgreSQL + extension vector
+#   cliproxy  eceasy/cli-proxy-api   :8317   OAuth + gateway tới Gemini (task 2.1)
 #   embedder  build ./embedder       :8001   sentence-transformers (T dựng ở task 3.10)
 #   adminer   adminer                :8080   xem DB khi debug
 #
-# Service `cliproxy` (:8317) được thêm ở task 2.1 — chưa khai ở đây để `up` không đòi
-# config.yaml chưa tồn tại.
-#
 # Chạy:
-#   cp .env.example .env         # điền CLIPROXY_MGMT_KEY
+#   cp .env.example .env                                  # điền CLIPROXY_MGMT_KEY
+#   cp cliproxy/config.example.yaml cliproxy/config.yaml   # secret-key trùng key trên
 #   docker compose up -d
 #   docker compose exec api alembic upgrade head
 #   curl localhost:8000/health   -> {"status":"ok"}
+#
+# ⚠️ Bỏ bước `cp` thứ hai thì Docker thấy đường dẫn bind mount không tồn tại và **tạo một
+# thư mục** tên `config.yaml` → cliproxy khởi động lỗi với thông báo rất khó đoán.
 
 name: businesscard-ocr
 
@@ -39,12 +41,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Chỉ chờ container khởi động, KHÔNG chờ healthy: `api` vẫn phải lên được khi cliproxy
+      # chết để trang /settings còn hiện được trạng thái "Chưa kết nối" (task 2.4, 9.4).
+      cliproxy:
+        condition: service_started
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://bizcard:change-me@db:5432/bizcard}
       CLIPROXY_BASE_URL: ${CLIPROXY_BASE_URL:-http://cliproxy:8317}
       CLIPROXY_MGMT_KEY: ${CLIPROXY_MGMT_KEY:-}
       CLIPROXY_AUTH_PROVIDER: ${CLIPROXY_AUTH_PROVIDER:-antigravity}
-      LLM_MODEL: ${LLM_MODEL:-gemini-flash-latest}
+      # Phải có thật trong channel `antigravity` — xem I-03 trong Task.md.
+      LLM_MODEL: ${LLM_MODEL:-gemini-3-flash}
       EMBEDDER_URL: ${EMBEDDER_URL:-http://embedder:8001}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
@@ -68,6 +75,29 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    restart: unless-stopped
+
+  cliproxy:
+    # Chủ sở hữu: Q | Task: 2.1
+    #
+    # Dùng image công khai, KHÔNG build từ mã nguồn: ta không sửa gì trong CLIProxy, mà build
+    # một image Go 1.26 chỉ tốn thời gian. Nhờ vậy máy nào clone repo về cũng chạy được — không
+    # cần có sẵn mã nguồn CLIProxyAPI ở máy (xem I-06).
+    #
+    # `:latest` không tái lập được — upstream đẩy bản mới là hành vi đổi. Chốt xong ở 2.1 thì
+    # ghim theo tag phiên bản hoặc digest, đặt qua biến CLIPROXY_IMAGE trong .env.
+    image: ${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    volumes:
+      # File này KHÔNG commit (chứa management key) — tạo từ config.example.yaml, xem đầu file.
+      - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml
+      # Token OAuth phải sống qua restart, nếu không mỗi lần up lại phải đăng nhập lại (rủi ro R1).
+      - cliproxy_auths:/root/.cli-proxy-api
+    ports:
+      - "8317:8317"
+      # ⚠️ I-04 — cổng callback OAuth của Antigravity (internal/auth/antigravity/constants.go:8).
+      # Thiếu cổng này thì bấm nút OAuth đi tới Google, đồng ý xong trình duyệt quay về
+      # localhost:51121 và chết — token không bao giờ được lưu.
+      - "51121:51121"
     restart: unless-stopped
 
   embedder:
@@ -108,6 +138,5 @@ services:
 volumes:
   pgdata:
   uploads:
-  # Token OAuth của CLIProxy — giữ lại giữa các lần restart (rủi ro R1). Service dùng nó
-  # được thêm ở task 2.1.
+  # Token OAuth của CLIProxy — giữ lại giữa các lần restart (rủi ro R1).
   cliproxy_auths:

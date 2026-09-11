@@ -140,11 +140,22 @@ jobs:
             exit 0
           fi
           pip install -r requirements.txt
-          heads=$(alembic heads 2>/dev/null | grep -c "(head)" || true)
+          # KHÔNG viết `alembic heads 2>/dev/null | grep -c`: alembic chết thì output rỗng,
+          # grep đếm ra 0, job xanh oan và kiểm tra này không bao giờ báo động.
+          if ! out=$(alembic heads 2>&1); then
+            echo "$out"
+            echo "::error title=alembic heads lỗi::Không chạy được 'alembic heads' — xem log job."
+            exit 1
+          fi
+          echo "$out"
+          heads=$(printf '%s\n' "$out" | grep -c "(head)" || true)
           echo "Số head: $heads"
+          if [ "$heads" -eq 0 ]; then
+            echo "::error title=Không đọc được head::Có ${#revisions[@]} file revision nhưng alembic không báo head nào."
+            exit 1
+          fi
           if [ "$heads" -gt 1 ]; then
             echo "::error title=Nhiều Alembic head::Có $heads head. Chạy 'alembic merge' hoặc sinh lại revision trên đúng nhánh cha."
-            alembic heads
             exit 1
           fi
 
