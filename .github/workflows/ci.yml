@@ -168,8 +168,12 @@ jobs:
     steps:
       - name: Tổng hợp kết quả
         run: |
-          # Chuỗi trong biểu thức ${{ }} phải dùng NHÁY ĐƠN. Dùng nháy kép thì GitHub báo
-          # "Invalid workflow file" và huỷ cả workflow trước khi tạo job nào.
+          # Hai cái bẫy đã làm hỏng workflow này trước đây — cả hai đều khiến GitHub báo
+          # "Invalid workflow file" và huỷ toàn bộ workflow TRƯỚC khi tạo job nào:
+          #   1. Chuỗi trong biểu thức GitHub phải dùng NHÁY ĐƠN, không được dùng nháy kép.
+          #   2. Trong khối run: TUYỆT ĐỐI không viết cặp ngoặc biểu thức rỗng, kể cả khi
+          #      đang ở trong một dòng comment shell. GitHub vẫn coi đó là biểu thức cần
+          #      đánh giá và báo lỗi cú pháp. Đây chính là lỗi đã làm 19/19 lượt CI đỏ.
           results='${{ join(needs.*.result, ' ') }}'
           echo "Kết quả các job: $results"
           for r in $results; do
