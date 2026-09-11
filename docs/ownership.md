@@ -127,7 +127,7 @@ Phạm vi: `cards` · `companies` · `kb` · `chat` · `integration` · `embedde
 
 ### PR phải xanh CI mới được merge
 
-`main` bật branch protection, required check = **`CI xanh`**. Chạy trước ở máy cho đỡ mất lượt:
+`main` bật branch protection, required check = **`CI success`**. Chạy trước ở máy cho đỡ mất lượt:
 
 ```bash
 ruff check . && ruff format --check . && mypy app embedder scripts && pytest
