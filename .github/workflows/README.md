@@ -3,6 +3,14 @@
 `ci.yml` chỉ **chạy kiểm tra và báo kết quả**. Nó không tự chặn merge.
 Muốn PR đỏ không merge được vào `main` thì phải bật Branch protection một lần trên GitHub.
 
+> 🔴 **Chưa bật được, và không phải vì ai quên** (I-14, kiểm lại 2026-09-11): repo đang `private`
+> trên gói **GitHub Free**. API trả `403 "Upgrade to GitHub Pro or make this repository public"`
+> cho `rulesets` và `404` cho `branches/main/protection`. Hướng dẫn dưới đây **chỉ chạy được sau
+> khi** chọn một trong hai: chuyển repo sang **public**, hoặc nâng **GitHub Pro**.
+> Chưa chọn thì luật "PR phải xanh CI" là **kỷ luật thủ công** — tự chạy kiểm tra ở máy.
+> Phần còn lại của file vẫn đúng: check cần chọn tên là `CI success`, và nó đã tồn tại thật
+> (I-11 đã đóng, run `34554835829` trên `main` → success).
+
 ## Bật một lần (cần quyền admin repo)
 
 `Settings` → `Branches` → `Add branch ruleset` (hoặc `Add rule` ở giao diện cũ):

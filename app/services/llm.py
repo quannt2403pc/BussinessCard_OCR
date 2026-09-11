@@ -21,6 +21,15 @@ danh mục model của channel — đừng bỏ bước đó để "cho gọn".
 Một điều nữa: route gọi model **không cần** management key (`api-keys: []` nghĩa là CLIProxy
 không kiểm tra client). Ta cũng cố ý không gửi key ở đây để khỏi đụng bộ đếm ban của I-05.
 
+Về vision (phần cuối của I-03): danh mục channel **khai** `gemini-3-flash` nhận ảnh —
+`GET /v0/management/model-definitions/antigravity` trả `supportedInputModalities:
+["text","image","audio","video"]` (đo 2026-09-11, không cần OAuth). Đó là *lời khai của danh
+mục*, **chưa phải bằng chứng gọi được**: một lời gọi `inline_data` thật cần credential OAuth.
+Đã thử với ảnh PNG 640×360 thật (2026-09-11): dừng ở `LLMNotConnectedError` vì chưa có token.
+Lưu ý **đừng đọc kết quả đó thành "payload đúng"** — CLIProxy chặn ở bước định tuyến theo
+credential, *trước khi* đọc tới body, nên nó chưa từng nhìn thấy `inline_data` của ta.
+Vision chỉ được coi là kiểm chứng khi có token và lời gọi trả về chữ — **bắt buộc trước 3.4**.
+
 **Không có `embed()`** — CLIProxy không có endpoint embedding, việc đó do service `embedder`
 đảm nhiệm (Plan.md mục 2.6, `services/embeddings.py` task 6.4).
 """
@@ -52,6 +61,16 @@ SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "ima
 
 #: `finishReason` nghĩa là câu trả lời bị chặn chứ không phải model sinh ra nội dung rỗng.
 BLOCKED_FINISH_REASONS = frozenset({"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"})
+
+#: Tool bật tra cứu Internet của Gemini (I-13, dùng ở enrichment F2 — task 4.7).
+#:
+#: **camelCase, không phải `google_search`**: executor của antigravity đọc đúng khoá này
+#: (`internal/runtime/executor/antigravity_executor.go:829` — `tool.Get("googleSearch")`),
+#: gõ snake_case thì tool bị bỏ qua **im lặng**, model trả lời bằng kiến thức nội tại và
+#: không có nguồn nào — đúng kịch bản bịa thông tin của rủi ro R4.
+#:
+#: Khai ở đây để F2 không phải tự gõ lại chuỗi: `generate_text(prompt, tools=[TOOL_GOOGLE_SEARCH])`.
+TOOL_GOOGLE_SEARCH: dict[str, dict[str, Any]] = {"googleSearch": {}}
 
 
 class LLMError(RuntimeError):
@@ -85,16 +104,26 @@ async def generate_text(
     model: str | None = None,
     temperature: float = 0.2,
     max_output_tokens: int | None = None,
+    tools: list[dict[str, Any]] | None = None,
     client: CliProxyClient | None = None,
 ) -> str:
     """Sinh văn bản thuần. Dùng cho nút "Kiểm tra kết nối" (2.4), enrichment và chat.
 
     `temperature` để thấp vì mọi chỗ dùng trong dự án đều là trích xuất/tổng hợp có cấu trúc,
     không phải viết sáng tạo.
+
+    `tools` đi thẳng vào payload `generateContent` (I-13). F2 bật tra cứu Internet bằng
+    `tools=[TOOL_GOOGLE_SEARCH]`. **Hàm này chỉ trả về text** — cần đọc URL nguồn ở
+    `candidates[0].groundingMetadata.groundingChunks[].web.uri` thì gọi `generate_content()`
+    để lấy JSON thô (xem `docs/adr-websearch.md` mục 2.1).
     """
     parts: list[dict[str, Any]] = [{"text": prompt}]
     payload = _build_payload(
-        parts, system=system, temperature=temperature, max_tokens=max_output_tokens
+        parts,
+        system=system,
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        tools=tools,
     )
     data = await generate_content(payload, model=model, client=client)
     return _extract_text(data)
@@ -109,6 +138,7 @@ async def generate_vision(
     model: str | None = None,
     temperature: float = 0.0,
     max_output_tokens: int | None = None,
+    tools: list[dict[str, Any]] | None = None,
     client: CliProxyClient | None = None,
 ) -> str:
     """Sinh văn bản từ **ảnh + prompt** — trái tim của F1 (task 3.4 gọi hàm này).
@@ -136,7 +166,11 @@ async def generate_vision(
         {"text": prompt},
     ]
     payload = _build_payload(
-        parts, system=system, temperature=temperature, max_tokens=max_output_tokens
+        parts,
+        system=system,
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        tools=tools,
     )
     data = await generate_content(payload, model=model, client=client)
     return _extract_text(data)
@@ -258,6 +292,7 @@ def _build_payload(
     system: str | None,
     temperature: float,
     max_tokens: int | None,
+    tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Dựng body chuẩn Gemini native `generateContent`."""
     generation_config: dict[str, Any] = {"temperature": temperature}
@@ -270,6 +305,10 @@ def _build_payload(
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
+    # Chỉ thêm khoá khi thật sự có tool: gửi `"tools": []` là thay đổi hành vi vô ích và
+    # có provider coi mảng rỗng là lỗi.
+    if tools:
+        payload["tools"] = tools
     return payload
 
 

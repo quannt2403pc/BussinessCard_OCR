@@ -285,7 +285,7 @@ giao cho cùng một người để tránh xung đột Git (bảng sở hữu fi
 
 ### 5.3 Quy ước làm việc
 - Git flow đơn giản: `main` (ổn định) ← PR từ `feat/<module>-<việc>`; commit theo Conventional Commits.
-- **PR phải xanh CI mới được merge** (`main` bật branch protection, required check = `CI success`). Chạy trước ở máy cho đỡ mất lượt: `ruff check . && ruff format --check . && mypy app embedder scripts && pytest`.
+- **PR phải xanh CI mới được merge** — check tên `CI success`. ⚠️ Tính đến 2026-09-11 đây là **kỷ luật thủ công, không có gì chặn**: `main` không bật được branch protection vì repo `private` trên gói GitHub Free (API trả `403 Upgrade to GitHub Pro or make this repository public` — I-14 trong `Task.md`). Vì vậy **bắt buộc tự chạy ở máy trước khi merge**: `ruff check . && ruff format --check . && mypy app embedder scripts && pytest`. Bật được protection khi chọn một trong hai: chuyển repo sang public, hoặc nâng GitHub Pro.
 - **Mỗi task 1 owner duy nhất; không sửa file thuộc quyền sở hữu của người kia** — cần đổi thì báo chủ file. Bảng sở hữu file/module nằm ở đầu `Task.md`.
 - **Không xếp hai người vào cùng một file trong cùng một ngày**; bất khả kháng thì làm tuần tự, người sau rebase trước khi sửa.
 - `app/main.py` và `routers/__init__.py` khai báo sẵn stub toàn bộ router từ D1 → về sau không ai phải sửa file chung khi thêm tính năng.

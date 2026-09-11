@@ -144,9 +144,10 @@ Xem log gọn: `docker compose logs -f cliproxy`.
 
 ---
 
-## 7. Phần đã kiểm chứng bằng máy & phần còn phải thử tay
+## 7. Phần đã kiểm chứng bằng máy
 
-Kiểm chứng tự động ở task 2.2–2.4 (container thật, không mock):
+Kiểm chứng tự động ở task 2.2–2.4 (container thật, không mock). Ba việc cần tài khoản Google
+thật thì nằm ở **mục 8** — đã chạy xong, không còn việc treo.
 
 - `/health` xanh, router `integration` được nạp, `/settings` trả HTTP 200.
 - `status` → `connected:false` khi `auth-files` rỗng; **`connected:true` + đúng email** khi thư
@@ -159,9 +160,27 @@ Kiểm chứng tự động ở task 2.2–2.4 (container thật, không mock):
 - Tắt `cliproxy`: `/health` và `/settings` vẫn 200, `status` trả `reachable:false` + cache,
   `connect` trả 503 có thông báo rõ.
 
-**Còn phải làm tay một lần (cần tài khoản Google thật, máy không tự làm được):**
+## 8. Kết quả chạy tay đầu–cuối (2026-09-11, tài khoản Google thật)
 
-1. Bấm nút OAuth đi hết vòng: Google → Đồng ý → callback 51121 → badge chuyển xanh.
-2. Bấm “Kiểm tra kết nối” và xem câu trả lời thật của `gemini-3-flash`.
-3. Thử `generate_vision()` với ảnh thật (`inline_data`) — **phải xong trước khi viết task 3.4**,
-   đây là việc còn lại của I-03.
+Ba việc “máy không tự làm được” của mục 7 đã chạy xong. Ghi lại số đo để lần sau không phải
+làm lại từ đầu, và để ai đọc cũng biết **cái gì đã được kiểm chứng bằng lời gọi thật**.
+
+| # | Việc | Kết quả |
+|---|------|---------|
+| 1 | Bấm nút OAuth đi hết vòng | ✅ `auth-files` có `antigravity-quanpyke@gmail.com.json`, `status: active`. Badge `/settings` → `connected:true`, `account_label` đúng email |
+| 2 | Nút “Kiểm tra kết nối” | ✅ `POST /api/integration/test` → `{"ok":true,"model":"gemini-3-flash","text":"Tôi là Gemini và tôi đang hoạt động bình thường."}`, `elapsed_ms: 7926` |
+| 3 | `generate_vision()` với ảnh thật | ✅ Danh thiếp PNG 1000×560 (15KB) → **7/7 trường đúng** trong **3.1s**: name, title, company, phone, mobile, email, website, address. **I-03 đóng hẳn** — channel `antigravity` chạy được vision qua `inline_data` |
+
+Bằng chứng phụ thu được từ log container trong cùng lượt đó:
+
+- Callback **51121 hoạt động thật**: `auth file changed (CREATE)` → `Authentication successful!`
+  (xác nhận I-04 bằng đường đi thật, không chỉ bằng việc publish cổng).
+- Poll `get-auth-status?state=…` trả `wait` rồi `ok` đúng thứ tự (xác nhận thiết kế của I-02).
+- **I-09 không tái hiện**: `RestartCount = 0`, container sống suốt lượt OAuth. Cách né (luôn
+  gửi `is_webui=1`) vẫn giữ nguyên trong mã.
+- Log có một dòng `warn` vô hại ngay sau khi lưu token:
+  `failed to shut down callback forwarder on port 51121 error=context deadline exceeded`,
+  liền sau đó là `callback forwarder on port 51121 stopped`. **Không phải lỗi** — đừng đi sửa.
+
+> ⚠️ Một cái bẫy cho task 3.4: model trả JSON **bọc trong khối ```json**, không phải JSON thuần.
+> `services/ocr.py` phải gỡ hàng rào code trước khi `json.loads()`. Xem I-15 trong `Task.md`.
