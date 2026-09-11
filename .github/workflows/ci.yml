@@ -2,7 +2,7 @@ name: CI
 
 # Chạy trên mọi PR nhắm vào main, và trên chính main sau khi merge.
 # LƯU Ý: workflow này KHÔNG tự chặn merge. Phải bật Branch protection cho `main`
-# và đặt "CI xanh" làm required status check — xem README của thư mục này.
+# và đặt "CI success" làm required status check — xem README của thư mục này.
 on:
   pull_request:
     branches: [main]
@@ -30,15 +30,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Cài ruff
+      - name: Install ruff
         run: pip install ruff==0.14.2
-      - name: ruff check (lỗi cú pháp, import thừa, thứ tự import…)
+      - name: ruff check
         run: ruff check --output-format=github .
-      - name: ruff format --check (định dạng thống nhất)
+      - name: ruff format --check
         run: ruff format --check --diff .
 
   typecheck:
-    name: Kiểm tra kiểu (mypy)
+    name: Type check (mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Cài phụ thuộc
+      - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install mypy==1.18.2
@@ -55,7 +55,7 @@ jobs:
         run: mypy app embedder scripts
 
   test:
-    name: Test (pytest + pgvector)
+    name: Tests (pytest + pgvector)
     runs-on: ubuntu-latest
     services:
       db:
@@ -85,9 +85,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Cài phụ thuộc
+      - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Bật extension vector trong DB test
+      - name: Enable pgvector extension
         run: |
           PGPASSWORD=bizcard psql -h localhost -U bizcard -d bizcard_test \
             -c "CREATE EXTENSION IF NOT EXISTS vector;"
@@ -106,7 +106,7 @@ jobs:
           exit "$code"
 
   secrets:
-    name: Quét secret rò rỉ
+    name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +120,7 @@ jobs:
             detect --source=. --config=.gitleaks.toml --redact --no-banner --verbose
 
   migrations:
-    name: Chỉ một head Alembic
+    name: Migrations (single Alembic head)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
           cache-dependency-path: requirements.txt
       # Ép quy ước số 5 trong Task.md: chỉ Q sinh revision. Hai người cùng sinh sẽ tạo
       # 2 head phải merge tay — kiểm ở đây thì phát hiện ngay lúc mở PR.
-      - name: Kiểm tra số head
+      - name: Check head count
         run: |
           shopt -s nullglob
           revisions=(alembic/versions/*.py)
@@ -160,13 +160,13 @@ jobs:
           fi
 
   ci-ok:
-    name: CI xanh
+    name: CI success
     # Đây là job duy nhất cần đặt làm required status check trong Branch protection.
     if: always()
     needs: [lint, typecheck, test, secrets, migrations]
     runs-on: ubuntu-latest
     steps:
-      - name: Tổng hợp kết quả
+      - name: Aggregate results
         run: |
           # Hai cái bẫy đã làm hỏng workflow này trước đây — cả hai đều khiến GitHub báo
           # "Invalid workflow file" và huỷ toàn bộ workflow TRƯỚC khi tạo job nào:

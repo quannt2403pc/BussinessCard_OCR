@@ -12,24 +12,24 @@ Muốn PR đỏ không merge được vào `main` thì phải bật Branch prote
    *(hai người, mỗi PR do người kia duyệt — khớp quy ước "PR nhỏ, merge trong ngày" ở Task.md)*
 3. Tích **Require status checks to pass before merging**
    → tích thêm **Require branches to be up to date before merging**
-   → ô tìm kiếm status check, chọn đúng **`CI xanh`**
+   → ô tìm kiếm status check, chọn đúng **`CI success`**
 4. Tích **Do not allow bypassing the above settings** nếu muốn áp cho cả admin
 
-> Chỉ cần chọn **`CI xanh`** làm required check. Job này gom kết quả của cả 5 job kia,
+> Chỉ cần chọn **`CI success`** làm required check. Job này gom kết quả của cả 5 job kia,
 > nên sau này thêm/bớt job không phải vào chỉnh lại cấu hình branch protection.
 
 Status check chỉ xuất hiện trong danh sách sau khi workflow đã chạy ít nhất một lần.
-Nếu chưa thấy `CI xanh`, mở một PR nháp cho nó chạy rồi quay lại bước 3.
+Nếu chưa thấy `CI success`, mở một PR nháp cho nó chạy rồi quay lại bước 3.
 
 ## Các job
 
 | Job | Kiểm gì | Hỏng thì làm gì |
 |-----|---------|-----------------|
 | **Lint & format (ruff)** | import thừa, biến chưa dùng, thứ tự import, định dạng | `ruff check --fix .` rồi `ruff format .` |
-| **Kiểm tra kiểu (mypy)** | lỗi kiểu rõ ràng trong `app/`, `embedder/`, `scripts/` | Sửa annotation. Cấu hình cố ý **không** strict — xem `pyproject.toml` |
-| **Test (pytest + pgvector)** | chạy `tests/` với PostgreSQL 16 + pgvector thật | Test phải mock CLIProxy bằng `respx` — CI không có OAuth |
-| **Quét secret rò rỉ** | gitleaks trên toàn bộ lịch sử | Xoá secret, đổi khoá, allowlist giá trị giữ chỗ trong `.gitleaks.toml` |
-| **Chỉ một head Alembic** | đảm bảo `alembic heads` chỉ ra 1 head | Ép quy ước số 5 ở `Task.md`: **chỉ Q sinh revision**. Hai head thì `alembic merge` hoặc sinh lại trên đúng nhánh cha |
+| **Type check (mypy)** | lỗi kiểu rõ ràng trong `app/`, `embedder/`, `scripts/` | Sửa annotation. Cấu hình cố ý **không** strict — xem `pyproject.toml` |
+| **Tests (pytest + pgvector)** | chạy `tests/` với PostgreSQL 16 + pgvector thật | Test phải mock CLIProxy bằng `respx` — CI không có OAuth |
+| **Secret scan (gitleaks)** | gitleaks trên toàn bộ lịch sử | Xoá secret, đổi khoá, allowlist giá trị giữ chỗ trong `.gitleaks.toml` |
+| **Migrations (single Alembic head)** | đảm bảo `alembic heads` chỉ ra 1 head | Ép quy ước số 5 ở `Task.md`: **chỉ Q sinh revision**. Hai head thì `alembic merge` hoặc sinh lại trên đúng nhánh cha |
 
 ## Chạy đúng các kiểm tra đó ở máy mình
 

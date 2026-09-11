@@ -78,7 +78,7 @@ feat/companies-enrich    chore/ci-gitleaks        refactor/kb-chunking
 ```
 
 PR nhỏ, **merge trong ngày**, rebase lên `main` trước khi merge, không để nhánh sống qua đêm.
-PR phải **xanh CI** mới được merge (`main` bật branch protection, required check = `CI xanh`).
+PR phải **xanh CI** mới được merge (`main` bật branch protection, required check = `CI success`).
 
 **Commit.** Theo [Conventional Commits](https://www.conventionalcommits.org/):
 
