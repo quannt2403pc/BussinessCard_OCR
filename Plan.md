@@ -116,14 +116,14 @@ Volumes: `pgdata` (DB), `uploads` (ảnh danh thiếp), `cliproxy_auths` (token 
 
 | Việc | Endpoint | Ghi chú |
 |------|----------|---------|
-| Lấy URL đăng nhập OAuth | `GET http://cliproxy:8317/v0/management/{provider}-auth-url` | Route được sinh động theo provider; provider built-in gồm `anthropic`, `codex`, `antigravity`, `kimi`, `xai`; Gemini nạp qua plugin auth (`ServePluginAuthURL`) |
+| Lấy URL đăng nhập OAuth | `GET http://cliproxy:8317/v0/management/{provider}-auth-url?is_webui=1` | Trả `{"status":"ok","url":…,"state":…}`. Route sinh động theo provider; built-in gồm `anthropic`, `codex`, `antigravity`, `kimi`, `xai`. **Luôn gửi `is_webui=1`** — nhánh dành cho luồng bấm nút trên UI (task 2.2) |
 | Callback OAuth | `GET/POST /v0/management/oauth-callback` | CLIProxyAPI tự xử lý, lưu token vào thư mục `auths/` |
 | **Badge "Đã kết nối / Chưa kết nối"** | `GET /v0/management/auth-files` | **Nguồn sự thật duy nhất** cho trạng thái. Mảng rỗng `{"files":[]}` = chưa kết nối |
-| Poll trong lúc chờ người dùng đồng ý | `GET /v0/management/get-auth-status?state=…` | **CHỈ dùng cho việc này.** ⚠️ I-02: không truyền `state` thì trả `{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ → dùng cho badge là lỗi âm thầm, badge sẽ luôn xanh |
+| Poll trong lúc chờ người dùng đồng ý | `GET /v0/management/get-auth-status?state=…` | **CHỈ dùng cho việc này.** ⚠️ I-02: không truyền `state` thì trả `{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ → dùng cho badge là lỗi âm thầm, badge sẽ luôn xanh. ⚠️ Báo lỗi bằng **HTTP 200** kèm `{"status":"error"}` — phải đọc body, không nhìn mã HTTP |
 | Huỷ phiên OAuth | `DELETE /v0/management/oauth-session` | |
-| Ngắt kết nối (xoá credential) | `DELETE /v0/management/auth-files` | |
+| Ngắt kết nối (xoá credential) | `DELETE /v0/management/auth-files?name=<tên file>` | **Bắt buộc `name`** (lấy từ `auth-files[].name`); thiếu là `400 invalid name`. Không có biến thể "xoá tất cả" → ngắt kết nối = liệt kê rồi xoá từng file (đo thật, task 2.2) |
 | Danh mục model của channel | `GET /v0/management/model-definitions/antigravity` | Chốt tên model thật cho `LLM_MODEL`; danh mục tự cập nhật từ xa nên **không hardcode theo tài liệu** |
-| Gọi model (Gemini native) | `POST /v1beta/models/<LLM_MODEL>:generateContent` | dùng cho vision + text |
+| Gọi model (Gemini native) | `POST /v1beta/models/<LLM_MODEL>:generateContent` | dùng cho vision + text. **Không cần management key** (`api-keys: []` = không kiểm tra client). Chưa kết nối OAuth thì trả `400 unknown provider for model …` — **trùng câu chữ với lỗi sai tên model**, phân biệt bằng cách tra danh mục channel (task 2.3) |
 | Gọi model (OpenAI-compatible) | `POST /v1/chat/completions` | phương án thay thế |
 | Embedding | **Không tồn tại** — đã kiểm chứng trong mã nguồn | Route `/v1beta/models/*action` chỉ nhận `generateContent`, `streamGenerateContent`, `countTokens`; cũng không có `/v1/embeddings`. Embedding do service `embedder` cục bộ đảm nhiệm — xem mục 2.6 |
 
