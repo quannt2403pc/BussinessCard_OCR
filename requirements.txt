@@ -11,6 +11,8 @@ httpx
 jinja2
 python-multipart
 pillow
+# E.164 cho SDT da quoc gia (task 3.6, chu so huu: Q)
+phonenumbers
 rapidfuzz
 
 # Test
