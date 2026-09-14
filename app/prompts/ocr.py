@@ -1,6 +1,103 @@
 """Prompt trích xuất danh thiếp: JSON schema cố định, confidence từng trường, cấm suy đoán.
 
 Chủ sở hữu: Q | Task: 3.3 | xem Task.md
+
+Prompt được thiết kế quanh **rủi ro R3 — OCR sai với danh thiếp Hàn/Nhật/Trung hoặc ảnh mờ**
+(Plan.md mục 6). Ba lớp phòng thủ:
+
+1. **Cấm suy đoán**: chỗ nào không đọc được thì `null`, tuyệt đối không điền giá trị "hợp lý"
+   suy ra từ tên công ty hay website. Trường trống người dùng điền được trong 10 giây; trường
+   sai trông như thật thì không ai phát hiện (chính là kịch bản hỏng của tiêu chí A3).
+2. **`confidence` từng trường**: model tự chấm điểm nó tin vào chữ mình đọc đến đâu. Màn hình
+   review (task 5.1) tô vàng trường điểm thấp để mắt người rơi vào đúng chỗ cần kiểm.
+3. **`language_detected`**: quyết định mã vùng khi chuẩn hoá số điện thoại (task 3.6) — `0912…`
+   là số Việt hay số Nhật phụ thuộc hoàn toàn vào trường này.
+
+Khoá JSON trùng tên cột trong bảng `business_cards` (Plan.md mục 3) để `services/ocr.py` không
+phải dựng thêm một lớp ánh xạ tên. Đổi khoá ở đây thì phải đổi cả `app/schemas/card.py`.
+
+⚠️ Prompt có ghi "chỉ trả JSON, không bọc trong khối ```". **Đừng tin là đủ**: đo thật ở task
+2.3 cho thấy `gemini-3-flash` vẫn bọc (I-15). `services/ocr.py` bắt buộc phải gỡ hàng rào code
+trước khi `json.loads()`.
 """
 
-# TODO(Q, task 3.3): chưa triển khai.
+#: Bảy trường bắt buộc của tiêu chí A3 (Plan.md mục 8) — "ngày upload" do hệ thống tự ghi nên
+#: không nằm trong prompt. Dùng để đo độ phủ ở task 7.8.
+REQUIRED_FIELDS: tuple[str, ...] = (
+    "full_name",
+    "job_title",
+    "company_name_raw",
+    "email",
+    "phone",
+    "address",
+    "website",
+)
+
+#: Toàn bộ trường nội dung model phải trả về, kể cả trường không bắt buộc.
+CONTENT_FIELDS: tuple[str, ...] = (*REQUIRED_FIELDS, "phone_alt")
+
+JSON_SCHEMA_DESCRIPTION = """{
+  "full_name":         string | null,  // ho ten nguoi tren danh thiep, giu nguyen chu viet goc
+  "job_title":         string | null,  // chuc vu, vi du "Giam doc kinh doanh", "Sales Manager"
+  "company_name_raw":  string | null,  // ten cong ty IN TREN THE, giu nguyen, khong tu rut gon
+  "email":             string | null,
+  "phone":             string | null,  // so lien he chinh, giu nguyen dinh dang in tren the
+  "phone_alt":         string | null,  // so thu hai neu the in nhieu so, khong co thi null
+  "address":           string | null,  // dia chi day du tren mot dong
+  "website":           string | null,
+  "language_detected": string,         // ma ISO 639-1 cua ngon ngu chinh: en | vi | ko | ja | zh
+  "is_business_card":  boolean,        // false neu anh khong phai danh thiep
+  "confidence": {                      // diem tin cay 0.0-1.0 cho tung truong o tren
+    "full_name": number, "job_title": number, "company_name_raw": number,
+    "email": number, "phone": number, "phone_alt": number,
+    "address": number, "website": number
+  }
+}"""
+
+SYSTEM_PROMPT = """Bạn là hệ thống trích xuất dữ liệu từ ảnh danh thiếp. Nhiệm vụ duy nhất:
+đọc chữ có thật trên ảnh và xếp vào đúng trường. Bạn KHÔNG phải trợ lý trò chuyện.
+
+QUY TẮC TỐI QUAN TRỌNG — đọc kỹ trước khi trả lời:
+
+1. CHỈ ghi những gì NHÌN THẤY trên ảnh. Không suy đoán, không bổ sung từ kiến thức của bạn.
+   Không đọc được hoặc thẻ không in trường đó → `null`. Để trống KHÔNG bị coi là thất bại;
+   điền một giá trị không có trên ảnh MỚI là thất bại.
+
+2. Không tự suy ra trường này từ trường khác. Ví dụ sai: thấy website "abc.com" rồi đoán email
+   là "info@abc.com"; thấy tên công ty rồi đoán địa chỉ trụ sở. Chỉ chép cái đã in.
+
+3. GIỮ NGUYÊN chữ viết gốc. Danh thiếp Hàn/Nhật/Trung thì chép đúng chữ Hàn/Nhật/Trung, không
+   dịch, không phiên âm sang chữ Latin. Danh thiếp Việt giữ nguyên dấu.
+   Thẻ in song ngữ (một mặt chữ bản địa, một mặt tiếng Anh): ưu tiên bản chữ bản địa cho
+   `full_name` và `company_name_raw`.
+
+4. Số điện thoại: chép nguyên định dạng in trên thẻ, kể cả dấu `+`, ngoặc và dấu cách; KHÔNG
+   tự đổi sang định dạng khác (hệ thống có bước chuẩn hoá riêng). Bỏ nhãn "Tel:", "Mobile:".
+   Thẻ in nhiều số: số di động hoặc số đứng đầu vào `phone`, số còn lại vào `phone_alt`.
+
+5. `confidence` phải phản ánh thật mức độ chắc chắn khi ĐỌC CHỮ: 1.0 = chữ rõ, chắc chắn đúng
+   từng ký tự; 0.5 = đoán được nhưng có ký tự mờ/nhoè; 0.0 = trường để `null`. Đừng chấm 1.0
+   cho mọi trường — điểm đó là thứ người dùng dựa vào để biết chỗ nào cần kiểm lại.
+
+6. `is_business_card` = false nếu ảnh không phải danh thiếp (ảnh phong cảnh, tài liệu, màn hình
+   chụp…). Khi đó để mọi trường nội dung là `null`, đừng cố vét chữ trong ảnh.
+
+7. Trả về ĐÚNG một object JSON theo schema dưới đây. Không thêm lời dẫn, không giải thích,
+   không bọc trong khối ```."""
+
+USER_PROMPT = f"""Trích xuất thông tin từ ảnh danh thiếp này thành JSON theo đúng schema sau:
+
+{JSON_SCHEMA_DESCRIPTION}
+
+Chỉ trả về JSON."""
+
+
+def build_prompt(hint: str | None = None) -> str:
+    """Prompt gửi kèm ảnh. `hint` để task 9.3 thêm gợi ý khi tinh chỉnh theo lỗi thực tế.
+
+    Tách thành hàm thay vì dùng thẳng hằng số vì vòng lặp đo — sửa prompt — đo lại ở task 7.8/9.3
+    cần chỗ cắm thêm ngữ cảnh mà không phải sửa chữ ký của `services/ocr.py`.
+    """
+    if not hint:
+        return USER_PROMPT
+    return f"{USER_PROMPT}\n\nGợi ý thêm về ảnh này: {hint}"
