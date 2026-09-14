@@ -51,5 +51,8 @@ exclude = "alembic/versions"
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# CI gọi thẳng `pytest` (không phải `python -m pytest`) nên thư mục gốc không tự vào sys.path;
+# thiếu dòng này thì `from app...` trong tests/ báo ModuleNotFoundError.
+pythonpath = ["."]
 asyncio_mode = "auto"
 addopts = "-q --strict-markers"
