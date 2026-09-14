@@ -73,7 +73,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 |------|-----------|-----------------|---------|
 | D1 | P0 — Khởi động | ✅ Xong | 1.1–1.10 đã merge vào `main`. Kiểm chứng lại 2026-09-10: `up -d` xanh, `/health` → `{"status":"ok"}`, `alembic current` = `0001 (head)` đủ 8 bảng, ruff/format/mypy xanh. Riêng **1.11 còn 🔄 40%** (chưa có ảnh nào) — ưu tiên S, theo kế hoạch hoàn tất ở **3.9** |
 | D2 | P1 — Nền tảng AI | 🔄 Đang làm — 8/9 task ✅ | **Mục tiêu ngày đã đạt**: bấm 1 nút trên UI → OAuth xong → badge xanh → gọi Gemini Flash trả về kết quả thật (text 7.9s, **vision 7/7 trường trong 3.1s**). Chỉ còn **2.7** — số đo đã có đủ ở I-12, chờ **T** chốt `docs/adr-websearch.md` (file của T). I-01→I-13 đã gỡ hết trừ **I-14** (không bật được branch protection, chờ quyết định) và **I-15** (mới: model bọc JSON trong khối ```json, chạm 3.4 và 4.7) |
-| D3 | P2 — F1 OCR | ⬜ Chưa làm | |
+| D3 | P2 — F1 OCR | 🔄 Đang làm | T: **3.7 🔄 100%** và **3.10 🔄 100%** chờ merge (48 test xanh; embedder đạt DoD offline), kèm phần `test_normalize_company.py` của **4.9**. Còn **3.8**, **3.9** và các task 3.1–3.6 của Q |
 | D4 | P2 — F1 OCR | ⬜ Chưa làm | |
 | D5 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
 | D6 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 18 / 103 task (D1–D11) hoàn thành (17%) · 2 task đang dở (1.11, 2.7) · Cập nhật lần cuối: 2026-09-11
+**Tổng quan:** 18 / 103 task (D1–D11) hoàn thành (17%) · 5 task đang dở (1.11, 2.7, 3.7, 3.10, 4.9) · Cập nhật lần cuối: 2026-09-14
 
 > Kiểm lại cây Git ngày 2026-09-11: `origin/main` **đã chứa** cả PR #8 (D2 của Q) lẫn PR #6 (D2 của T) và bản sửa CI `e055ebb` → các nhánh `feature-day1-issues`, `feature-day2-cliproxy`, `feature-quannt` không còn commit riêng nào.
 > **OAuth đã chạy tay đầu–cuối bằng tài khoản Google thật (2026-09-11)** → 2.3 và 2.5 chốt ✅, I-03 và I-09 đóng. Số đo ở mục 8 `docs/oauth-setup.md`.
@@ -175,10 +175,10 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 | 3.4 | `services/ocr.py`: gọi Gemini Flash Vision, parse & validate bằng Pydantic, xử lý khi LLM trả JSON hỏng | Q | M | 2h | ⬜ Chưa làm |
 | 3.5 | Lưu `business_cards` (`ocr_raw_json`, `status = needs_review`) + log thời gian xử lý | Q | M | 1h | ⬜ Chưa làm |
 | 3.6 | `services/normalize.py`: chuẩn hoá SĐT (E.164), email lowercase, bỏ khoảng trắng thừa, tách nhiều SĐT — hậu xử lý ngay sau khi quét, gọi trong `ocr.py` | Q | M | 1.5h | ⬜ Chưa làm |
-| 3.7 | `services/normalize_company.py`: `normalize_company_name()` — bỏ hậu tố pháp lý đa ngôn ngữ (Co., Ltd, JSC, Cty, 株式会社, 주식회사…), lowercase, bỏ dấu (**file riêng** để giữ quy ước 1 chủ sở hữu/file) | T | M | 2h | ⬜ Chưa làm |
+| 3.7 | `services/normalize_company.py`: `normalize_company_name()` — bỏ hậu tố pháp lý đa ngôn ngữ (Co., Ltd, JSC, Cty, 株式会社, 주식회사…), lowercase, bỏ dấu (**file riêng** để giữ quy ước 1 chủ sở hữu/file) | T | M | 2h | 🔄 Đang làm — 100%, chờ merge vào `main`. Viết lại 2026-09-14: bỏ tham số ngôn ngữ (cùng công ty ra cùng key), bỏ hình thức pháp lý ở cả đầu lẫn cuối và khớp nguyên từ, chỉ bỏ dấu chữ Latin (không làm hỏng `ガス`, chữ Hàn giữ dạng ghép), không bao giờ trả chuỗi rỗng, idempotent. Bộ 25 ca thực tế **25/25**; `tests/test_normalize_company.py` **48 test xanh** bằng đúng lệnh CI (thêm `pythonpath = ["."]` vào `pyproject.toml`, thiếu thì CI không import được `app`); ruff/format/mypy xanh. Giới hạn đã biết: `Phú Cơ` → `phu` (chữ `cơ` sau khi bỏ dấu trùng hậu tố `co`), `&` và `and` chưa quy về một |
 | 3.8 | `services/company_matching.py`: `upsert_company()` + so khớp mờ (rapidfuzz) chống trùng, dùng `normalize_company.normalize_company_name()` — chữ ký đã chốt ở họp D2 | T | M | 2.5h | ⬜ Chưa làm |
 | 3.9 | Hoàn tất bộ 30 ảnh mẫu (Anh/Việt/Hàn/Nhật/Trung) + `samples/expected.json` để đo độ chính xác | T | S | 1.5h | ⬜ Chưa làm |
-| 3.10 | Dựng `embedder/`: Dockerfile + FastAPI `POST /embed` & `GET /health` theo hợp đồng ở Plan.md 2.6, model từ `docs/adr-embedding.md` (task 2.6) **tải lúc build, không tải lúc chạy**. DoD: `docker build` xong, **rút mạng** vẫn `curl localhost:8001/health` ra đúng `model` + `dim` | T | M | 1.5h | ⬜ Chưa làm |
+| 3.10 | Dựng `embedder/`: Dockerfile + FastAPI `POST /embed` & `GET /health` theo hợp đồng ở Plan.md 2.6, model từ `docs/adr-embedding.md` (task 2.6) **tải lúc build, không tải lúc chạy**. DoD: `docker build` xong, **rút mạng** vẫn `curl localhost:8001/health` ra đúng `model` + `dim` | T | M | 1.5h | 🔄 Đang làm — 100%, chờ merge vào `main`. Build image OK: torch `2.14.0+cpu`, không có gói `nvidia-*`, model 471MB nằm sẵn trong image. **DoD đạt**: container `--network none` sẵn sàng sau ~8s, `/health` đúng `model` + `dim=384`, `/embed` chạy được khi không có mạng. Kiểm chức năng 16/16 qua compose: vector chuẩn hoá L2, tiền tố theo `kind` không bị lặp, 422 khi đầu vào sai, batch 64 đoạn 7.8s, `/health` không bị chặn trong lúc nhúng (455ms). **Embedder tự thêm tiền tố e5 — 6.4 của Q không thêm nữa** (ADR mục 6). Image thực tế 2.79GB (torch 769MB + scipy/sympy/sklearn kéo theo). Sau khi merge, Q xoá `profiles: ["embedder"]` trong compose |
 
 **Tiêu chí hoàn thành:** `curl` upload 1 ảnh → response trả về đủ 7 trường bắt buộc; bản ghi có trong DB; upload lại cùng ảnh không tạo bản ghi trùng; service `embedder` trả vector đúng số chiều đã chốt.
 
@@ -198,7 +198,7 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 | 4.6 | `repositories/company.py`: repository cho `companies` + `company_profiles` | T | M | 2h | ⬜ Chưa làm |
 | 4.7 | `services/enrichment.py`: `enrich_company(name, hints)` — hints lấy từ danh thiếp (website, địa chỉ, quốc gia); gọi LLM + web search theo ADR | T | M | 3h | ⬜ Chưa làm |
 | 4.8 | Parse & validate kết quả LLM: loại bỏ trường không có nguồn, gắn nhãn `unverified` | T | M | 1.5h | ⬜ Chưa làm |
-| 4.9 | `tests/test_normalize_company.py` + `tests/test_company_matching.py` | T | S | 1h | ⬜ Chưa làm |
+| 4.9 | `tests/test_normalize_company.py` + `tests/test_company_matching.py` | T | S | 1h | 🔄 Đang làm — 50%: `tests/test_normalize_company.py` xong sớm cùng 3.7 (48 test xanh, chạy thật trong CI nhờ `pythonpath` ở `pyproject.toml`); `tests/test_company_matching.py` làm cùng 3.8 |
 | 4.10 | `tests/test_normalize.py`: chuẩn hoá SĐT/email đa định dạng & đa quốc gia (hậu xử lý F1) | Q | S | 0.5h | ⬜ Chưa làm |
 
 **Tiêu chí hoàn thành:** Danh sách danh thiếp hiển thị & lọc được trên UI; gọi `enrich_company()` từ script trả về JSON hồ sơ có nguồn.
