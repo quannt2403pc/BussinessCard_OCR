@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.models.card import BusinessCard
-from app.prompts.enrichment import SYSTEM_PROMPT, build_user_prompt
+from app.prompts.enrichment import build_research_prompt, build_structure_prompt
 from app.schemas.company import (
     SOURCED_FIELDS,
     CompanyProfileOut,
@@ -34,7 +34,8 @@ from app.services.llm import (
 
 logger = logging.getLogger(__name__)
 
-ENRICH_TEMPERATURE = 0.2
+RESEARCH_TEMPERATURE = 0.2
+STRUCTURE_TEMPERATURE = 0.0
 REDIRECT_TIMEOUT = httpx.Timeout(5.0)
 REDIRECT_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
 PROFILE_FIELDS: tuple[str, ...] = (*SOURCED_FIELDS, "description")
@@ -74,17 +75,28 @@ async def enrich_company(
         raise ValueError("Tên công ty rỗng.")
 
     model_name = model or settings.llm_model
-    prompt = build_user_prompt(company_name, dict(hints or {}))
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "generationConfig": {"temperature": ENRICH_TEMPERATURE},
-        "tools": [TOOL_GOOGLE_SEARCH],
-    }
-    data = await generate_content(payload, model=model_name, client=client)
+    research_data = await generate_content(
+        _payload(
+            build_research_prompt(company_name, hints),
+            temperature=RESEARCH_TEMPERATURE,
+            tools=[TOOL_GOOGLE_SEARCH],
+        ),
+        model=model_name,
+        client=client,
+    )
+    research = response_text(research_data)
+    grounding = await resolve_redirects(extract_grounding(research_data), http=http)
 
-    raw = parse_profile_json(response_text(data))
-    grounding = await resolve_redirects(extract_grounding(data), http=http)
+    cited = [(source.title, source.resolved_url) for source in grounding if source.resolved_url]
+    raw: dict[str, Any] = {}
+    if cited:
+        structure_data = await generate_content(
+            _payload(build_structure_prompt(research, cited), temperature=STRUCTURE_TEMPERATURE),
+            model=model_name,
+            client=client,
+        )
+        raw = parse_profile_json(response_text(structure_data))
+
     profile = validate_profile(raw, grounding, llm_model=model_name, generated_at=datetime.now(UTC))
     logger.info(
         "Enrich %r: %d grounding sources, %d sourced fields, unverified %s",
@@ -319,6 +331,18 @@ def _host(value: str | None) -> str | None:
 
 def _is_grounded(host: str, grounded_hosts: frozenset[str]) -> bool:
     return any(host == grounded or host.endswith(f".{grounded}") for grounded in grounded_hosts)
+
+
+def _payload(
+    text: str, *, temperature: float, tools: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": [{"text": text}]}],
+        "generationConfig": {"temperature": temperature},
+    }
+    if tools:
+        payload["tools"] = tools
+    return payload
 
 
 def _has_value(value: object) -> bool:

@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from app.models.card import BusinessCard
+from app.prompts.enrichment import build_research_prompt, build_structure_prompt
 from app.schemas.company import ProfileStatus
 from app.services.cliproxy_client import CliProxyClient
 from app.services.enrichment import (
@@ -25,6 +26,7 @@ from app.services.llm import LLMBlockedError, LLMError
 NOW = datetime(2026, 9, 14, tzinfo=UTC)
 REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc123"
 TAX_PAGE = "https://masothue.com/0301234567-cong-ty-abc"
+GENERATE_URL = "http://cliproxy.test/v1beta/models/gemini-3-flash:generateContent"
 GROUNDING = [
     GroundingSource(uri=REDIRECT, title="masothue.com", resolved_url=TAX_PAGE),
     GroundingSource(
@@ -271,6 +273,23 @@ def test_build_hints() -> None:
     assert build_hints([]) == {}
 
 
+def test_research_prompt_has_no_json_format() -> None:
+    prompt = build_research_prompt("ABC", {"website": "abc.vn", "phone": None})
+    assert "Tên công ty in trên danh thiếp: ABC" in prompt
+    assert "- Website: abc.vn" in prompt
+    assert "Điện thoại" not in prompt
+    assert '"sources"' not in prompt
+
+
+def test_structure_prompt_lists_sources() -> None:
+    prompt = build_structure_prompt(
+        "MST {0301234567}", [("masothue.com", TAX_PAGE), (None, "https://abc.vn")]
+    )
+    assert "MST {0301234567}" in prompt
+    assert f"[1] masothue.com — {TAX_PAGE}" in prompt
+    assert "[2] https://abc.vn — https://abc.vn" in prompt
+
+
 @respx.mock
 async def test_enrich_company_end_to_end() -> None:
     answer = {
@@ -279,22 +298,21 @@ async def test_enrich_company_end_to_end() -> None:
         "founded_year": 2005,
         "address": "1 Lê Lợi, Q1",
         "sources": {
-            "legal_name": [{"url": REDIRECT, "title": "MST"}],
+            "legal_name": [{"url": TAX_PAGE, "title": "MST"}],
             "tax_code": [{"url": TAX_PAGE}],
             "address": [{"url": "https://abc.vn/lien-he"}],
         },
     }
-    route = respx.post("http://cliproxy.test/v1beta/models/gemini-3-flash:generateContent").mock(
-        return_value=httpx.Response(
-            200,
-            json=gemini_response(
-                f"```json\n{json.dumps(answer, ensure_ascii=False)}\n```",
-                [
-                    {"web": {"uri": REDIRECT, "title": "masothue.com"}},
-                    {"web": {"uri": "https://abc.vn/lien-he", "title": "abc.vn"}},
-                ],
-            ),
-        )
+    research = gemini_response(
+        "Tên pháp lý: Công ty TNHH ABC, MST 0301234567 (masothue.com).",
+        [
+            {"web": {"uri": REDIRECT, "title": "masothue.com"}},
+            {"web": {"uri": "https://abc.vn/lien-he", "title": "abc.vn"}},
+        ],
+    )
+    structure = gemini_response(f"```json\n{json.dumps(answer, ensure_ascii=False)}\n```")
+    route = respx.post(GENERATE_URL).mock(
+        side_effect=[httpx.Response(200, json=research), httpx.Response(200, json=structure)]
     )
     respx.get(REDIRECT).mock(return_value=httpx.Response(302, headers={"location": TAX_PAGE}))
 
@@ -306,17 +324,37 @@ async def test_enrich_company_end_to_end() -> None:
             client=client,
         )
 
-    payload = json.loads(route.calls.last.request.content)
-    assert payload["tools"] == [{"googleSearch": {}}]
-    assert "systemInstruction" in payload
-    prompt = payload["contents"][0]["parts"][0]["text"]
-    assert "Công ty TNHH ABC" in prompt and "abc.vn" in prompt
+    assert route.call_count == 2
+    research_payload = json.loads(route.calls[0].request.content)
+    assert research_payload["tools"] == [{"googleSearch": {}}]
+    assert "systemInstruction" not in research_payload
+    research_prompt = research_payload["contents"][0]["parts"][0]["text"]
+    assert "Công ty TNHH ABC" in research_prompt and "abc.vn" in research_prompt
+
+    structure_payload = json.loads(route.calls[1].request.content)
+    assert "tools" not in structure_payload
+    structure_prompt = structure_payload["contents"][0]["parts"][0]["text"]
+    assert "MST 0301234567" in structure_prompt
+    assert TAX_PAGE in structure_prompt and REDIRECT not in structure_prompt
 
     assert profile.legal_name == "Công ty TNHH ABC"
     assert profile.sources["legal_name"][0].url == TAX_PAGE
     assert profile.founded_year is None
     assert profile.unverified_fields == ["founded_year"]
     assert profile.sourced_field_count() == 3
+
+
+@respx.mock
+async def test_enrich_company_without_grounding_skips_structuring() -> None:
+    route = respx.post(GENERATE_URL).mock(
+        return_value=httpx.Response(200, json=gemini_response("MST 0301234567."))
+    )
+    async with CliProxyClient(base_url="http://cliproxy.test") as client:
+        profile = await enrich_company("ABC", model="gemini-3-flash", client=client)
+
+    assert route.call_count == 1
+    assert profile.sourced_field_count() == 0
+    assert profile.unverified_fields == []
 
 
 async def test_enrich_company_rejects_blank_name() -> None:
