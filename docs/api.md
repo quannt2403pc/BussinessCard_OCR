@@ -264,6 +264,6 @@ Không phải HTTP API nhưng phải chốt cùng nhau (họp đầu D2):
 
 | Bên gọi | Bên cung cấp | Chữ ký dự kiến |
 |---------|--------------|----------------|
-| `cards.confirm` (Q) | `company_matching.upsert_company()` (T) | `async def upsert_company(db, raw_name: str) -> uuid.UUID` |
+| `cards.confirm` (Q) | `company_matching.upsert_company()` (T) | `async def upsert_company(db, raw_name: str, *, email: str \| None = None, website: str \| None = None) -> uuid.UUID` — chỉ `flush`, người gọi commit (chốt ở 3.8) |
 | `enrichment` (T) | `kb.ingest_company_profile()` (Q) | `async def ingest_company_profile(db, profile_id: uuid.UUID) -> int` |
 | `services/embeddings.py` (Q) | service `embedder` (T) | `POST /embed {"texts": [...], "kind": "passage"\|"query"}` → `{"vectors": [[...]], "dim": 384, "model": "..."}` |
