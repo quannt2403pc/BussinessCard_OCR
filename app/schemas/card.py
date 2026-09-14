@@ -158,6 +158,23 @@ class CardExtraction(BaseModel):
         return self.model_dump(exclude={"is_business_card"})
 
 
+#: Cột người dùng được sửa tay ở màn hình review (task 4.2/5.1). `status` KHÔNG nằm ở đây —
+#: vòng đời bản ghi đổi qua `POST /{id}/confirm` (task 4.3), không qua PATCH. Để lẫn vào thì
+#: một lần PATCH lỡ tay có thể đẩy thẳng bản ghi sang `confirmed` mà bỏ qua bước gắn công ty.
+EDITABLE_FIELDS: tuple[str, ...] = (
+    "full_name",
+    "job_title",
+    "company_name_raw",
+    "email",
+    "phone",
+    "phone_alt",
+    "address",
+    "website",
+    "language_detected",
+    "notes",
+)
+
+
 class CardOut(BaseModel):
     """Một danh thiếp trả về cho UI/API. Không kèm `ocr_raw_json` cho nhẹ (task 4.2 mới cần)."""
 
@@ -179,6 +196,72 @@ class CardOut(BaseModel):
     notes: str | None = None
     image_path: str
     uploaded_at: datetime
+
+
+class CardDetailOut(CardOut):
+    """Chi tiết một danh thiếp (task 4.2) — thêm bản JSON gốc và mốc thời gian.
+
+    `ocr_raw_json` cố ý chỉ có ở đây chứ không có trong danh sách: nó là nguyên văn model trả
+    về, kèm cả trường đã bị chuẩn hoá ghi đè, nên là thứ duy nhất đối chiếu được khi nghi OCR
+    sai. Nhét vào danh sách 50 bản ghi thì payload phình lên vô ích.
+    """
+
+    image_hash: str
+    ocr_raw_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CardListOut(BaseModel):
+    """Một trang danh sách danh thiếp (task 4.1)."""
+
+    items: list[CardOut]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class CardUpdateIn(BaseModel):
+    """Body của `PATCH /api/cards/{id}` (task 4.2) — sửa tay sau khi review.
+
+    Mọi trường đều tuỳ chọn và **phân biệt "không gửi" với "gửi null"**: không gửi thì giữ
+    nguyên, gửi `null` là chủ ý xoá trắng trường đó. Nếu gộp hai ca này làm một thì người dùng
+    không bao giờ xoá được một giá trị model đọc nhầm — mà đó chính là việc hay phải làm nhất ở
+    màn hình review.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    full_name: str | None = None
+    job_title: str | None = None
+    company_name_raw: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    phone_alt: str | None = None
+    address: str | None = None
+    website: str | None = None
+    language_detected: str | None = None
+    notes: str | None = None
+
+    def changes(self) -> dict[str, Any]:
+        """Đúng những trường client gửi lên (kể cả khi giá trị là `null`)."""
+        return self.model_dump(exclude_unset=True)
+
+
+class CardConfirmOut(BaseModel):
+    """Kết quả `POST /api/cards/{id}/confirm` (task 4.3).
+
+    `company_matched=false` **không phải lỗi**: danh thiếp không đọc được tên công ty vẫn được
+    xác nhận bình thường, chỉ là không gắn được vào bảng `companies`. `detail` nói rõ vì sao để
+    UI hiện đúng lý do thay vì im lặng.
+    """
+
+    id: uuid.UUID
+    status: str
+    company_id: uuid.UUID | None = None
+    company_matched: bool = False
+    detail: str | None = None
 
 
 class CardUploadOut(BaseModel):

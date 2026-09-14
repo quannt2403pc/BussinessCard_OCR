@@ -74,7 +74,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D1 | P0 — Khởi động | ✅ Xong | 1.1–1.10 đã merge vào `main`. Kiểm chứng lại 2026-09-10: `up -d` xanh, `/health` → `{"status":"ok"}`, `alembic current` = `0001 (head)` đủ 8 bảng, ruff/format/mypy xanh. Riêng **1.11 còn 🔄 40%** (chưa có ảnh nào) — ưu tiên S, theo kế hoạch hoàn tất ở **3.9** |
 | D2 | P1 — Nền tảng AI | 🔄 Đang làm — 8/9 task ✅ | **Mục tiêu ngày đã đạt**: bấm 1 nút trên UI → OAuth xong → badge xanh → gọi Gemini Flash trả về kết quả thật (text 7.9s, **vision 7/7 trường trong 3.1s**). Chỉ còn **2.7** — số đo đã có đủ ở I-12, chờ **T** chốt `docs/adr-websearch.md` (file của T). I-01→I-13 đã gỡ hết trừ **I-14** (không bật được branch protection, chờ quyết định) và **I-15** (mới: model bọc JSON trong khối ```json, chạm 3.4 và 4.7) |
 | D3 | P2 — F1 OCR | 🔄 Đang làm — 6/10 task ✅ | **Toàn bộ phần của Q xong** (3.1–3.6), kiểm chứng trong Docker bằng ảnh thật: upload → 7/7 trường đúng cho cả thẻ Việt (4.2s) lẫn thẻ Nhật (3.0s), upload lại cùng ảnh không sinh bản ghi trùng. Còn 3.7–3.10 của **T**. ⚠️ `requirements.txt` có thêm `phonenumbers` (task 3.6) → **T nhớ `docker compose build api`** sau khi pull |
-| D4 | P2 — F1 OCR | ⬜ Chưa làm | |
+| D4 | P2 — F1 OCR | 🔄 Đang làm — 6/10 task ✅ | **Toàn bộ phần của Q xong** (4.1–4.5, 4.10), kiểm chứng trên Chrome thật với container đang chạy: `/cards` lọc/tìm/phân trang đúng, bấm *Xác nhận* chạy trọn luồng, `/cards/upload` upload thật được. Còn 4.6–4.9 của **T**. ⚠️ Viết test 4.10 lòi ra một lỗi im lặng trong `normalize.py` (2 số trên 2 dòng dính làm một, mất số thứ hai) — **đã sửa**. ⚠️ `confirm` (4.3) hiện chưa gắn được công ty vì `upsert_company()` của T (task 3.8) chưa có; đã xử lý mềm, không chặn xác nhận |
 | D5 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
 | D6 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
 | D7 | P4 — F3 RAG | ⬜ Chưa làm | |
@@ -84,7 +84,16 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 24 / 103 task (D1–D11) hoàn thành (23%) · 2 task đang dở (1.11, 2.7) · Cập nhật lần cuối: 2026-09-13
+**Tổng quan:** 31 / 103 task (D1–D11) hoàn thành (30%) · 2 task đang dở (1.11, 2.7) · Cập nhật lần cuối: 2026-09-14
+
+> ⚠️ **Hai lỗi sổ sách có sẵn, phát hiện khi chốt D4 — cần chủ dự án quyết, Q không tự sửa:**
+> (a) Dòng tổng quan trước ghi **24** trong khi đếm thật các dòng task đánh ✅ là **25** (lệch 1
+> từ trước D4; con số 31 ở trên là đếm lại toàn bảng, không phải 24 + 6).
+> (b) Bảng task thật sự có **104 dòng**, không phải 103 — đếm theo ngày: D1 11, D2 9, D3 10,
+> D4 10, D5 7, D6 8, D7 10, D8 11, D9 10, D10 9, D11 9. D5 không có task `5.7` (nhảy từ 5.6
+> sang 5.8) nên nhìn qua rất dễ tưởng thiếu một dòng chứ không phải thừa.
+> Chốt lại mẫu số thì phải sửa cả `CLAUDE.md` ("103 task") và `AGENTS.md` cho khớp — nằm ngoài
+> phạm vi D4 nên để nguyên ở đây.
 
 > Kiểm lại cây Git ngày 2026-09-11: `origin/main` **đã chứa** cả PR #8 (D2 của Q) lẫn PR #6 (D2 của T) và bản sửa CI `e055ebb` → các nhánh `feature-day1-issues`, `feature-day2-cliproxy`, `feature-quannt` không còn commit riêng nào.
 > **OAuth đã chạy tay đầu–cuối bằng tài khoản Google thật (2026-09-11)** → 2.3 và 2.5 chốt ✅, I-03 và I-09 đóng. Số đo ở mục 8 `docs/oauth-setup.md`.
@@ -197,18 +206,31 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 
 | # | Task | Người | Ưu tiên | Ước tính | Trạng thái |
 |---|------|-------|---------|----------|--------|
-| 4.1 | `routers/cards.py` — `GET /api/cards`: phân trang, tìm kiếm theo tên/công ty/email, lọc theo status | Q | M | 1.5h | ⬜ Chưa làm |
-| 4.2 | `routers/cards.py` — `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` | Q | M | 1.5h | ⬜ Chưa làm |
-| 4.3 | `routers/cards.py` — `POST /{id}/confirm`: chuyển `confirmed`, gắn `company_id` bằng `company_matching.upsert_company()` của T. **Không kích hoạt enrich** — hồ sơ DN chỉ sinh khi người dùng bấm nút ở màn hình Doanh nghiệp | Q | M | 1h | ⬜ Chưa làm |
-| 4.4 | `templates/cards/list.html`: bảng danh sách + ô tìm kiếm + bộ lọc + badge trạng thái | Q | M | 2h | ⬜ Chưa làm |
-| 4.5 | `templates/cards/upload.html`: kéo–thả ảnh, `<input capture>` để chụp từ điện thoại, hiển thị tiến trình | Q | M | 1.5h | ⬜ Chưa làm |
+| 4.1 | `routers/cards.py` — `GET /api/cards`: phân trang, tìm kiếm theo tên/công ty/email, lọc theo status | Q | M | 1.5h | ✅ Xong 2026-09-14 — truy vấn nằm ở `repositories/card.py::list_cards()`, trả **cả tổng số bản ghi** chứ không chỉ một trang: thiếu nó thì UI không vẽ được phân trang, mà đếm ở router lại phải chép bộ điều kiện lọc lần thứ hai. Sắp xếp `uploaded_at DESC, **id DESC**` — chỉ theo thời gian thì hai ảnh cùng một batch trùng mốc micro giây, bản ghi sẽ nhảy giữa các trang. Chuỗi tìm kiếm được **escape ký tự đại diện của `LIKE`**: gõ `%` mà không escape thì `ILIKE '%%%'` khớp mọi bản ghi, trông y như bộ lọc hỏng (đo: `?q=%` → `total 0`, đúng). `status` lạ trả **400** chứ không trả danh sách rỗng — rỗng đọc như "chưa có danh thiếp nào" |
+| 4.2 | `routers/cards.py` — `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` | Q | M | 1.5h | ✅ Xong 2026-09-14 — `GET` trả thêm `ocr_raw_json` + `created_at/updated_at` (danh sách cố ý không kèm cho nhẹ). `PATCH` **phân biệt "không gửi" với "gửi `null`"** (`exclude_unset`) — gộp hai ca này thì không bao giờ xoá trắng được một trường model đọc nhầm, mà đó là việc hay làm nhất ở màn hình review. Giá trị sửa tay vẫn đi qua `normalize.py` (đo: `0912 345 678` → `+84912345678`), nhưng chuẩn hoá **từng trường một** chứ không gọi `normalize_card_fields()`: hàm đó xử lý `phone`/`phone_alt` như một cặp nên PATCH mỗi `phone` sẽ xoá mất `phone_alt` (đã đo: sửa riêng `phone`, `phone_alt` còn nguyên). `status` **không** nằm trong body (`extra="forbid"` → 422) — đổi vòng đời là việc của 4.3. `DELETE` xoá hàng trước rồi mới xoá file (đo trong container: file biến mất khỏi `/data/uploads`, xoá lần 2 → 404); xoá file hỏng chỉ ghi log vì file thừa không làm hỏng gì |
+| 4.3 | `routers/cards.py` — `POST /{id}/confirm`: chuyển `confirmed`, gắn `company_id` bằng `company_matching.upsert_company()` của T. **Không kích hoạt enrich** — hồ sơ DN chỉ sinh khi người dùng bấm nút ở màn hình Doanh nghiệp | Q | M | 1h | ✅ Xong 2026-09-14 — gọi `upsert_company(db, raw_name)` đúng chữ ký chốt ở họp D2 (`docs/api.md` mục 8), **import trong hàm + `getattr`** vì `services/company_matching.py` còn là stub tới khi T xong 3.8. **Gắn công ty không chặn xác nhận**: cả ba nhánh đã đo — hàm chưa có → `confirmed` + `detail` nói rõ đang chờ task 3.8 của T; hàm ném lỗi → rollback, vẫn `confirmed`; hàm chạy tốt → `company_id` gắn đúng. Chặn lại sẽ khiến toàn bộ luồng F1 đứng chờ task của người khác. Đã bấm thử trên UI: badge đổi sang **Đã xác nhận**, nút Xác nhận biến mất. **Không đụng enrich** (Plan.md 2.2 Luồng 2). Ingest KB là 6.4/6.5, chưa làm ở đây |
+| 4.4 | `templates/cards/list.html`: bảng danh sách + ô tìm kiếm + bộ lọc + badge trạng thái | Q | M | 2h | ✅ Xong 2026-09-14 — kiểm trên Chrome thật: 4 danh thiếp hiện đủ thumbnail + badge, gõ "minh quang" lọc còn đúng 1, bộ lọc trạng thái/ngôn ngữ và phân trang chạy, 0 lỗi console. Ô tìm kiếm **debounce 300ms** (mỗi phím một request thì kết quả về không đúng thứ tự sẽ nhấp nháy). Mọi giá trị ghi bằng **`textContent`, không `innerHTML`** — nội dung do model đọc từ ảnh người lạ đưa, một danh thiếp in sẵn thẻ `<script>` là đủ để chạy mã trong trang. Hộp xác nhận xoá vẽ trong trang thay vì `confirm()` (dialog trình duyệt chặn hẳn tab). Danh sách rỗng nói rõ "chưa có gì" hay "không khớp bộ lọc" — hai việc phải làm tiếp khác hẳn nhau. Kèm `GET /api/cards/{id}/image` phục vụ thumbnail: ảnh **không** mount ra `/static` vì tên file là hash mà hash nằm sẵn trong mọi `CardDetail`; đường dẫn được kiểm nằm trong `UPLOAD_DIR` để chặn `../` |
+| 4.5 | `templates/cards/upload.html`: kéo–thả ảnh, `<input capture>` để chụp từ điện thoại, hiển thị tiến trình | Q | M | 1.5h | ✅ Xong 2026-09-14 — đã upload thật qua UI: thanh tiến trình chạy, quét xong hiện 7 trường, trường bắt buộc thiếu tô đỏ ngay (người vừa chụp là người duy nhất còn cầm tấm danh thiếp trong tay). Dùng `XMLHttpRequest` chứ không `fetch` vì **chỉ XHR có `upload.onprogress`** — một lượt quét 3–5s, không có thanh tiến trình thì người dùng tưởng treo và bấm lại. Gửi **tuần tự**, không song song: mỗi lượt là một lời gọi vision qua CLIProxy, bắn 10 request cùng lúc chỉ đổi lỗi chờ lâu thành lỗi rate limit (R5) — hàng đợi nền thật là 5.2. Chặn sẵn ở trình duyệt hai ca server cũng chặn (không phải ảnh / quá `MAX_UPLOAD_MB`) để khỏi tải 10MB rồi mới biết hỏng |
 | 4.6 | `repositories/company.py`: repository cho `companies` + `company_profiles` | T | M | 2h | ⬜ Chưa làm |
 | 4.7 | `services/enrichment.py`: `enrich_company(name, hints)` — hints lấy từ danh thiếp (website, địa chỉ, quốc gia); gọi LLM + web search theo ADR | T | M | 3h | ⬜ Chưa làm |
 | 4.8 | Parse & validate kết quả LLM: loại bỏ trường không có nguồn, gắn nhãn `unverified` | T | M | 1.5h | ⬜ Chưa làm |
 | 4.9 | `tests/test_normalize_company.py` + `tests/test_company_matching.py` | T | S | 1h | ⬜ Chưa làm |
-| 4.10 | `tests/test_normalize.py`: chuẩn hoá SĐT/email đa định dạng & đa quốc gia (hậu xử lý F1) | Q | S | 0.5h | ⬜ Chưa làm |
+| 4.10 | `tests/test_normalize.py`: chuẩn hoá SĐT/email đa định dạng & đa quốc gia (hậu xử lý F1) | Q | S | 0.5h | ✅ Xong 2026-09-14 — **61 test, xanh**, thuần hàm nên chạy được ngay không cần `conftest.py` (task 6.1). Phủ đủ 5 nước của phạm vi + ca "không đọc được thì giữ bản đã dọn, không trả `None`". **Test bắt được 1 lỗi thật trong `normalize.py` (3.6, file của Q) — đã sửa luôn:** `split_phones()` gọi `squash_spaces()` trước, mà hàm đó gộp `\n` thành khoảng trắng nên tới lượt regex tách thì không còn gì để tách → danh thiếp in 2 số trên 2 dòng bị dính thành một chuỗi, `phone` lưu một số vô nghĩa và số thứ hai **mất hẳn**, không báo lỗi gì. Nay đổi xuống dòng thành dấu tách trước khi gộp khoảng trắng. Chưa ghi vào `docs/bugs-f1-f3.md` vì file đó mở ở task 10.1. Ghi thành test cả ranh giới `"N/A"` → `None` **thuộc `CardExtraction`, không thuộc `normalize.py`** — chỗ rất dễ bị cài đặt hai lần rồi lệch nhau |
 
 **Tiêu chí hoàn thành:** Danh sách danh thiếp hiển thị & lọc được trên UI; gọi `enrich_company()` từ script trả về JSON hồ sơ có nguồn.
+
+> **Trạng thái phần của Q (2026-09-14):** vế đầu của tiêu chí — *danh sách hiển thị & lọc được
+> trên UI* — **đã đạt và đo trên Chrome thật** với container đang chạy: `/cards` hiện đủ 4 danh
+> thiếp kèm thumbnail và badge, tìm kiếm / lọc trạng thái / lọc ngôn ngữ / phân trang đều đúng,
+> bấm *Xác nhận* ngay trên danh sách chạy trọn 4.3, `/cards/upload` upload thật được và hiện
+> tiến trình. Vế thứ hai (`enrich_company()`) là task **4.7 của T**.
+> Dữ liệu thử đã dọn sạch sau khi đo — DB trở lại đúng 4 bản ghi `needs_review` như trước.
+> ⚠️ Giống tiền lệ D3: mã đã chạy và **đã chạy đủ 4 kiểm tra của CI ở máy** (ruff check + format,
+> mypy, pytest 61 test — xanh cả bốn) nhưng **chưa commit, chưa mở PR**; ô trạng thái 4.1–4.5 và
+> 4.10 chỉ đạt trọn vẹn DoD ("đã merge vào `main`") sau khi PR xanh và merge.
+> 📌 **Việc còn treo cho T:** làm xong 3.8 thì danh thiếp đã `confirmed` từ trước **không tự gắn
+> công ty** — `confirm` chỉ upsert khi `company_id` còn trống, nên phải bấm Xác nhận lại (hoặc
+> thêm một bước gắn bù). Nhắc ở đây để đừng ai tưởng nó tự chạy ngược.
 
 ---
 
