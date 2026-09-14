@@ -134,8 +134,12 @@ Chạy lại số liệu bằng `python scripts/spike_embedding.py --models e5 b
 
 | Task | Người | Phải làm gì với kết quả này |
 |---|---|---|
-| **3.10** | T | `embedder/` dùng `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, **tải model lúc `docker build`** (không tải lúc chạy). Dự trù ~471MB model + torch CPU trong image |
-| **6.4** | Q | `services/embeddings.py`: thêm `passage: ` khi index, `query: ` khi truy vấn. Chuẩn hoá L2, so bằng cosine |
+| **3.10** | T | `embedder/` dùng `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, **tải model lúc `docker build`** (không tải lúc chạy). **Embedder tự thêm tiền tố `passage: `/`query: ` theo trường `kind`** của `POST /embed`, và bỏ tiền tố có sẵn trước khi thêm để không bị lặp. Dự trù ~471MB model + torch CPU trong image |
+| **6.4** | Q | `services/embeddings.py`: gửi `kind: "passage"` khi index, `kind: "query"` khi truy vấn — **không tự thêm tiền tố** (embedder đã thêm). Vector trả về đã chuẩn hoá L2, so bằng cosine |
+
+> **Chốt 2026-09-14 — tiền tố đặt trong embedder, không đặt ở `embeddings.py`.** Mục 4 cho thấy tiền tố
+> gắn liền với model (có lợi cho e5, làm hại bge-m3), nên để cạnh model: đổi model thì chỉ sửa một chỗ.
+> Hợp đồng `POST /embed` ở Plan.md 2.6 vốn đã có trường `kind` cho việc này.
 | **6.3** | Q | Index `ivfflat` cosine trên `vector(384)` — **không cần đổi migration**, `0001` đã đúng |
 | **7.4** | Q | Nếu recall thấp: xem mục 4, tiền tố không phải nghi phạm chính. Cân nhắc bge-m3 theo mục 5 |
 

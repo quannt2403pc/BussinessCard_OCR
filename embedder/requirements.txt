@@ -1,5 +1,4 @@
-# Service embedding chay CPU (task 3.10, chu so huu: T).
-fastapi
-uvicorn[standard]
-sentence-transformers
-torch --index-url https://download.pytorch.org/whl/cpu
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sentence-transformers==6.0.1
+transformers==5.17.0
