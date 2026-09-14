@@ -10,16 +10,28 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard, CardStatus
 
 logger = logging.getLogger(__name__)
+
+#: Cột được quét khi tìm kiếm tự do (`?q=`) ở task 4.1 — đúng ba cột `docs/api.md` đã chốt.
+#: Không quét `address`/`notes`: gõ "Hà Nội" sẽ ra toàn bộ danh thiếp, ô tìm kiếm thành vô dụng.
+SEARCH_COLUMNS = (
+    BusinessCard.full_name,
+    BusinessCard.company_name_raw,
+    BusinessCard.email,
+)
+
+#: Trần số bản ghi một trang. Người dùng sửa `?size=` trên thanh địa chỉ được, nên phải chặn ở
+#: đây chứ không chỉ ở khai báo `Query()` của router.
+MAX_PAGE_SIZE = 100
 
 #: Cột được phép ghi từ kết quả OCR. Danh sách trắng, không phải `setattr` tuỳ ý: dữ liệu này do
 #: một model ngôn ngữ sinh ra, để nó đặt được `status` hay `company_id` là mở cửa cho chính nó
@@ -56,6 +68,53 @@ async def get_by_hash(db: AsyncSession, image_hash: str) -> BusinessCard | None:
     """Tra theo SHA-256 của file gốc — chống upload trùng (task 3.1)."""
     result = await db.execute(select(BusinessCard).where(BusinessCard.image_hash == image_hash))
     return result.scalar_one_or_none()
+
+
+async def list_cards(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    status: str | None = None,
+    company_id: uuid.UUID | None = None,
+    language: str | None = None,
+    page: int = 1,
+    size: int = 20,
+) -> tuple[Sequence[BusinessCard], int]:
+    """Một trang danh thiếp + **tổng số bản ghi khớp bộ lọc** (task 4.1).
+
+    Trả cả tổng chứ không chỉ danh sách: thiếu nó thì UI không vẽ được thanh phân trang, mà đếm
+    ở tầng router lại phải dựng lại đúng bộ điều kiện này lần thứ hai — hai bản sao của cùng một
+    logic lọc là chỗ chắc chắn sẽ lệch nhau về sau.
+
+    Sắp xếp `uploaded_at DESC, id DESC`: chỉ theo thời gian thôi thì hai ảnh upload trong cùng
+    một batch có thể trùng mốc thời gian tới từng micro giây, thứ tự giữa các trang sẽ nhảy và
+    có bản ghi hiện hai lần / mất hẳn.
+    """
+    conditions = _list_conditions(q=q, status=status, company_id=company_id, language=language)
+    size = max(1, min(size, MAX_PAGE_SIZE))
+    page = max(1, page)
+
+    total = await db.scalar(select(func.count()).select_from(BusinessCard).where(*conditions))
+
+    rows = await db.execute(
+        select(BusinessCard)
+        .where(*conditions)
+        .order_by(BusinessCard.uploaded_at.desc(), BusinessCard.id.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    return rows.scalars().all(), int(total or 0)
+
+
+async def delete_card(db: AsyncSession, card: BusinessCard) -> None:
+    """Xoá bản ghi. **Không đụng tới file ảnh** — router lo (task 4.2).
+
+    Tách đôi có chủ đích: xoá file là thao tác không hoàn tác được trên hệ thống tệp, còn xoá
+    hàng thì rollback được. Gộp vào đây thì một transaction hỏng sẽ để lại bản ghi trỏ vào file
+    đã bốc hơi.
+    """
+    await db.delete(card)
+    await db.commit()
 
 
 async def create_card(
@@ -119,6 +178,39 @@ async def update_fields(
     await db.commit()
     await db.refresh(card)
     return card
+
+
+def _list_conditions(
+    *,
+    q: str | None,
+    status: str | None,
+    company_id: uuid.UUID | None,
+    language: str | None,
+) -> list[ColumnElement[bool]]:
+    """Điều kiện WHERE dùng chung cho cả câu đếm lẫn câu lấy trang (xem `list_cards`)."""
+    conditions: list[ColumnElement[bool]] = []
+
+    if q and (term := q.strip()):
+        pattern = f"%{_escape_like(term)}%"
+        conditions.append(or_(*(column.ilike(pattern, escape="\\") for column in SEARCH_COLUMNS)))
+    if status:
+        conditions.append(BusinessCard.status == status)
+    if company_id is not None:
+        conditions.append(BusinessCard.company_id == company_id)
+    if language and (code := language.strip().lower()):
+        conditions.append(BusinessCard.language_detected == code)
+
+    return conditions
+
+
+def _escape_like(term: str) -> str:
+    r"""Vô hiệu hoá ký tự đại diện của `LIKE` trong chuỗi người dùng gõ.
+
+    Gõ `%` vào ô tìm kiếm mà không escape thì câu truy vấn thành `ILIKE '%%%'` — khớp mọi bản
+    ghi và trông y như "bộ lọc không hoạt động". `_` còn tệ hơn: nó khớp một ký tự bất kỳ nên
+    tìm `nguyen_van` lại ra `nguyen van`, sai một cách rất khó nhận ra.
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _is_duplicate_hash(exc: IntegrityError) -> bool:

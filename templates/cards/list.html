@@ -1,3 +1,358 @@
 {# Màn hình danh thiếp đã quét: bảng + tìm kiếm + lọc + badge trạng thái. #}
 {# Chủ sở hữu: Q | Task: 4.4 | xem Task.md #}
-{# TODO(Q, task 4.4): chưa triển khai. #}
+{#
+  Dữ liệu do JavaScript gọi `GET /api/cards` (task 4.1) đổ vào, không render sẵn từ server:
+  tìm kiếm và lọc phải đổi được mà không tải lại trang, và trang vẫn mở được khi DB chết để
+  hiện đúng lý do — cùng lối với `/settings` (task 2.5).
+
+  ⚠️ Mọi giá trị của một danh thiếp đều do **model ngôn ngữ sinh ra từ ảnh người lạ đưa**. Chỉ
+  ghi vào DOM bằng `textContent`, tuyệt đối không `innerHTML`: một danh thiếp in sẵn thẻ
+  <script> là đủ để chạy mã trong trang này.
+
+  Màn hình chi tiết / sửa từng trường là task 5.1. Ở đây mới có hai hành động chạy thẳng trên
+  danh sách: Xác nhận (task 4.3) và Xoá (task 4.2).
+#}
+{% extends "base.html" %}
+
+{% block title %}Danh thiếp{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Danh thiếp đã quét</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Danh thiếp mới quét ở trạng thái <strong>Chờ duyệt</strong>. Kiểm lại rồi bấm
+      <em>Xác nhận</em> để gắn vào danh sách doanh nghiệp.
+    </p>
+  </div>
+  <a href="/cards/upload"
+     class="ml-auto rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
+    Quét danh thiếp mới
+  </a>
+</div>
+
+<section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+  <form id="filters" class="flex flex-wrap items-end gap-3">
+    <label class="flex-1 min-w-[16rem] text-sm">
+      <span class="text-slate-500">Tìm kiếm</span>
+      <input id="f-q" type="search" name="q" placeholder="Họ tên, tên công ty hoặc email…"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+    </label>
+
+    <label class="text-sm">
+      <span class="text-slate-500">Trạng thái</span>
+      <select id="f-status" name="status"
+              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+        <option value="">Tất cả</option>
+        {% for value in status_choices %}
+        <option value="{{ value }}">{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="text-sm">
+      <span class="text-slate-500">Ngôn ngữ</span>
+      <select id="f-language" name="language"
+              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+        <option value="">Tất cả</option>
+        <option value="vi">vi — Việt</option>
+        <option value="en">en — Anh</option>
+        <option value="ja">ja — Nhật</option>
+        <option value="ko">ko — Hàn</option>
+        <option value="zh">zh — Trung</option>
+      </select>
+    </label>
+
+    <button type="reset" id="btn-reset"
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50">
+      Xoá bộ lọc
+    </button>
+    <span id="summary" class="ml-auto text-sm text-slate-500">Đang tải…</span>
+  </form>
+</section>
+
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+<section class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+  <table class="w-full text-left text-sm">
+    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+      <tr>
+        <th class="w-16 px-4 py-3">Ảnh</th>
+        <th class="px-4 py-3">Họ tên / Chức vụ</th>
+        <th class="px-4 py-3">Công ty</th>
+        <th class="px-4 py-3">Liên hệ</th>
+        <th class="px-4 py-3">Trạng thái</th>
+        <th class="px-4 py-3">Ngày quét</th>
+        <th class="px-4 py-3"></th>
+      </tr>
+    </thead>
+    <tbody id="rows" class="divide-y divide-slate-100"></tbody>
+  </table>
+
+  <p id="empty" class="hidden px-4 py-10 text-center text-sm text-slate-500"></p>
+</section>
+
+<nav class="mt-4 flex items-center gap-3 text-sm">
+  <button id="btn-prev" type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+    ← Trang trước
+  </button>
+  <span id="page-label" class="text-slate-500"></span>
+  <button id="btn-next" type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+    Trang sau →
+  </button>
+</nav>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  "use strict";
+
+  const SIZE = {{ default_page_size }};
+
+  const BADGES = {
+    pending:      ["Chưa quét được", "bg-rose-50 text-rose-700 ring-rose-200"],
+    needs_review: ["Chờ duyệt",      "bg-amber-50 text-amber-700 ring-amber-200"],
+    confirmed:    ["Đã xác nhận",    "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const rows = $("rows");
+  let page = 1;
+  let pages = 1;
+
+  // --- tiện ích -------------------------------------------------------------
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    // textContent, không innerHTML: nội dung do model đọc từ ảnh, coi như dữ liệu không tin được.
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function message(text, kind) {
+    const box = $("message");
+    box.textContent = text;
+    box.className = kind === "error"
+      ? "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800"
+      : "mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800";
+  }
+
+  function clearMessage() {
+    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString("vi-VN");
+  }
+
+  /** Đọc lỗi từ body FastAPI (`detail`), không chỉ hiện mã HTTP trơ. */
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((e) => e.msg).join("; ");
+    } catch (_) { /* body không phải JSON */ }
+    return `Lỗi HTTP ${res.status}`;
+  }
+
+  // --- vẽ bảng --------------------------------------------------------------
+
+  function statusBadge(status) {
+    const [label, tone] = BADGES[status] || [status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    return el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label);
+  }
+
+  function thumbnail(card) {
+    const link = el("a", "block h-12 w-12 overflow-hidden rounded border border-slate-200");
+    link.href = `/api/cards/${card.id}/image`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const img = el("img", "h-full w-full object-cover");
+    img.src = `/api/cards/${card.id}/image`;
+    img.alt = "Ảnh danh thiếp";
+    img.loading = "lazy";
+    // File ảnh có thể đã bị xoá khỏi volume trong khi bản ghi còn — đừng để icon ảnh vỡ.
+    img.addEventListener("error", () => {
+      link.replaceChildren(el("span", "flex h-full w-full items-center justify-center text-xs text-slate-300", "—"));
+    });
+    link.append(img);
+    return link;
+  }
+
+  function actionButton(label, tone, handler) {
+    const btn = el("button", `rounded-md border px-2 py-1 text-xs transition ${tone}`, label);
+    btn.type = "button";
+    btn.addEventListener("click", handler);
+    return btn;
+  }
+
+  function renderRow(card) {
+    const tr = el("tr", "align-top hover:bg-slate-50/60");
+
+    const thumb = el("td", "px-4 py-3");
+    thumb.append(thumbnail(card));
+    tr.append(thumb);
+
+    const who = el("td", "px-4 py-3");
+    who.append(el("div", "font-medium text-slate-900", card.full_name || "(chưa có tên)"));
+    who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
+    tr.append(who);
+
+    const company = el("td", "px-4 py-3");
+    company.append(el("div", "text-slate-800", card.company_name_raw || "—"));
+    if (card.company_id) {
+      company.append(el("div", "text-xs text-emerald-600", "đã gắn hồ sơ công ty"));
+    }
+    tr.append(company);
+
+    const contact = el("td", "px-4 py-3");
+    contact.append(el("div", "text-slate-800", card.email || "—"));
+    contact.append(el("div", "text-xs text-slate-500", card.phone || "—"));
+    tr.append(contact);
+
+    const state = el("td", "px-4 py-3");
+    state.append(statusBadge(card.status));
+    if (card.language_detected) {
+      state.append(el("div", "mt-1 text-xs text-slate-400", card.language_detected));
+    }
+    tr.append(state);
+
+    tr.append(el("td", "px-4 py-3 text-xs text-slate-500", formatDate(card.uploaded_at)));
+
+    const actions = el("td", "px-4 py-3");
+    const group = el("div", "flex justify-end gap-2");
+    if (card.status !== "confirmed") {
+      group.append(actionButton("Xác nhận", "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
+        () => confirmCard(card)));
+    }
+    group.append(actionButton("Xoá", "border-rose-200 text-rose-700 hover:bg-rose-50",
+      () => removeCard(card)));
+    actions.append(group);
+    tr.append(actions);
+
+    return tr;
+  }
+
+  // --- hành động ------------------------------------------------------------
+
+  async function confirmCard(card) {
+    clearMessage();
+    const res = await fetch(`/api/cards/${card.id}/confirm`, { method: "POST" });
+    if (!res.ok) {
+      message(await readError(res), "error");
+      return;
+    }
+    const body = await res.json();
+    message(body.detail || "Đã xác nhận và gắn công ty.", "ok");
+    load();
+  }
+
+  async function removeCard(card) {
+    // `confirm()` của trình duyệt chặn hẳn tab; hỏi ngay trong trang bằng một lớp phủ nhỏ.
+    if (!(await askDelete(card))) return;
+    clearMessage();
+    const res = await fetch(`/api/cards/${card.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      message(await readError(res), "error");
+      return;
+    }
+    message("Đã xoá danh thiếp.", "ok");
+    load();
+  }
+
+  function askDelete(card) {
+    return new Promise((resolve) => {
+      const overlay = el("div", "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4");
+      const box = el("div", "w-full max-w-sm rounded-lg bg-white p-5 shadow-lg");
+      box.append(el("p", "font-medium text-slate-900", "Xoá danh thiếp này?"));
+      box.append(el("p", "mt-1 text-sm text-slate-600",
+        `${card.full_name || "(chưa có tên)"} — ${card.company_name_raw || "không rõ công ty"}. Ảnh gốc cũng bị xoá.`));
+
+      const buttons = el("div", "mt-4 flex justify-end gap-2");
+      const close = (value) => { overlay.remove(); resolve(value); };
+      buttons.append(actionButton("Huỷ", "border-slate-300 text-slate-600 hover:bg-slate-50", () => close(false)));
+      buttons.append(actionButton("Xoá", "border-rose-300 bg-rose-600 text-white hover:bg-rose-700", () => close(true)));
+      box.append(buttons);
+      overlay.append(box);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
+      document.body.append(overlay);
+    });
+  }
+
+  // --- tải dữ liệu ----------------------------------------------------------
+
+  function query() {
+    const params = new URLSearchParams({ page: String(page), size: String(SIZE) });
+    const q = $("f-q").value.trim();
+    const status = $("f-status").value;
+    const language = $("f-language").value;
+    if (q) params.set("q", q);
+    if (status) params.set("status", status);
+    if (language) params.set("language", language);
+    return params;
+  }
+
+  async function load() {
+    $("summary").textContent = "Đang tải…";
+    let body;
+    try {
+      const res = await fetch(`/api/cards?${query()}`);
+      if (!res.ok) throw new Error(await readError(res));
+      body = await res.json();
+    } catch (err) {
+      $("summary").textContent = "";
+      message(`Không tải được danh sách: ${err.message}`, "error");
+      return;
+    }
+
+    pages = body.pages;
+    page = body.page;
+
+    rows.replaceChildren(...body.items.map(renderRow));
+    $("summary").textContent = `${body.total} danh thiếp`;
+    $("page-label").textContent = `Trang ${body.page} / ${body.pages}`;
+    $("btn-prev").disabled = body.page <= 1;
+    $("btn-next").disabled = body.page >= body.pages;
+
+    const empty = $("empty");
+    if (body.items.length === 0) {
+      // Phân biệt "chưa có gì" với "bộ lọc không khớp" — hai việc phải làm tiếp khác hẳn nhau.
+      const filtered = $("f-q").value || $("f-status").value || $("f-language").value;
+      empty.textContent = filtered
+        ? "Không có danh thiếp nào khớp bộ lọc."
+        : "Chưa có danh thiếp nào. Bấm “Quét danh thiếp mới” để bắt đầu.";
+      empty.classList.remove("hidden");
+    } else {
+      empty.classList.add("hidden");
+    }
+  }
+
+  // --- sự kiện --------------------------------------------------------------
+
+  let timer;
+  function reload(delay) {
+    clearTimeout(timer);
+    timer = setTimeout(() => { page = 1; load(); }, delay);
+  }
+
+  // Gõ tới đâu lọc tới đó, nhưng chờ 300ms: mỗi phím một request thì server nhận cả chục câu
+  // truy vấn cho một lần gõ, và kết quả về không đúng thứ tự sẽ nhấp nháy.
+  $("f-q").addEventListener("input", () => reload(300));
+  $("f-status").addEventListener("change", () => reload(0));
+  $("f-language").addEventListener("change", () => reload(0));
+  $("btn-reset").addEventListener("click", () => reload(0));
+  $("filters").addEventListener("submit", (e) => { e.preventDefault(); reload(0); });
+
+  $("btn-prev").addEventListener("click", () => { if (page > 1) { page -= 1; load(); } });
+  $("btn-next").addEventListener("click", () => { if (page < pages) { page += 1; load(); } });
+
+  load();
+})();
+</script>
+{% endblock %}

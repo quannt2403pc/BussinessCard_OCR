@@ -152,8 +152,14 @@ def split_phones(value: Any) -> list[str]:
 
     Mảnh dưới 7 chữ số thường là số máy lẻ viết rời ("… / 102") hoặc rác OCR — giữ lại sẽ sinh
     ra một `phone_alt` vô nghĩa.
+
+    ⚠️ Xuống dòng phải đổi thành dấu tách **trước** khi gọi `squash_spaces()`. Phát hiện khi
+    viết test 4.10: `squash_spaces` gộp `\\n` thành khoảng trắng, nên tới lượt `_PHONE_SPLIT_RE`
+    thì không còn gì để tách — `"024 7300 7300\\n0912345678"` dính thành một chuỗi, `phone` lưu
+    một số vô nghĩa và số thứ hai mất hẳn. Danh thiếp in hai số trên hai dòng là chuyện thường.
     """
-    text = squash_spaces(value)
+    raw = "" if value is None else (value if isinstance(value, str) else str(value))
+    text = squash_spaces(raw.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " / "))
     if text is None:
         return []
 

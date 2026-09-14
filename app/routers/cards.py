@@ -1,9 +1,10 @@
-"""F1 — upload, danh sách, chi tiết, confirm danh thiếp.
+"""F1 — upload, danh sách, chi tiết, sửa, xoá, confirm danh thiếp.
 
-Chủ sở hữu: Q | Task: 3.1 | xem Task.md
+Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5 | xem Task.md
 
-D3 mới làm `POST /api/cards/upload`. Danh sách/chi tiết/confirm là task 4.1–4.3, thêm vào chính
-file này (router đã khai sẵn từ D1 nên không phải đụng `app/main.py` — quy ước số 4).
+Router khai **đường dẫn đầy đủ** thay vì đặt `prefix="/api/cards"`, theo đúng tiền lệ
+`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn hai trang HTML
+(`/cards`, `/cards/upload`). Gom vào một router để không phải đụng `app/main.py` (quy ước số 4).
 
 Một lượt upload đi qua đúng bốn bước, theo thứ tự:
 
@@ -26,30 +27,95 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import get_db
-from app.models.card import CardStatus
+from app.core.templates import templates
+from app.models.card import BusinessCard, CardStatus
 from app.repositories import card as card_repo
-from app.schemas.card import CardOut, CardUploadOut
+from app.schemas.card import (
+    CardConfirmOut,
+    CardDetailOut,
+    CardListOut,
+    CardOut,
+    CardUpdateIn,
+    CardUploadOut,
+)
 from app.services import image as image_service
-from app.services import llm, ocr
+from app.services import llm, normalize, ocr
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/cards", tags=["cards"])
+router = APIRouter()
 
 #: Đọc từng khối 1MB để giữ RAM phẳng và để dừng được ngay khi vượt ngưỡng.
 CHUNK_SIZE = 1024 * 1024
 
+#: Số bản ghi mỗi trang khi UI không nói gì (task 4.1).
+DEFAULT_PAGE_SIZE = 20
+
+#: Bộ lọc trạng thái hợp lệ của ô select trên `templates/cards/list.html`.
+STATUS_CHOICES: tuple[str, ...] = tuple(s.value for s in CardStatus)
+
+
+# --------------------------------------------------------------------------- trang HTML
+
+
+@router.get("/cards", response_class=HTMLResponse, tags=["ui"])
+async def cards_page(request: Request) -> HTMLResponse:
+    """Màn hình danh sách danh thiếp (task 4.4).
+
+    Trang render rỗng rồi để JavaScript gọi `GET /api/cards` đổ dữ liệu vào — cùng lối với
+    `/settings` (task 2.5): tìm kiếm và lọc phải chạy được mà không tải lại trang, và DB chết
+    thì trang vẫn mở được để hiện đúng lý do.
+    """
+    return templates.TemplateResponse(
+        request,
+        "cards/list.html",
+        {
+            "active_nav": "cards",
+            "status_choices": STATUS_CHOICES,
+            "default_page_size": DEFAULT_PAGE_SIZE,
+        },
+    )
+
+
+@router.get("/cards/upload", response_class=HTMLResponse, tags=["ui"])
+async def cards_upload_page(request: Request) -> HTMLResponse:
+    """Màn hình kéo–thả / chụp ảnh danh thiếp (task 4.5)."""
+    return templates.TemplateResponse(
+        request,
+        "cards/upload.html",
+        {
+            "active_nav": "cards",
+            "max_upload_mb": settings.max_upload_mb,
+        },
+    )
+
+
+# --------------------------------------------------------------------------- API
+
 
 @router.post(
-    "/upload",
+    "/api/cards/upload",
+    tags=["cards"],
     response_model=CardUploadOut,
     status_code=status.HTTP_201_CREATED,
     summary="Upload 1 ảnh danh thiếp, quét và lưu",
@@ -138,7 +204,268 @@ async def upload_card(
     )
 
 
+@router.get("/api/cards", response_model=CardListOut, tags=["cards"])
+async def list_cards(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str | None, Query(description="Tìm trong họ tên / tên công ty / email")] = None,
+    card_status: Annotated[
+        str | None, Query(alias="status", description="pending | needs_review | confirmed")
+    ] = None,
+    company_id: Annotated[uuid.UUID | None, Query()] = None,
+    language: Annotated[
+        str | None, Query(description="Mã ISO 639-1: en | vi | ko | ja | zh")
+    ] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=card_repo.MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> CardListOut:
+    """Danh sách danh thiếp, có phân trang / tìm kiếm / lọc (task 4.1).
+
+    Trạng thái lạ trả **400** chứ không trả danh sách rỗng: rỗng đọc như "chưa có danh thiếp
+    nào", người dùng sẽ đi tìm lỗi ở chỗ upload trong khi thực ra chỉ gõ sai bộ lọc.
+    """
+    if card_status is not None and card_status not in STATUS_CHOICES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"status phải là một trong {', '.join(STATUS_CHOICES)}.",
+        )
+
+    rows, total = await card_repo.list_cards(
+        db,
+        q=q,
+        status=card_status,
+        company_id=company_id,
+        language=language,
+        page=page,
+        size=size,
+    )
+    return CardListOut(
+        items=[CardOut.model_validate(row) for row in rows],
+        total=total,
+        page=page,
+        size=size,
+        # Trang cuối tính từ tổng, không từ `len(items)`: trang rỗng ở cuối vẫn phải biết còn
+        # bao nhiêu trang để nút "về trang trước" của UI không dẫn vào hư không.
+        pages=max(1, -(-total // size)),
+    )
+
+
+@router.get("/api/cards/{card_id}", response_model=CardDetailOut, tags=["cards"])
+async def get_card(
+    card_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CardDetailOut:
+    """Chi tiết một danh thiếp, kèm `ocr_raw_json` để đối chiếu khi nghi OCR sai (task 4.2)."""
+    card = await _get_or_404(db, card_id)
+    return CardDetailOut.model_validate(card)
+
+
+@router.get("/api/cards/{card_id}/image", tags=["cards"])
+async def get_card_image(
+    card_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FileResponse:
+    """Ảnh đã tiền xử lý của một danh thiếp — UI dùng làm thumbnail (4.4) và ảnh gốc (5.1).
+
+    Ảnh nằm trong volume `uploads`, **không** nằm dưới `/static`: mount cả thư mục upload ra
+    static là công khai toàn bộ danh thiếp cho bất kỳ ai đoán được tên file (tên file là hash,
+    nhưng hash nằm sẵn trong mọi response `CardDetail`). Đi qua endpoint này thì về sau thêm
+    kiểm tra quyền chỉ phải sửa một chỗ.
+    """
+    card = await _get_or_404(db, card_id)
+    path = _resolve_image(card.image_path)
+    if path is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Bản ghi còn nhưng file ảnh không còn trong volume uploads.",
+        )
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@router.patch("/api/cards/{card_id}", response_model=CardDetailOut, tags=["cards"])
+async def update_card(
+    card_id: uuid.UUID,
+    payload: CardUpdateIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CardDetailOut:
+    """Sửa tay các trường sau khi review (task 4.2).
+
+    Giá trị người dùng gõ vẫn đi qua `services/normalize.py` — gõ `0912 345 678` thì lưu
+    `+84912345678`, đúng như lúc quét. Không chuẩn hoá ở đây thì DB có hai kiểu số khác nhau tuỳ
+    theo trường đó do model đọc hay do người sửa, và mọi thứ so khớp về sau đều vấp.
+
+    **Cố ý không đụng `status`.** Sửa nội dung không phải là xác nhận — chuyển sang `confirmed`
+    là việc của `POST /{id}/confirm` (task 4.3), nơi mới có bước gắn công ty.
+    """
+    card = await _get_or_404(db, card_id)
+
+    changes = payload.changes()
+    if not changes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
+
+    edited = sorted(changes)
+    language = changes.get("language_detected", card.language_detected)
+
+    # `notes` không nằm trong `OCR_COLUMNS` (danh sách trắng của repository) nên phải gán tay.
+    # Gán TRƯỚC khi gọi `update_fields` để cả hai thay đổi đi chung một commit — tách ra thì một
+    # lần PATCH có thể ghi được nửa này mà hỏng nửa kia.
+    if "notes" in changes:
+        notes = changes.pop("notes")
+        card.notes = normalize.squash_spaces(notes) if notes is not None else None
+
+    card = await card_repo.update_fields(db, card, _normalize_edits(changes, language=language))
+
+    logger.info("Card %s: sửa tay %s", card.id, ", ".join(edited))
+    return CardDetailOut.model_validate(card)
+
+
+@router.delete("/api/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["cards"])
+async def delete_card(
+    card_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Xoá một danh thiếp và file ảnh của nó (task 4.2).
+
+    Xoá hàng trước, xoá file sau. Ngược lại thì transaction hỏng sẽ để lại một bản ghi trỏ vào
+    file đã mất — hỏng theo kiểu im lặng, chỉ lộ ra khi có người mở đúng bản ghi đó. Xoá file
+    hỏng thì chỉ ghi log: file thừa nằm lại trong volume không làm hỏng gì.
+    """
+    card = await _get_or_404(db, card_id)
+    image_path = card.image_path
+
+    await card_repo.delete_card(db, card)
+
+    path = _resolve_image(image_path)
+    if path is not None:
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("Xoá được bản ghi %s nhưng không xoá được %s: %s", card_id, path, exc)
+
+    logger.info("Đã xoá card %s", card_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/api/cards/{card_id}/confirm", response_model=CardConfirmOut, tags=["cards"])
+async def confirm_card(
+    card_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CardConfirmOut:
+    """Người dùng duyệt xong → `confirmed` + gắn `company_id` (task 4.3).
+
+    **Không kích hoạt enrich.** Hồ sơ doanh nghiệp chỉ sinh khi người dùng tích chọn công ty rồi
+    bấm nút ở màn hình Doanh nghiệp (Plan.md mục 2.2, Luồng 2). Xác nhận danh thiếp chỉ tạo ra
+    một bản ghi *tên công ty*, chưa phải hồ sơ.
+
+    Gắn công ty **không chặn xác nhận**: danh thiếp không đọc được tên công ty, hoặc
+    `company_matching.upsert_company()` (task 3.8 của T) chưa có, thì bản ghi vẫn về `confirmed`
+    và `detail` nói rõ vì sao chưa gắn. Chặn lại sẽ khiến toàn bộ luồng F1 đứng chờ một task của
+    người khác.
+    """
+    card = await _get_or_404(db, card_id)
+
+    company_id = card.company_id
+    detail: str | None = None
+
+    if company_id is not None:
+        detail = "Danh thiếp đã được gắn công ty từ trước."
+    elif not (raw_name := (card.company_name_raw or "").strip()):
+        detail = "Danh thiếp không có tên công ty nên chưa gắn được vào bảng companies."
+    else:
+        company_id, detail = await _upsert_company(db, raw_name)
+
+    card.company_id = company_id
+    card.status = CardStatus.CONFIRMED
+    await db.commit()
+    await db.refresh(card)
+
+    logger.info("Card %s → confirmed (company_id=%s)", card.id, company_id)
+    return CardConfirmOut(
+        id=card.id,
+        status=card.status,
+        company_id=company_id,
+        company_matched=company_id is not None,
+        detail=detail,
+    )
+
+
 # --------------------------------------------------------------------------- nội bộ
+
+
+async def _get_or_404(db: AsyncSession, card_id: uuid.UUID) -> BusinessCard:
+    card = await card_repo.get(db, card_id)
+    if card is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Không có danh thiếp này.")
+    return card
+
+
+def _normalize_edits(changes: dict[str, Any], *, language: str | None) -> dict[str, Any]:
+    """Chuẩn hoá đúng những trường người dùng vừa sửa, **từng trường một**.
+
+    Cố ý không gọi `normalize_card_fields()` như lúc quét: hàm đó xử lý `phone` và `phone_alt`
+    như một cặp và luôn ghi lại cả hai, nên PATCH chỉ gửi `phone` sẽ xoá mất `phone_alt` đang có.
+    Ở màn hình review, người dùng sửa ô nào thì chỉ ô đó được đổi.
+    """
+    region = normalize.region_for_language(language)
+    out: dict[str, Any] = {}
+
+    for name, value in changes.items():
+        if value is None:
+            out[name] = None
+        elif name == "email":
+            out[name] = normalize.normalize_email(value)
+        elif name == "website":
+            out[name] = normalize.normalize_website(value)
+        elif name in ("phone", "phone_alt"):
+            out[name] = normalize.normalize_phone(value, region=region)
+        elif name == "language_detected":
+            out[name] = (normalize.squash_spaces(value) or "").lower() or None
+        else:
+            out[name] = normalize.squash_spaces(value)
+
+    return out
+
+
+async def _upsert_company(db: AsyncSession, raw_name: str) -> tuple[uuid.UUID | None, str | None]:
+    """Gọi `company_matching.upsert_company()` của T — chữ ký chốt ở họp D2 (`docs/api.md` mục 8).
+
+    Import **trong hàm** chứ không ở đầu file: `services/company_matching.py` còn là stub cho tới
+    khi T làm xong task 3.8, import ở module level sẽ không sao (module tồn tại), nhưng gọi hàm
+    chưa có thì `AttributeError` ném ra giữa request. Kiểm bằng `getattr` để phân biệt rõ "T
+    chưa làm" với "gọi được nhưng hỏng", và để câu thông báo nói đúng việc cần làm.
+    """
+    from app.services import company_matching
+
+    upsert = getattr(company_matching, "upsert_company", None)
+    if upsert is None:
+        logger.info("company_matching.upsert_company() chưa có (task 3.8 của T) — bỏ qua bước gắn")
+        return None, (
+            "Đã xác nhận. Chưa gắn được công ty vì `company_matching.upsert_company()` "
+            "(task 3.8, chủ sở hữu T) chưa triển khai — gắn lại được sau khi task đó xong."
+        )
+
+    try:
+        return await upsert(db, raw_name), None
+    except Exception as exc:  # T sở hữu hàm này; lỗi của nó không được làm hỏng việc xác nhận
+        await db.rollback()
+        logger.warning("upsert_company(%r) lỗi: %s", raw_name, exc)
+        return None, f"Đã xác nhận, nhưng gắn công ty thất bại: {exc}"
+
+
+def _resolve_image(image_path: str) -> Path | None:
+    """Đường dẫn tuyệt đối của ảnh trong volume, hoặc `None` nếu không còn.
+
+    DB lưu đường dẫn **tương đối** (xem `_store`). Ghép xong phải kiểm lại nó thật sự nằm trong
+    `UPLOAD_DIR`: giá trị hiện tại do chính `_store` sinh ra nên an toàn, nhưng một bản ghi cũ
+    hoặc dữ liệu seed chứa `../` sẽ biến endpoint ảnh thành đường đọc trộm file của container.
+    """
+    root = settings.upload_dir.resolve()
+    try:
+        target = (root / image_path).resolve()
+        target.relative_to(root)
+    except (OSError, ValueError):
+        logger.warning("image_path %r nằm ngoài UPLOAD_DIR, từ chối phục vụ", image_path)
+        return None
+    return target if target.is_file() else None
 
 
 async def _read_limited(file: UploadFile) -> bytes:

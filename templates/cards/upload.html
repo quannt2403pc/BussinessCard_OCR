@@ -1,3 +1,302 @@
 {# Kéo-thả ảnh + input capture chụp từ điện thoại. #}
 {# Chủ sở hữu: Q | Task: 4.5 | xem Task.md #}
-{# TODO(Q, task 4.5): chưa triển khai. #}
+{#
+  Gửi từng ảnh một tới `POST /api/cards/upload` (task 3.1). Upload nhiều ảnh bằng MỘT request
+  (`POST /api/cards/batch-upload` + hàng đợi nền) là task 5.2 — ở đây thả nhiều ảnh thì trang
+  tự xếp hàng và gửi tuần tự, đủ dùng và không phải sửa lại khi 5.2 xong.
+
+  Vì sao dùng `XMLHttpRequest` chứ không `fetch`: chỉ XHR mới có `upload.onprogress`. Một lượt
+  quét mất 3–5 giây (đo ở task 3.4) nên thanh tiến trình không phải trang trí — không có nó,
+  người dùng tưởng trang treo và bấm lại.
+
+  ⚠️ Tên file và mọi trường model đọc được đều ghi vào DOM bằng `textContent`.
+#}
+{% extends "base.html" %}
+
+{% block title %}Quét danh thiếp{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Quét danh thiếp</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Kéo ảnh vào khung bên dưới, chọn từ máy, hoặc chụp thẳng bằng camera điện thoại.
+      Tối đa <strong>{{ max_upload_mb }}MB</strong> mỗi ảnh.
+    </p>
+  </div>
+  <a href="/cards"
+     class="ml-auto rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+    Xem danh sách
+  </a>
+</div>
+
+<section id="dropzone"
+         class="mt-6 rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 py-12 text-center transition">
+  <p class="text-slate-700">Kéo &amp; thả ảnh danh thiếp vào đây</p>
+  <p class="mt-1 text-sm text-slate-500">JPEG · PNG · WEBP · BMP · TIFF · GIF</p>
+
+  <div class="mt-6 flex flex-wrap justify-center gap-3">
+    <button type="button" id="btn-pick"
+            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
+      Chọn ảnh từ máy
+    </button>
+    {# `capture="environment"` mở thẳng camera sau trên điện thoại; máy tính bỏ qua thuộc tính
+       này và mở hộp thoại chọn file như thường. #}
+    <label class="cursor-pointer rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Chụp bằng camera
+      <input id="input-capture" type="file" accept="image/*" capture="environment" class="hidden">
+    </label>
+  </div>
+
+  <input id="input-file" type="file" accept="image/*" multiple class="hidden">
+</section>
+
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+<section id="queue-box" class="mt-6 hidden">
+  <div class="flex items-center gap-3">
+    <h2 class="text-base font-semibold text-slate-900">Hàng đợi</h2>
+    <span id="queue-summary" class="text-sm text-slate-500"></span>
+    <button type="button" id="btn-clear"
+            class="ml-auto text-sm text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline">
+      Dọn danh sách
+    </button>
+  </div>
+  <ul id="queue" class="mt-3 space-y-3"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  "use strict";
+
+  const MAX_BYTES = {{ max_upload_mb }} * 1024 * 1024;
+
+  const $ = (id) => document.getElementById(id);
+  const queue = $("queue");
+  let pending = 0;
+  let busy = false;
+  const waiting = [];
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function message(text, kind) {
+    const box = $("message");
+    box.textContent = text;
+    box.className = kind === "error"
+      ? "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800"
+      : "mt-4 rounded-md bg-sky-50 px-4 py-3 text-sm text-sky-800";
+  }
+
+  // --- một dòng trong hàng đợi ---------------------------------------------
+
+  function addItem(file) {
+    const li = el("li", "rounded-lg border border-slate-200 bg-white p-4");
+
+    const head = el("div", "flex items-center gap-3");
+    head.append(el("span", "truncate text-sm font-medium text-slate-800", file.name));
+    const state = el("span", "ml-auto shrink-0 text-xs text-slate-500", "đang chờ…");
+    head.append(state);
+    li.append(head);
+
+    const track = el("div", "mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100");
+    const bar = el("div", "h-full w-0 rounded-full bg-sky-500 transition-[width] duration-150");
+    track.append(bar);
+    li.append(track);
+
+    const body = el("dl", "mt-3 hidden grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3");
+    li.append(body);
+
+    queue.prepend(li);
+    $("queue-box").classList.remove("hidden");
+    return { li, state, bar, track, body };
+  }
+
+  const FIELDS = [
+    ["full_name", "Họ tên"],
+    ["job_title", "Chức vụ"],
+    ["company_name_raw", "Công ty"],
+    ["email", "Email"],
+    ["phone", "Điện thoại"],
+    ["address", "Địa chỉ"],
+    ["website", "Website"],
+  ];
+
+  function showResult(item, body) {
+    const card = body.card;
+    item.body.className = "mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3";
+    item.body.replaceChildren();
+
+    // Trường bắt buộc mà model không đọc được thì tô đỏ ngay tại đây, không đợi màn hình
+    // review: người vừa chụp ảnh là người duy nhất còn cầm tấm danh thiếp trong tay.
+    const missing = new Set(body.missing_required || []);
+    for (const [key, label] of FIELDS) {
+      const value = card[key];
+      // Mỗi cặp nhãn/giá trị gói trong một ô riêng. Thả thẳng <dt>/<dd> vào lưới thì mỗi thẻ
+      // chiếm một ô, nhãn và giá trị của nó rơi vào hai cột khác nhau — đọc ra nghĩa khác hẳn.
+      const cell = el("div");
+      cell.append(el("dt", "text-xs text-slate-400", label));
+      cell.append(el(
+        "dd",
+        missing.has(key) ? "text-rose-600" : "text-slate-800",
+        value || (missing.has(key) ? "thiếu" : "—"),
+      ));
+      item.body.append(cell);
+    }
+
+    const foot = el("div", "col-span-full mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2 text-xs");
+    if (body.duplicate) {
+      foot.append(el("span", "text-amber-700", "Ảnh này đã quét trước đó — mở lại bản ghi cũ, không tạo bản trùng."));
+    } else if (body.ocr_error) {
+      foot.append(el("span", "text-rose-700", `Ảnh đã lưu nhưng chưa quét được: ${body.ocr_error}`));
+    } else if (body.ocr_ms) {
+      foot.append(el("span", "text-slate-400", `Quét trong ${(body.ocr_ms / 1000).toFixed(1)}s`));
+    }
+    const link = el("a", "text-sky-600 hover:underline", "Xem trong danh sách →");
+    link.href = "/cards";
+    foot.append(link);
+    item.body.append(foot);
+  }
+
+  // --- gửi một ảnh ----------------------------------------------------------
+
+  function send(file, item) {
+    return new Promise((resolve) => {
+      const form = new FormData();
+      form.append("file", file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/cards/upload");
+
+      xhr.upload.addEventListener("progress", (e) => {
+        if (!e.lengthComputable) return;
+        const percent = Math.round((e.loaded / e.total) * 100);
+        item.bar.style.width = `${percent}%`;
+        // Gửi xong không có nghĩa là quét xong: server còn gọi vision mất vài giây nữa.
+        item.state.textContent = percent < 100 ? `đang gửi ${percent}%` : "đang quét ảnh…";
+        if (percent >= 100) item.bar.classList.add("animate-pulse");
+      });
+
+      xhr.addEventListener("load", () => {
+        item.bar.classList.remove("animate-pulse");
+        item.bar.style.width = "100%";
+        let body = null;
+        try { body = JSON.parse(xhr.responseText); } catch (_) { /* không phải JSON */ }
+
+        if (xhr.status >= 200 && xhr.status < 300 && body) {
+          fail(item, false, body.duplicate ? "đã có sẵn" : (body.ocr_error ? "lưu, chưa quét được" : "xong"));
+          showResult(item, body);
+        } else {
+          const detail = body && typeof body.detail === "string" ? body.detail : `Lỗi HTTP ${xhr.status}`;
+          fail(item, true, detail);
+        }
+        resolve();
+      });
+
+      xhr.addEventListener("error", () => {
+        fail(item, true, "Không kết nối được tới máy chủ.");
+        resolve();
+      });
+
+      xhr.send(form);
+    });
+  }
+
+  function fail(item, isError, text) {
+    item.state.textContent = text;
+    item.state.className = isError
+      ? "ml-auto shrink-0 text-xs text-rose-600"
+      : "ml-auto shrink-0 text-xs text-emerald-600";
+    item.bar.className = isError
+      ? "h-full w-full rounded-full bg-rose-400"
+      : "h-full w-full rounded-full bg-emerald-500";
+  }
+
+  // --- hàng đợi -------------------------------------------------------------
+
+  async function pump() {
+    if (busy) return;
+    busy = true;
+    while (waiting.length) {
+      const job = waiting.shift();
+      await send(job.file, job.item);
+      pending -= 1;
+      updateSummary();
+    }
+    busy = false;
+  }
+
+  function updateSummary() {
+    $("queue-summary").textContent = pending > 0 ? `còn ${pending} ảnh trong hàng đợi` : "đã xong";
+  }
+
+  function enqueue(files) {
+    const accepted = [];
+    for (const file of files) {
+      // Chặn ngay ở trình duyệt hai ca server cũng chặn (400 / 413) — đỡ tải lên 10MB rồi mới
+      // biết là hỏng, nhất là khi chụp bằng 4G.
+      if (!file.type.startsWith("image/")) {
+        message(`Bỏ qua "${file.name}": không phải file ảnh.`, "error");
+        continue;
+      }
+      if (file.size > MAX_BYTES) {
+        message(`Bỏ qua "${file.name}": vượt quá {{ max_upload_mb }}MB.`, "error");
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (!accepted.length) return;
+
+    // Gửi tuần tự, không song song: mỗi lượt là một lời gọi vision qua CLIProxy, bắn 10 request
+    // cùng lúc chỉ đổi lỗi chờ lâu thành lỗi rate limit (rủi ro R5). Hàng đợi nền là task 5.2.
+    for (const file of accepted) {
+      waiting.push({ file, item: addItem(file) });
+      pending += 1;
+    }
+    updateSummary();
+    pump();
+  }
+
+  // --- sự kiện --------------------------------------------------------------
+
+  const zone = $("dropzone");
+  const IDLE = "mt-6 rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 py-12 text-center transition";
+  const OVER = "mt-6 rounded-lg border-2 border-dashed border-sky-400 bg-sky-50 px-6 py-12 text-center transition";
+
+  ["dragenter", "dragover"].forEach((name) =>
+    zone.addEventListener(name, (e) => { e.preventDefault(); zone.className = OVER; }));
+  ["dragleave", "drop"].forEach((name) =>
+    zone.addEventListener(name, (e) => { e.preventDefault(); zone.className = IDLE; }));
+
+  zone.addEventListener("drop", (e) => {
+    if (e.dataTransfer && e.dataTransfer.files.length) enqueue(e.dataTransfer.files);
+  });
+
+  // Thả ảnh ra ngoài khung là mở ảnh đó trong tab hiện tại và mất sạch hàng đợi đang chạy.
+  ["dragover", "drop"].forEach((name) =>
+    window.addEventListener(name, (e) => { if (e.target !== zone && !zone.contains(e.target)) e.preventDefault(); }));
+
+  $("btn-pick").addEventListener("click", () => $("input-file").click());
+
+  for (const id of ["input-file", "input-capture"]) {
+    $(id).addEventListener("change", (e) => {
+      enqueue(e.target.files);
+      // Reset để chọn lại đúng file vừa chọn vẫn kích hoạt `change`.
+      e.target.value = "";
+    });
+  }
+
+  $("btn-clear").addEventListener("click", () => {
+    queue.replaceChildren();
+    $("queue-box").classList.add("hidden");
+    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+  });
+})();
+</script>
+{% endblock %}
