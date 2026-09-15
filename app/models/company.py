@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -62,3 +62,52 @@ class CompanyProfile(Base):
 
     def __repr__(self) -> str:
         return f"<CompanyProfile {self.id} company={self.company_id} status={self.status}>"
+
+
+ACTIVE_JOB_ITEM_STATUSES = ("pending", "running")
+
+
+class EnrichJob(Base):
+    __tablename__ = "enrich_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column()
+
+    def __repr__(self) -> str:
+        return f"<EnrichJob {self.id} finished={self.finished_at is not None}>"
+
+
+class EnrichJobItem(Base):
+    __tablename__ = "enrich_job_items"
+    __table_args__ = (
+        Index(
+            "uq_enrich_job_items_active_company",
+            "company_id",
+            unique=True,
+            postgresql_where=text("status IN ('pending', 'running')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enrich_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sourced_fields: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime | None] = mapped_column()
+    finished_at: Mapped[datetime | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<EnrichJobItem {self.id} company={self.company_id} status={self.status}>"
