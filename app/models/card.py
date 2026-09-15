@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import String, Text, func
+from sqlalchemy import ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,12 +59,16 @@ class BusinessCard(Base):
     )
     # Gắn khi người dùng confirm, qua company_matching.upsert_company() của T (task 4.3).
     #
-    # Ràng buộc khoá ngoại tới `companies.id` ĐÃ CÓ trong DB (migration 0001) nhưng cố ý chưa
-    # khai ở đây: bảng `companies` thuộc `app/models/company.py` do **T** sở hữu và còn là stub.
-    # Khai `ForeignKey(...)` lúc này sẽ làm `Base.metadata.sorted_tables` ném NoReferencedTableError,
-    # hỏng cả autogenerate lẫn fixture dựng schema của test (task 6.1).
-    # → T khai model `Company` xong thì Q thêm lại `ForeignKey("companies.id", ondelete="SET NULL")`.
-    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    # Khoá ngoại khớp đúng ràng buộc đã có trong DB từ migration 0001 (Postgres tự đặt tên
+    # `business_cards_company_id_fkey`) — khai không tên, giống migration và `company.py`,
+    # để autogenerate so theo cột/bảng và không sinh lệnh drop/create thừa.
+    # `SET NULL` để xoá một công ty không kéo theo danh thiếp: dữ liệu gốc trên thẻ vẫn nằm
+    # ở `company_name_raw` và `ocr_raw_json`, gắn lại được sau.
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="SET NULL"),
+        index=True,
+    )
     notes: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

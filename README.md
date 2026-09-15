@@ -47,9 +47,11 @@ CLIProxyAPI về máy**: `cliproxy` chạy bằng image công khai `eceasy/cli-p
 | http://localhost:8080 | Adminer, xem DB khi debug (server `db`) |
 | http://localhost:8317 | CLIProxyAPI — Management API + gateway tới Gemini |
 | localhost:51121 | Callback OAuth của Antigravity; không mở tay, trình duyệt tự quay về |
+| http://localhost:8001 | Service `embedder` — sinh vector cho RAG (`/health`, `/embed`) |
 
-Service `embedder` (:8001) đang nằm trong profile vì `embedder/` chưa dựng (task 3.10):
-`docker compose --profile embedder up -d embedder`.
+> `embedder` chạy cùng `docker compose up -d` từ 2026-09-14 (task 3.10 xong, đã gỡ `profiles`).
+> **Lần build đầu mất vài phút**: image kéo `torch` CPU và nhúng sẵn model ~470MB vào trong
+> (cố ý — máy không có mạng vẫn chạy được, tiêu chí A1).
 
 ## Phát triển ở máy (không qua Docker)
 
