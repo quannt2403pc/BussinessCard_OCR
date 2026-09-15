@@ -4,7 +4,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, Select, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,12 @@ async def get_profile(db: AsyncSession, company_id: uuid.UUID) -> CompanyProfile
     return await db.scalar(select(CompanyProfile).where(CompanyProfile.company_id == company_id))
 
 
+async def get_company_row(db: AsyncSession, company_id: uuid.UUID) -> CompanyRow | None:
+    result = await db.execute(_company_rows().where(Company.id == company_id))
+    row = result.tuples().one_or_none()
+    return _to_company_row(*row) if row else None
+
+
 async def list_companies(
     db: AsyncSession,
     *,
@@ -53,25 +59,14 @@ async def list_companies(
         .where(*conditions)
     )
 
-    contact_count = (
-        select(func.count(BusinessCard.id))
-        .where(BusinessCard.company_id == Company.id)
-        .correlate(Company)
-        .scalar_subquery()
-    )
     rows = await db.execute(
-        select(Company, contact_count, CompanyProfile.status, CompanyProfile.generated_at)
-        .outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
+        _company_rows()
         .where(*conditions)
         .order_by(Company.display_name, Company.id)
         .offset((page - 1) * size)
         .limit(size)
     )
-    items = [
-        CompanyRow(company, int(count or 0), status, generated_at)
-        for company, count, status, generated_at in rows.tuples()
-    ]
-    return items, int(total or 0)
+    return [_to_company_row(*row) for row in rows.tuples()], int(total or 0)
 
 
 async def list_contacts(db: AsyncSession, company_id: uuid.UUID) -> Sequence[BusinessCard]:
@@ -114,6 +109,23 @@ async def save_profile(
     return result.scalar_one()
 
 
+async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
+    await db.execute(
+        insert(CompanyProfile)
+        .values(id=uuid.uuid4(), company_id=company_id, status=ProfileStatus.DRAFT.value)
+        .on_conflict_do_nothing(constraint="uq_company_profiles_company_id")
+    )
+
+
+async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
+    await db.execute(
+        delete(CompanyProfile).where(
+            CompanyProfile.company_id == company_id,
+            CompanyProfile.status == ProfileStatus.DRAFT.value,
+        )
+    )
+
+
 def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnElement[bool]]:
     conditions: list[ColumnElement[bool]] = []
 
@@ -139,6 +151,24 @@ def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnE
         )
 
     return conditions
+
+
+def _company_rows() -> Select[tuple[Company, int, str | None, datetime | None]]:
+    contact_count = (
+        select(func.count(BusinessCard.id))
+        .where(BusinessCard.company_id == Company.id)
+        .correlate(Company)
+        .scalar_subquery()
+    )
+    return select(
+        Company, contact_count, CompanyProfile.status, CompanyProfile.generated_at
+    ).outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
+
+
+def _to_company_row(
+    company: Company, count: int | None, status: str | None, generated_at: datetime | None
+) -> CompanyRow:
+    return CompanyRow(company, int(count or 0), status, generated_at)
 
 
 def _contains(term: str) -> str:

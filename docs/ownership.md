@@ -41,7 +41,7 @@ sai mà là **hai người sửa cùng một file rồi mất thời gian gỡ c
 
 | Vùng | File/thư mục |
 |------|--------------|
-| F2 — Hồ sơ doanh nghiệp | `app/services/enrichment.py`, `app/services/normalize_company.py`, `app/services/company_matching.py`, `app/prompts/enrichment.py`, `app/routers/companies.py`, `app/repositories/company.py`, `app/schemas/company.py`, `app/models/company.py`, `templates/companies/` |
+| F2 — Hồ sơ doanh nghiệp | `app/services/enrichment.py`, `app/services/enrich_jobs.py`, `app/services/normalize_company.py`, `app/services/company_matching.py`, `app/prompts/enrichment.py`, `app/routers/companies.py`, `app/repositories/company.py`, `app/repositories/enrich_job.py`, `app/schemas/company.py`, `app/schemas/enrich_job.py`, `app/models/company.py`, `templates/companies/` |
 | Service embedding (RAG) | `embedder/` (Dockerfile + FastAPI + model), `scripts/spike_embedding.py`, `docs/adr-embedding.md` |
 | Dashboard & export | `app/routers/stats.py`, `app/routers/export.py`, `templates/dashboard.html` |
 | Tài liệu & dữ liệu mẫu | `docs/` *(trừ `oauth-setup.md`, `bugs-f1-f3.md`, `accuracy.md`)*, `samples/`, `scripts/spike_*.py` |
