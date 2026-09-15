@@ -104,11 +104,9 @@ services:
     # T dựng thư mục `embedder/` ở task 3.10; khối này khai sẵn từ D1 để T không phải sửa file
     # của Q (Task.md, mục "Ba chỗ hai người gọi code của nhau").
     #
-    # TODO(Q): `embedder/Dockerfile` hiện còn là stub nên service tạm nằm trong profile — không
-    # thì `docker compose up -d` sẽ hỏng ở bước build và trượt tiêu chí D1. Task 3.10 xong thì Q
-    # xoá 2 dòng `profiles` bên dưới; từ đó `up` chạy luôn cả embedder.
-    # Trong lúc chờ, bật riêng bằng: docker compose --profile embedder up -d embedder
-    profiles: ["embedder"]
+    # 3.10 xong (2026-09-14) nên `profiles: ["embedder"]` đã gỡ: `docker compose up -d` nay
+    # dựng luôn embedder, đúng tiêu chí A1 (một lệnh chạy cả hệ thống).
+    # ⚠️ Lần build đầu kéo torch + nhúng model vào image (~2.8GB), mất vài phút.
     build: ./embedder
     environment:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}

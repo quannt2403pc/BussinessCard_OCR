@@ -132,10 +132,11 @@ erDiagram
 - `kb_chunks.metadata` là tên cột trong DB; trong ORM thuộc tính đặt là `meta` vì `metadata`
   là tên dành riêng của SQLAlchemy.
 - **Chỉ Q sinh Alembic revision** (quy ước số 5, Task.md). T cần đổi schema → báo Q.
-- Bảng `companies` / `company_profiles` đã tồn tại trong DB từ migration `0001`, nhưng **model
-  ORM (`app/models/company.py`) do T viết**. Tới lúc đó `alembic/env.py` đang bỏ qua hai bảng
-  này khi so sánh autogenerate; T khai model xong thì Q gỡ phần bỏ qua và khai lại
-  `ForeignKey("companies.id")` trong `app/models/card.py`.
+- Bảng `companies` / `company_profiles` đã tồn tại trong DB từ migration `0001`; **model ORM
+  (`app/models/company.py`) do T viết**, xong ở task 3.8. Q gỡ nốt phần nợ ngày 2026-09-14
+  (I-16): `alembic/env.py` không còn bỏ qua hai bảng ấy khi autogenerate, `app/models/card.py`
+  khai lại `ForeignKey("companies.id", ondelete="SET NULL")`. Đo lại bằng `alembic check` trên
+  Postgres thật: *No new upgrade operations detected* — ERD, migration và model nay khớp nhau.
 - Bảng theo dõi **job lập hồ sơ hàng loạt** (task 5.8 — `enrich-batch` trả `job_id`) chưa có
   trong ERD này vì Plan.md mục 3 không liệt kê. T chốt cấu trúc job rồi báo Q sinh revision bổ
   sung, chậm nhất đầu D5.
