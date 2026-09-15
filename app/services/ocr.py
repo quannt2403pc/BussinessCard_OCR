@@ -30,6 +30,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.core.config import settings
+from app.models.card import CardStatus
 from app.prompts import ocr as prompts
 from app.schemas.card import CardExtraction
 from app.services import image as image_service
@@ -154,6 +155,28 @@ async def extract_card(
 def parse_response(text: str) -> CardExtraction:
     """Chuỗi model trả về → `CardExtraction` đã chuẩn hoá. Tách riêng để test không cần gọi mạng."""
     return _validate(_to_json(text))
+
+
+def status_and_notes(result: OcrResult | None, error: str | None) -> tuple[CardStatus, str | None]:
+    """Trạng thái vòng đời + ghi chú cho một bản ghi vừa quét.
+
+    `pending` = chưa quét được, còn phải quét lại. `needs_review` = đã có dữ liệu, chờ người
+    duyệt (task 5.1). Không bao giờ tự nhảy sang `confirmed` — xác nhận là việc của người dùng
+    (task 4.3).
+
+    Nằm ở đây chứ không ở `routers/cards.py` vì từ task 5.2 có **hai** đường đi tới cùng một kết
+    luận: upload 1 ảnh (đồng bộ, trong request) và upload hàng loạt (nền, `services/card_batch.py`).
+    Hai bản sao của cùng một quy tắc vòng đời là chỗ sẽ lệch nhau mà không ai nhận ra — sửa một
+    bên rồi quên bên kia thì cùng một ảnh hỏng lại ra hai trạng thái khác nhau tuỳ đường vào.
+    """
+    if result is None:
+        return CardStatus.PENDING, f"OCR chưa chạy được: {error}"
+    if not result.extraction.is_business_card:
+        return (
+            CardStatus.NEEDS_REVIEW,
+            "Model cho rằng ảnh này không phải danh thiếp — kiểm lại trước khi xác nhận.",
+        )
+    return CardStatus.NEEDS_REVIEW, None
 
 
 # --------------------------------------------------------------------------- nội bộ

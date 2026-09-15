@@ -284,6 +284,62 @@ class CardUploadOut(BaseModel):
     elapsed_ms: int
 
 
+class BatchUploadOut(BaseModel):
+    """Kết quả `POST /api/cards/batch-upload` (task 5.2) — trả **202**, việc quét chạy ở nền.
+
+    Con số tách làm ba vì ba việc phải làm tiếp khác hẳn nhau: `queued` là phần sẽ có kết quả
+    nếu chờ, `duplicates` là phần đã có sẵn trong DB (mở `/cards` xem ngay), `rejected` là phần
+    người dùng phải xử lý bằng tay (chọn file khác, giảm dung lượng). Gộp thành một số "đã nhận
+    N ảnh" thì ai cũng phải mở danh sách ra đếm lại mới biết chuyện gì đã xảy ra.
+    """
+
+    job_id: uuid.UUID
+    total: int
+    #: Sẽ được gọi vision ở nền.
+    queued: int
+    #: Ảnh đã quét từ trước — trả lại bản ghi cũ, không gọi model.
+    duplicates: int
+    #: Không nhận được ngay từ đầu (quá dung lượng, không phải ảnh, file rỗng).
+    rejected: int
+
+
+class BatchItemOut(BaseModel):
+    """Tiến trình của một ảnh trong job (task 5.2).
+
+    Cố ý **không** trả đường dẫn ảnh trong volume: đó là đường dẫn nội bộ của container, UI chỉ
+    cần `card_id` để dựng link `/cards/{id}`.
+    """
+
+    filename: str
+    #: `pending` | `running` | `done` | `error`
+    status: str
+    card_id: uuid.UUID | None = None
+    duplicate: bool = False
+    error: str | None = None
+    #: Số lượt đã gọi model. > 1 nghĩa là đã phải retry — dấu hiệu sớm của rate limit (R5).
+    attempts: int = 0
+    ocr_ms: int | None = None
+
+
+class BatchJobOut(BaseModel):
+    """Trạng thái một job batch — `GET /api/cards/batch-jobs/{job_id}` (task 5.2, UI poll ở 5.3).
+
+    `finished` là cờ riêng chứ không suy ra từ `done + failed == total`: trong lúc job vừa bị
+    huỷ sớm (chưa kết nối OAuth) hai con số đó cũng bằng nhau, mà UI thì cần phân biệt "xong
+    hẳn" với "đang chạy dở" để biết lúc nào ngừng poll.
+    """
+
+    job_id: uuid.UUID
+    total: int
+    done: int
+    failed: int
+    running: int
+    finished: bool
+    #: Lý do cả lượt bị dừng sớm, `null` nếu chạy bình thường.
+    aborted_reason: str | None = None
+    items: list[BatchItemOut]
+
+
 def _clean_scalar(value: Any) -> Any:
     """Chuẩn hoá một giá trị vô hướng do model trả về.
 
