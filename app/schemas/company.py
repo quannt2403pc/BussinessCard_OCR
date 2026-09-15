@@ -44,19 +44,19 @@ class SourceRef(BaseModel):
 class CompanyProfileSchema(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    legal_name: str | None = None
-    tax_code: str | None = None
+    legal_name: str | None = Field(default=None, max_length=255)
+    tax_code: str | None = Field(default=None, max_length=64)
     founded_year: int | None = Field(default=None, ge=1800, le=2100)
 
-    size_label: str | None = None
-    employee_range: str | None = None
+    size_label: str | None = Field(default=None, max_length=64)
+    employee_range: str | None = Field(default=None, max_length=64)
     industry: list[str] = Field(default_factory=list)
     products: list[str] = Field(default_factory=list)
 
     address: str | None = None
-    website: str | None = None
-    phone: str | None = None
-    email: str | None = None
+    website: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
 
     description: str | None = None
     sources: dict[str, list[SourceRef]] = Field(default_factory=dict)

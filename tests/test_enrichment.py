@@ -357,6 +357,21 @@ async def test_enrich_company_without_grounding_skips_structuring() -> None:
     assert profile.unverified_fields == []
 
 
+def test_value_longer_than_db_column_is_cleared_not_truncated() -> None:
+    long_range = "9.877 nhân sự (tính đến ngày 31/12/2023) / Khoảng 10.000 lao động"
+    raw = {
+        "tax_code": "0300588569",
+        "employee_range": long_range,
+        "sources": {"tax_code": [TAX_PAGE], "employee_range": [TAX_PAGE]},
+    }
+    profile = validate(raw)
+    assert len(long_range) > 64
+    assert profile.employee_range is None
+    assert profile.tax_code == "0300588569"
+    assert "employee_range" not in profile.sources
+    assert profile.unverified_fields == ["employee_range"]
+
+
 async def test_enrich_company_rejects_blank_name() -> None:
     with pytest.raises(ValueError):
         await enrich_company("   ")

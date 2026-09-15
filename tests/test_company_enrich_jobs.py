@@ -91,6 +91,13 @@ def test_describe_failure(exc: Exception, retry: bool, abort_job: bool, fragment
     assert fragment in failure.message
 
 
+def test_unexpected_failure_message_hides_details() -> None:
+    exc = RuntimeError("INSERT INTO company_profiles ... [parameters: {'tax_code': '0300588569'}]")
+    message = describe_failure(exc).message
+    assert message == "Lỗi ngoài dự kiến (RuntimeError)."
+    assert "INSERT" not in message
+
+
 class Recorder:
     def __init__(self, *results: object) -> None:
         self.results = list(results)

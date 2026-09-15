@@ -77,7 +77,7 @@ def describe_failure(exc: BaseException) -> Failure:
         return Failure("Model trả kết quả không đọc được.", retry=True)
     if isinstance(exc, LLMError):
         return Failure(f"Không gọi được LLM: {exc}", retry=True)
-    return Failure(f"Lỗi ngoài dự kiến: {exc}")
+    return Failure(f"Lỗi ngoài dự kiến ({type(exc).__name__}).")
 
 
 async def run_with_retry(
@@ -91,6 +91,7 @@ async def run_with_retry(
         except Exception as exc:
             failure = describe_failure(exc)
             if not failure.retry:
+                logger.warning("Enrich hỏng lượt %d, không thử lại: %r", attempt, exc)
                 return Outcome(attempts=attempt, failure=failure)
             if attempt == MAX_ATTEMPTS:
                 message = f"Thử {attempt} lượt vẫn hỏng: {failure.message}"
@@ -141,7 +142,9 @@ async def run_job(job_id: uuid.UUID) -> None:
     for item_id, result in zip(item_ids, results, strict=True):
         if isinstance(result, BaseException):
             logger.error("Enrich job %s: lỗi ngoài dự kiến ở %s", job_id, item_id, exc_info=result)
-            await _finish_item(item_id, JobItemStatus.ERROR, error=f"Lỗi ngoài dự kiến: {result}")
+            await _finish_item(
+                item_id, JobItemStatus.ERROR, error=f"Lỗi ngoài dự kiến ({type(result).__name__})."
+            )
 
     async with SessionLocal() as db:
         await job_repo.finish_job(db, job_id)
