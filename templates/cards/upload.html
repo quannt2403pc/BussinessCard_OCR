@@ -24,10 +24,16 @@
       Tối đa <strong>{{ max_upload_mb }}MB</strong> mỗi ảnh.
     </p>
   </div>
-  <a href="/cards"
-     class="ml-auto rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-    Xem danh sách
-  </a>
+  <div class="ml-auto flex items-center gap-2">
+    <a href="/cards/batch"
+       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Quét hàng loạt
+    </a>
+    <a href="/cards"
+       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Xem danh sách
+    </a>
+  </div>
 </div>
 
 <section id="dropzone"
@@ -158,8 +164,10 @@
     } else if (body.ocr_ms) {
       foot.append(el("span", "text-slate-400", `Quét trong ${(body.ocr_ms / 1000).toFixed(1)}s`));
     }
-    const link = el("a", "text-sky-600 hover:underline", "Xem trong danh sách →");
-    link.href = "/cards";
+    // Dẫn thẳng vào màn hình review của đúng thẻ vừa quét (task 5.1): người vừa chụp ảnh là
+    // người duy nhất còn cầm tấm danh thiếp trong tay, sửa ngay lúc này là rẻ nhất.
+    const link = el("a", "text-sky-600 hover:underline", "Review thẻ này →");
+    link.href = `/cards/${card.id}`;
     foot.append(link);
     item.body.append(foot);
   }

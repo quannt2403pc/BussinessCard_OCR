@@ -25,10 +25,16 @@
       <em>Xác nhận</em> để gắn vào danh sách doanh nghiệp.
     </p>
   </div>
-  <a href="/cards/upload"
-     class="ml-auto rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
-    Quét danh thiếp mới
-  </a>
+  <div class="ml-auto flex items-center gap-2">
+    <a href="/cards/batch"
+       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Quét hàng loạt
+    </a>
+    <a href="/cards/upload"
+       class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
+      Quét danh thiếp mới
+    </a>
+  </div>
 </div>
 
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -200,7 +206,11 @@
     tr.append(thumb);
 
     const who = el("td", "px-4 py-3");
-    who.append(el("div", "font-medium text-slate-900", card.full_name || "(chưa có tên)"));
+    // Tên là chỗ mắt rơi vào đầu tiên → cho nó dẫn thẳng sang màn hình review (task 5.1),
+    // thay vì bắt người dùng đi tìm một nút "Sửa" nhỏ ở cuối dòng.
+    const open = el("a", "font-medium text-sky-700 hover:underline", card.full_name || "(chưa có tên)");
+    open.href = `/cards/${card.id}`;
+    who.append(open);
     who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
     tr.append(who);
 
@@ -227,6 +237,9 @@
 
     const actions = el("td", "px-4 py-3");
     const group = el("div", "flex justify-end gap-2");
+    const review = el("a", "rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 transition hover:bg-slate-50", "Review");
+    review.href = `/cards/${card.id}`;
+    group.append(review);
     if (card.status !== "confirmed") {
       group.append(actionButton("Xác nhận", "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
         () => confirmCard(card)));

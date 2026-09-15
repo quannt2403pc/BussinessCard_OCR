@@ -1,3 +1,477 @@
 {# Review OCR: ảnh gốc trái, form phải, tô vàng trường confidence thấp. #}
 {# Chủ sở hữu: Q | Task: 5.1 | xem Task.md #}
-{# TODO(Q, task 5.1): chưa triển khai. #}
+{#
+  Dữ liệu do JavaScript gọi `GET /api/cards/{id}` (task 4.2) đổ vào, không render sẵn từ Jinja —
+  xem lý do trong docstring của `card_detail_page()` ở `app/routers/cards.py`: sau mỗi lần Lưu,
+  server trả về bản **đã chuẩn hoá** (`0912 345 678` → `+84912345678`) và trang phải vẽ lại từ
+  đúng payload đó, nếu không sẽ có hai nguồn sự thật lệch nhau.
+
+  ⚠️ Mọi giá trị ở đây do model đọc từ ảnh người lạ đưa. Ghi vào DOM bằng `textContent` hoặc
+  `input.value`, tuyệt đối không `innerHTML`.
+
+  Ba điểm thiết kế đáng nói:
+
+  1. **Chỉ PATCH những ô đã sửa.** `CardUpdateIn` phân biệt "không gửi" với "gửi null", nên gửi
+     cả form sẽ ghi đè cả những trường người dùng không đụng tới — và ô trống sẽ xoá trắng dữ
+     liệu model đọc đúng.
+  2. **Ô rỗng gửi `null` chứ không gửi `""`.** Xoá một giá trị model đọc nhầm là việc hay làm
+     nhất ở màn hình này; gửi chuỗi rỗng thì DB đầy `''` mà mọi truy vấn về sau đều phải lọc tay.
+  3. **Bấm "Xác nhận" khi còn thay đổi chưa lưu thì lưu trước rồi mới xác nhận.** Ngược lại là
+     người dùng sửa một trường rồi xác nhận và thay đổi đó bốc hơi không một lời nào.
+#}
+{% extends "base.html" %}
+
+{% block title %}Review danh thiếp{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Review danh thiếp</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Đối chiếu với ảnh bên trái rồi sửa những chỗ máy đọc sai.
+      Ô <span class="rounded bg-amber-100 px-1 text-amber-800">tô vàng</span> là chỗ model tự
+      chấm điểm thấp — kiểm những ô đó trước.
+    </p>
+  </div>
+  <a href="/cards"
+     class="ml-auto rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+    ← Danh sách
+  </a>
+</div>
+
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+<div id="loading" class="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500">
+  Đang tải danh thiếp…
+</div>
+
+<div id="layout" class="mt-6 hidden gap-6 lg:grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+
+  {# --- cột trái: ảnh model đã nhìn + siêu dữ liệu --- #}
+  <aside class="space-y-4 lg:sticky lg:top-6 lg:self-start">
+    <figure class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <a id="image-link" href="#" target="_blank" rel="noopener" class="block">
+        <img id="image" src="" alt="Ảnh danh thiếp" class="w-full bg-slate-100 object-contain">
+      </a>
+      <figcaption class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+        Đây là ảnh <strong>sau tiền xử lý</strong> — đúng bản mà model đã đọc (task 3.2).
+      </figcaption>
+    </figure>
+
+    <dl class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <div class="flex items-center justify-between gap-3">
+        <dt class="text-slate-500">Trạng thái</dt>
+        <dd id="m-status"></dd>
+      </div>
+      <div class="mt-2 flex items-center justify-between gap-3">
+        <dt class="text-slate-500">Ngày quét</dt>
+        <dd id="m-uploaded" class="text-slate-700"></dd>
+      </div>
+      <div class="mt-2 flex items-center justify-between gap-3">
+        <dt class="text-slate-500">Công ty đã gắn</dt>
+        <dd id="m-company" class="text-right text-slate-700"></dd>
+      </div>
+      <div class="mt-2 flex items-center justify-between gap-3">
+        <dt class="text-slate-500">Hash ảnh</dt>
+        <dd id="m-hash" class="font-mono text-xs text-slate-400"></dd>
+      </div>
+    </dl>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <summary class="cursor-pointer text-slate-600">JSON gốc model trả về</summary>
+      <p class="mt-2 text-xs text-slate-400">
+        Nguyên văn trước khi chuẩn hoá — dùng để đối chiếu khi nghi máy đọc sai.
+      </p>
+      <pre id="m-raw" class="mt-2 max-h-80 overflow-auto rounded bg-slate-900 p-3 text-xs leading-relaxed text-slate-100"></pre>
+    </details>
+  </aside>
+
+  {# --- cột phải: form --- #}
+  <section>
+    <div id="banner" class="mb-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+    <form id="form" class="rounded-lg border border-slate-200 bg-white p-5">
+      <div id="fields" class="grid gap-4 sm:grid-cols-2"></div>
+
+      <div class="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+        <button type="submit" id="btn-save"
+                class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+          Lưu
+        </button>
+        <button type="button" id="btn-confirm"
+                class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+          Xác nhận
+        </button>
+        <span id="dirty" class="text-xs text-amber-700"></span>
+        <button type="button" id="btn-delete"
+                class="ml-auto rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
+          Xoá danh thiếp
+        </button>
+      </div>
+    </form>
+
+    <p class="mt-3 text-xs text-slate-400">
+      Xác nhận chỉ gắn danh thiếp vào bảng công ty. Hồ sơ doanh nghiệp <strong>không</strong> tự
+      sinh — sang màn hình Doanh nghiệp tích chọn rồi bấm nút.
+    </p>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  "use strict";
+
+  const CARD_ID = "{{ card_id }}";
+  const LOW = {{ low_confidence }};
+
+  // Bảy trường bắt buộc của tiêu chí A3 (Plan.md mục 8) — đánh dấu * và cảnh báo khi trống.
+  const REQUIRED = new Set(
+    ["full_name", "job_title", "company_name_raw", "email", "phone", "address", "website"]);
+
+  const FIELDS = [
+    { name: "full_name",        label: "Họ tên",          type: "text" },
+    { name: "job_title",        label: "Chức vụ",         type: "text" },
+    { name: "company_name_raw", label: "Công ty",         type: "text", wide: true },
+    { name: "email",            label: "Email",           type: "email" },
+    { name: "website",          label: "Website",         type: "url" },
+    { name: "phone",            label: "Điện thoại",      type: "tel" },
+    { name: "phone_alt",        label: "Điện thoại phụ",  type: "tel" },
+    { name: "address",          label: "Địa chỉ",         type: "textarea", wide: true },
+    { name: "language_detected",label: "Ngôn ngữ",        type: "lang" },
+    { name: "notes",            label: "Ghi chú",         type: "textarea", wide: true },
+  ];
+
+  const BADGES = {
+    pending:      ["Chưa quét được", "bg-rose-50 text-rose-700 ring-rose-200"],
+    needs_review: ["Chờ duyệt",      "bg-amber-50 text-amber-700 ring-amber-200"],
+    confirmed:    ["Đã xác nhận",    "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+  };
+
+  const BASE_INPUT =
+    "mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-1";
+  const NORMAL = `${BASE_INPUT} border-slate-300 focus:border-sky-500 focus:ring-sky-500`;
+  const LOW_CONF = `${BASE_INPUT} border-amber-300 bg-amber-50 focus:border-amber-500 focus:ring-amber-500`;
+
+  const $ = (id) => document.getElementById(id);
+
+  /** Giá trị hiện có trên server, để biết ô nào thật sự đã đổi. */
+  let loaded = {};
+  /** Ô nhập theo tên trường. */
+  const inputs = new Map();
+
+  // --- tiện ích -------------------------------------------------------------
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function message(text, kind) {
+    const box = $("message");
+    box.textContent = text;
+    box.className = kind === "error"
+      ? "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800"
+      : "mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800";
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function clearMessage() {
+    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString("vi-VN");
+  }
+
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((e) => e.msg).join("; ");
+    } catch (_) { /* body không phải JSON */ }
+    return `Lỗi HTTP ${res.status}`;
+  }
+
+  // --- dựng form ------------------------------------------------------------
+
+  function buildField(spec) {
+    const cell = el("div", spec.wide ? "sm:col-span-2" : "");
+
+    const head = el("div", "flex items-baseline gap-2");
+    const label = el("label", "text-xs font-medium text-slate-500", spec.label);
+    label.htmlFor = `f-${spec.name}`;
+    head.append(label);
+    if (REQUIRED.has(spec.name)) head.append(el("span", "text-xs text-rose-400", "*"));
+    head.append(el("span", "ml-auto text-xs", ""));   // chỗ dành cho chip confidence
+    cell.append(head);
+
+    let input;
+    if (spec.type === "textarea") {
+      input = document.createElement("textarea");
+      input.rows = spec.name === "address" ? 2 : 2;
+    } else {
+      input = document.createElement("input");
+      // `type=email`/`url` bật validate sẵn của trình duyệt. Không dùng cho `tel` — không có
+      // định dạng số điện thoại nào đúng cho cả 5 ngôn ngữ, chặn ở đây chỉ chặn nhầm.
+      input.type = spec.type === "lang" ? "text" : spec.type;
+      if (spec.type === "lang") input.setAttribute("list", "lang-list");
+    }
+    input.id = `f-${spec.name}`;
+    input.name = spec.name;
+    input.className = NORMAL;
+    input.addEventListener("input", updateDirty);
+    cell.append(input);
+    inputs.set(spec.name, input);
+
+    const note = el("p", "mt-1 hidden text-xs text-amber-700");
+    note.dataset.note = spec.name;
+    cell.append(note);
+
+    return cell;
+  }
+
+  function buildForm() {
+    $("fields").replaceChildren(...FIELDS.map(buildField));
+
+    // Gợi ý 5 ngôn ngữ trong phạm vi demo, nhưng vẫn cho gõ tự do: model có thể trả `zh-tw`
+    // và một ô <select> sẽ âm thầm đổi nó thành giá trị khác.
+    const list = document.createElement("datalist");
+    list.id = "lang-list";
+    for (const code of ["vi", "en", "ja", "ko", "zh"]) {
+      const opt = document.createElement("option");
+      opt.value = code;
+      list.append(opt);
+    }
+    $("fields").append(list);
+  }
+
+  // --- đổ dữ liệu -----------------------------------------------------------
+
+  function fill(card) {
+    loaded = {};
+    const confidence = card.confidence || {};
+    let lowCount = 0;
+
+    for (const spec of FIELDS) {
+      const value = card[spec.name];
+      const input = inputs.get(spec.name);
+      input.value = value == null ? "" : String(value);
+      loaded[spec.name] = input.value;
+
+      const chip = input.parentElement.querySelector("span.ml-auto");
+      const note = input.parentElement.querySelector(`[data-note="${spec.name}"]`);
+      const score = confidence[spec.name];
+
+      if (typeof score === "number") {
+        const low = score < LOW;
+        if (low) lowCount += 1;
+        chip.textContent = `độ tin cậy ${Math.round(score * 100)}%`;
+        chip.className = low ? "ml-auto text-xs text-amber-700" : "ml-auto text-xs text-slate-300";
+        input.className = low ? LOW_CONF : NORMAL;
+      } else {
+        chip.textContent = "";
+        chip.className = "ml-auto text-xs";
+        input.className = NORMAL;
+      }
+
+      // Trường bắt buộc mà trống: nhắc ngay dưới ô, không đợi tới lúc bấm Xác nhận.
+      if (REQUIRED.has(spec.name) && !input.value) {
+        note.textContent = "Trường bắt buộc còn trống — điền nếu thẻ có in.";
+        note.className = "mt-1 text-xs text-amber-700";
+      } else {
+        note.className = "mt-1 hidden text-xs text-amber-700";
+      }
+    }
+
+    // --- cột trái ---
+    $("image").src = `/api/cards/${card.id}/image`;
+    $("image-link").href = `/api/cards/${card.id}/image`;
+    $("image").addEventListener("error", () => {
+      $("image").replaceWith(el("div",
+        "flex h-48 items-center justify-center bg-slate-100 text-sm text-slate-400",
+        "Ảnh không còn trong volume uploads."));
+    }, { once: true });
+
+    const [label, tone] = BADGES[card.status] || [card.status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    $("m-status").replaceChildren(el("span",
+      `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    $("m-uploaded").textContent = formatDate(card.uploaded_at);
+    $("m-company").textContent = card.company_id ? "đã gắn" : "chưa gắn";
+    $("m-hash").textContent = (card.image_hash || "").slice(0, 16) + "…";
+    $("m-raw").textContent = card.ocr_raw_json
+      ? JSON.stringify(card.ocr_raw_json, null, 2)
+      : "Chưa quét được nên chưa có JSON nào.";
+
+    banner(card, lowCount);
+    $("btn-confirm").textContent = card.status === "confirmed" ? "Xác nhận lại" : "Xác nhận";
+    updateDirty();
+  }
+
+  function banner(card, lowCount) {
+    const box = $("banner");
+    const missing = FIELDS.filter((f) => REQUIRED.has(f.name) && !inputs.get(f.name).value).length;
+
+    if (card.status === "pending") {
+      // `notes` chứa lý do quét hỏng (router ghi ở task 3.1 / 5.2) — đây là thông tin quan
+      // trọng nhất trên màn hình, đưa lên trên cùng.
+      box.textContent = card.notes || "Ảnh đã lưu nhưng chưa quét được. Xoá rồi upload lại để thử lần nữa.";
+      box.className = "mb-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800";
+      return;
+    }
+    if (missing || lowCount) {
+      const parts = [];
+      if (missing) parts.push(`${missing} trường bắt buộc còn trống`);
+      if (lowCount) parts.push(`${lowCount} trường máy đọc không chắc`);
+      box.textContent = `Cần kiểm: ${parts.join(" · ")}.`;
+      box.className = "mb-4 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800";
+      return;
+    }
+    if (card.status === "confirmed") {
+      box.textContent = "Danh thiếp đã được xác nhận.";
+      box.className = "mb-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800";
+      return;
+    }
+    box.className = "mb-4 hidden rounded-md px-4 py-3 text-sm";
+  }
+
+  // --- thay đổi chưa lưu ----------------------------------------------------
+
+  /** Những trường người dùng thật sự đã đổi, dạng payload cho PATCH. */
+  function changes() {
+    const out = {};
+    for (const [name, input] of inputs) {
+      const value = input.value.trim();
+      if (value !== (loaded[name] || "")) out[name] = value === "" ? null : value;
+    }
+    return out;
+  }
+
+  function updateDirty() {
+    const count = Object.keys(changes()).length;
+    $("dirty").textContent = count ? `${count} thay đổi chưa lưu` : "";
+    $("btn-save").disabled = count === 0;
+  }
+
+  function busy(on) {
+    $("btn-save").disabled = on || Object.keys(changes()).length === 0;
+    $("btn-confirm").disabled = on;
+  }
+
+  // --- gọi API --------------------------------------------------------------
+
+  async function load() {
+    const res = await fetch(`/api/cards/${CARD_ID}`);
+    if (!res.ok) {
+      $("loading").textContent = await readError(res);
+      $("loading").className =
+        "mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-10 text-center text-sm text-rose-800";
+      return;
+    }
+    fill(await res.json());
+    $("loading").classList.add("hidden");
+    $("layout").classList.remove("hidden");
+  }
+
+  /** Lưu các ô đã sửa. Trả `true` nếu server đã nhận (hoặc không có gì để lưu). */
+  async function save({ quiet = false } = {}) {
+    const payload = changes();
+    if (!Object.keys(payload).length) return true;
+
+    const res = await fetch(`/api/cards/${CARD_ID}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      message(await readError(res), "error");
+      return false;
+    }
+    // Vẽ lại từ payload server trả về: số điện thoại vừa gõ đã được chuẩn hoá, người dùng cần
+    // thấy dạng thật sự nằm trong DB chứ không phải dạng mình vừa gõ.
+    fill(await res.json());
+    if (!quiet) message("Đã lưu.", "ok");
+    return true;
+  }
+
+  async function confirmCard() {
+    clearMessage();
+    busy(true);
+    try {
+      // Lưu trước, im lặng: bấm Xác nhận trong lúc còn sửa dở thì ý người dùng là "lấy cả hai".
+      if (!(await save({ quiet: true }))) return;
+
+      const res = await fetch(`/api/cards/${CARD_ID}/confirm`, { method: "POST" });
+      if (!res.ok) {
+        message(await readError(res), "error");
+        return;
+      }
+      const body = await res.json();
+      await load();
+      message(body.detail || "Đã xác nhận và gắn công ty.", body.company_matched ? "ok" : "error");
+    } finally {
+      busy(false);
+    }
+  }
+
+  function askDelete() {
+    return new Promise((resolve) => {
+      const overlay = el("div", "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4");
+      const box = el("div", "w-full max-w-sm rounded-lg bg-white p-5 shadow-lg");
+      box.append(el("p", "font-medium text-slate-900", "Xoá danh thiếp này?"));
+      box.append(el("p", "mt-1 text-sm text-slate-600", "Ảnh gốc cũng bị xoá khỏi volume."));
+
+      const buttons = el("div", "mt-4 flex justify-end gap-2");
+      const close = (value) => { overlay.remove(); resolve(value); };
+      const button = (text, tone, value) => {
+        const b = el("button", `rounded-md border px-3 py-1.5 text-sm transition ${tone}`, text);
+        b.type = "button";
+        b.addEventListener("click", () => close(value));
+        return b;
+      };
+      buttons.append(button("Huỷ", "border-slate-300 text-slate-600 hover:bg-slate-50", false));
+      buttons.append(button("Xoá", "border-rose-300 bg-rose-600 text-white hover:bg-rose-700", true));
+      box.append(buttons);
+      overlay.append(box);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
+      document.body.append(overlay);
+    });
+  }
+
+  // --- sự kiện --------------------------------------------------------------
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearMessage();
+    busy(true);
+    try { await save(); } finally { busy(false); }
+  });
+
+  $("btn-confirm").addEventListener("click", confirmCard);
+
+  $("btn-delete").addEventListener("click", async () => {
+    if (!(await askDelete())) return;
+    const res = await fetch(`/api/cards/${CARD_ID}`, { method: "DELETE" });
+    if (!res.ok) {
+      message(await readError(res), "error");
+      return;
+    }
+    window.location.href = "/cards";
+  });
+
+  // Đóng tab / bấm Back khi còn thay đổi chưa lưu thì hỏi lại — form này là nơi người dùng gõ
+  // tay từng ký tự, mất là gõ lại từ đầu.
+  window.addEventListener("beforeunload", (e) => {
+    if (Object.keys(changes()).length) e.preventDefault();
+  });
+
+  buildForm();
+  load();
+})();
+</script>
+{% endblock %}

@@ -1,10 +1,15 @@
 """F1 — upload, danh sách, chi tiết, sửa, xoá, confirm danh thiếp.
 
-Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5 | xem Task.md
+Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3 | xem Task.md
 
 Router khai **đường dẫn đầy đủ** thay vì đặt `prefix="/api/cards"`, theo đúng tiền lệ
-`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn hai trang HTML
-(`/cards`, `/cards/upload`). Gom vào một router để không phải đụng `app/main.py` (quy ước số 4).
+`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn bốn trang HTML
+(`/cards`, `/cards/upload`, `/cards/batch`, `/cards/{id}`). Gom vào một router để không phải đụng
+`app/main.py` (quy ước số 4).
+
+⚠️ **Thứ tự khai báo route HTML là một phần của thiết kế**: `/cards/upload` và `/cards/batch` phải
+đứng trước `/cards/{card_id}`, nếu không hai chữ `upload`/`batch` sẽ rơi vào route chi tiết và
+chết ở bước parse UUID.
 
 Một lượt upload đi qua đúng bốn bước, theo thứ tự:
 
@@ -51,6 +56,9 @@ from app.core.templates import templates
 from app.models.card import BusinessCard, CardStatus
 from app.repositories import card as card_repo
 from app.schemas.card import (
+    BatchItemOut,
+    BatchJobOut,
+    BatchUploadOut,
     CardConfirmOut,
     CardDetailOut,
     CardListOut,
@@ -58,8 +66,8 @@ from app.schemas.card import (
     CardUpdateIn,
     CardUploadOut,
 )
+from app.services import card_batch, llm, normalize, ocr
 from app.services import image as image_service
-from app.services import llm, normalize, ocr
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +81,15 @@ DEFAULT_PAGE_SIZE = 20
 
 #: Bộ lọc trạng thái hợp lệ của ô select trên `templates/cards/list.html`.
 STATUS_CHOICES: tuple[str, ...] = tuple(s.value for s in CardStatus)
+
+#: Trần số ảnh một lượt batch (task 5.2). Không phải giới hạn kỹ thuật mà là giới hạn về sự
+#: kiên nhẫn: 50 ảnh × ~4s / 2 luồng đã là hơn 1 phút rưỡi ngồi nhìn thanh tiến trình.
+MAX_BATCH_FILES = 50
+
+#: Điểm `confidence` dưới mức này thì `templates/cards/detail.html` tô vàng (task 5.1). 0.75 đo
+#: từ kết quả thật ở task 3.4: chữ rõ model chấm 0.9–1.0, chỗ mờ tụt hẳn xuống 0.5–0.7 — đặt
+#: ngưỡng ở giữa thì vàng nghĩa là "đáng kiểm", không phải "vàng cả thẻ nên thôi kệ".
+LOW_CONFIDENCE = 0.75
 
 
 # --------------------------------------------------------------------------- trang HTML
@@ -106,6 +123,47 @@ async def cards_upload_page(request: Request) -> HTMLResponse:
         {
             "active_nav": "cards",
             "max_upload_mb": settings.max_upload_mb,
+        },
+    )
+
+
+@router.get("/cards/batch", response_class=HTMLResponse, tags=["ui"])
+async def cards_batch_page(request: Request) -> HTMLResponse:
+    """Màn hình upload hàng loạt + theo dõi tiến trình (task 5.3).
+
+    **Phải khai trước `/cards/{card_id}`.** Starlette so đường dẫn theo thứ tự khai báo, đặt sau
+    thì `/cards/batch` rơi vào route chi tiết, `batch` không parse được thành UUID và người dùng
+    nhận 422 thay vì trang này.
+    """
+    return templates.TemplateResponse(
+        request,
+        "cards/batch.html",
+        {
+            "active_nav": "cards",
+            "max_upload_mb": settings.max_upload_mb,
+            "max_batch_files": MAX_BATCH_FILES,
+            "max_concurrency": card_batch.MAX_CONCURRENCY,
+        },
+    )
+
+
+@router.get("/cards/{card_id}", response_class=HTMLResponse, tags=["ui"])
+async def card_detail_page(request: Request, card_id: uuid.UUID) -> HTMLResponse:
+    """Màn hình review một danh thiếp: ảnh trái, form phải (task 5.1).
+
+    Route **không** đọc DB, chỉ truyền `card_id` xuống template rồi để JavaScript gọi
+    `GET /api/cards/{id}` — cùng lối với `/cards` (task 4.4) và `/settings` (task 2.5). Lý do
+    không phải là lười: sau mỗi lần Lưu, server chuẩn hoá lại SĐT/email và trả bản đã chuẩn hoá
+    về, trang phải vẽ lại từ đúng payload đó. Render sẵn từ Jinja thì trang có hai nguồn sự
+    thật — bản lúc mở trang và bản sau khi lưu — và chúng sẽ lệch nhau ngay lần sửa đầu tiên.
+    """
+    return templates.TemplateResponse(
+        request,
+        "cards/detail.html",
+        {
+            "active_nav": "cards",
+            "card_id": str(card_id),
+            "low_confidence": LOW_CONFIDENCE,
         },
     )
 
@@ -161,7 +219,7 @@ async def upload_card(
         logger.warning("Quét ảnh %s thất bại: %s", relative_path, exc)
 
     fields = ocr_result.extraction.card_columns() if ocr_result else {}
-    card_status, notes = _status_and_notes(ocr_result, ocr_error)
+    card_status, notes = ocr.status_and_notes(ocr_result, ocr_error)
 
     try:
         card = await card_repo.create_card(
@@ -202,6 +260,82 @@ async def upload_card(
         ocr_error=ocr_error,
         elapsed_ms=elapsed_ms,
     )
+
+
+@router.post(
+    "/api/cards/batch-upload",
+    tags=["cards"],
+    response_model=BatchUploadOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Upload nhiều ảnh danh thiếp, quét ở nền",
+)
+async def batch_upload_cards(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    files: Annotated[list[UploadFile], File(description="Nhiều ảnh danh thiếp")],
+) -> BatchUploadOut:
+    """Nhận nhiều ảnh → lưu hết ngay → trả `job_id`, việc quét chạy nền (task 5.2).
+
+    Ranh giới giữa "làm ngay" và "làm sau" đặt ở chỗ **mất thì có lấy lại được không**: file
+    người dùng vừa chọn chỉ tồn tại trong request này, nên đọc–băm–nén–ghi volume–tạo bản ghi
+    `pending` đều làm ngay tại đây. Gọi vision mới đẩy ra nền, vì đó là phần mất 3–5 giây/ảnh và
+    là phần duy nhất chạm rate limit. Chi tiết hàng đợi: `app/services/card_batch.py`.
+
+    **Một ảnh hỏng không làm hỏng cả lượt.** Ảnh quá dung lượng hay không phải file ảnh chỉ làm
+    hỏng đúng dòng của nó và lý do nằm ngay trong `items[]`; trả 4xx cho cả request là bắt người
+    dùng chọn lại 29 ảnh còn lại chỉ vì một file lỡ tay.
+    """
+    if not files:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Chưa chọn ảnh nào.")
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Tối đa {MAX_BATCH_FILES} ảnh một lượt, lượt này có {len(files)}.",
+        )
+
+    started = time.perf_counter()
+    items = [await _stage(db, upload) for upload in files]
+
+    job = card_batch.create_job(items)
+    card_batch.start(job)
+
+    queued = sum(1 for item in items if item.status is card_batch.ItemStatus.PENDING)
+    duplicates = sum(1 for item in items if item.duplicate)
+    rejected = sum(1 for item in items if item.status is card_batch.ItemStatus.ERROR)
+    logger.info(
+        "Batch job %s: nhận %d ảnh trong %dms — %d xếp hàng, %d trùng, %d bị từ chối",
+        job.id,
+        len(items),
+        _ms_since(started),
+        queued,
+        duplicates,
+        rejected,
+    )
+    return BatchUploadOut(
+        job_id=job.id,
+        total=len(items),
+        queued=queued,
+        duplicates=duplicates,
+        rejected=rejected,
+    )
+
+
+@router.get("/api/cards/batch-jobs/{job_id}", response_model=BatchJobOut, tags=["cards"])
+async def get_batch_job(job_id: uuid.UUID) -> BatchJobOut:
+    """Tiến trình một lượt batch — `templates/cards/batch.html` poll endpoint này (task 5.3)."""
+    job = card_batch.get_job(job_id)
+    if job is None:
+        # Nói thẳng job sống trong bộ nhớ: 404 trơ ở đây đọc như "ID sai", trong khi nguyên nhân
+        # thật thường là container vừa restart (`--reload` nạp lại khi sửa code) — hai việc phải
+        # làm tiếp hoàn toàn khác nhau.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Không còn theo dõi được lượt quét này. Job nằm trong bộ nhớ tiến trình nên mất "
+                "khi `api` khởi động lại hoặc sau 20 lượt gần nhất. Ảnh vẫn an toàn — mở /cards "
+                "để xem, thẻ nào chưa quét được sẽ ở trạng thái “Chưa quét được” kèm lý do."
+            ),
+        )
+    return _job_out(job)
 
 
 @router.get("/api/cards", response_model=CardListOut, tags=["cards"])
@@ -391,6 +525,104 @@ async def confirm_card(
 # --------------------------------------------------------------------------- nội bộ
 
 
+async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
+    """Một file trong lượt batch: đọc → băm → chống trùng → nén → ghi volume → bản ghi `pending`.
+
+    Trả về `BatchItem` **ở mọi nhánh**, kể cả nhánh hỏng: hàng đợi cần một dòng cho mỗi file
+    người dùng đã chọn, nếu không thì file bị loại sẽ biến mất khỏi giao diện và người dùng ngồi
+    đếm "mình chọn 12 ảnh sao chỉ thấy 11".
+
+    Đây là phần **đồng bộ** của batch nên nó chặn event loop trong lúc chạy: Pillow nén một ảnh
+    mất khoảng 100ms, 50 ảnh là ~5 giây. Chấp nhận được vì trong 5 giây đó client duy nhất đang
+    chờ chính là request này — trang `/cards/batch` chỉ bắt đầu poll sau khi nhận được 202.
+    """
+    filename = (upload.filename or "").strip() or "(không có tên file)"
+
+    try:
+        raw = await _read_limited(upload)
+    except HTTPException as exc:
+        # Bắt lại chính lỗi mình vừa ném ra thay vì chép lại luật giới hạn dung lượng lần thứ
+        # hai: upload 1 ảnh trả 4xx là đúng, còn ở đây cùng một luật phải thành một dòng lỗi.
+        return card_batch.BatchItem(
+            filename=filename, status=card_batch.ItemStatus.ERROR, error=str(exc.detail)
+        )
+
+    image_hash = hashlib.sha256(raw).hexdigest()
+    if (existing := await card_repo.get_by_hash(db, image_hash)) is not None:
+        return card_batch.BatchItem(
+            filename=filename,
+            card_id=existing.id,
+            status=card_batch.ItemStatus.DONE,
+            duplicate=True,
+        )
+
+    try:
+        processed = image_service.preprocess(raw)
+    except image_service.ImageError as exc:
+        return card_batch.BatchItem(
+            filename=filename, status=card_batch.ItemStatus.ERROR, error=str(exc)
+        )
+
+    relative_path = _store(processed.data, image_hash)
+
+    try:
+        card = await card_repo.create_card(
+            db,
+            image_path=relative_path,
+            image_hash=image_hash,
+            status=CardStatus.PENDING,
+            notes="Đang xếp hàng chờ quét (upload hàng loạt).",
+        )
+    except card_repo.DuplicateImageError:
+        # Cùng một ảnh nằm hai lần trong chính lượt này: lượt trước đã commit xong.
+        raced = await card_repo.get_by_hash(db, image_hash)
+        if raced is None:  # không xảy ra trên PostgreSQL
+            raise
+        return card_batch.BatchItem(
+            filename=filename,
+            card_id=raced.id,
+            status=card_batch.ItemStatus.DONE,
+            duplicate=True,
+        )
+
+    return card_batch.BatchItem(
+        filename=filename,
+        card_id=card.id,
+        image_path=settings.upload_dir / relative_path,
+        status=card_batch.ItemStatus.PENDING,
+    )
+
+
+def _job_out(job: card_batch.BatchJob) -> BatchJobOut:
+    """`BatchJob` (dataclass trong bộ nhớ) → payload JSON.
+
+    Ánh xạ tay chứ không `model_validate(from_attributes=True)`: `BatchItem.image_path` là đường
+    dẫn nội bộ của container, tự động hoá bước này là tự mở đường cho nó rò ra API vào một ngày
+    nào đó mà không ai để ý.
+    """
+    return BatchJobOut(
+        job_id=job.id,
+        total=job.total,
+        done=job.done,
+        failed=job.failed,
+        running=job.running,
+        finished=job.finished,
+        aborted_reason=job.aborted_reason,
+        items=[
+            BatchItemOut(
+                filename=item.filename,
+                status=item.status.value,
+                card_id=item.card_id,
+                duplicate=item.duplicate,
+                error=item.error,
+                attempts=item.attempts,
+                ocr_ms=item.ocr_ms,
+            )
+            for item in job.items
+        ],
+    )
+
+
 async def _get_or_404(db: AsyncSession, card_id: uuid.UUID) -> BusinessCard:
     card = await card_repo.get(db, card_id)
     if card is None:
@@ -503,25 +735,6 @@ def _store(data: bytes, image_hash: str) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
     return relative.as_posix()
-
-
-def _status_and_notes(
-    result: ocr.OcrResult | None, error: str | None
-) -> tuple[CardStatus, str | None]:
-    """Trạng thái vòng đời + ghi chú cho một bản ghi vừa quét.
-
-    `pending` = chưa quét được, còn phải quét lại. `needs_review` = đã có dữ liệu, chờ người
-    duyệt (task 5.1). Không bao giờ tự nhảy sang `confirmed` — xác nhận là việc của người dùng
-    (task 4.3).
-    """
-    if result is None:
-        return CardStatus.PENDING, f"OCR chưa chạy được: {error}"
-    if not result.extraction.is_business_card:
-        return (
-            CardStatus.NEEDS_REVIEW,
-            "Model cho rằng ảnh này không phải danh thiếp — kiểm lại trước khi xác nhận.",
-        )
-    return CardStatus.NEEDS_REVIEW, None
 
 
 def _ms_since(started: float) -> int:

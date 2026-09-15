@@ -75,7 +75,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D2 | P1 — Nền tảng AI | 🔄 Đang làm — 8/9 task ✅ | **Mục tiêu ngày đã đạt**: bấm 1 nút trên UI → OAuth xong → badge xanh → gọi Gemini Flash trả về kết quả thật (text 7.9s, **vision 7/7 trường trong 3.1s**). Chỉ còn **2.7** — số đo đã có đủ ở I-12, chờ **T** chốt `docs/adr-websearch.md` (file của T). I-01→I-13 đã gỡ hết trừ **I-14** (không bật được branch protection, chờ quyết định) và **I-15** (mới: model bọc JSON trong khối ```json, chạm 3.4 và 4.7) |
 | D3 | P2 — F1 OCR | 🔄 Đang làm — 9/10 task ✅ | **Toàn bộ phần của Q xong** (3.1–3.6), kiểm chứng trong Docker bằng ảnh thật: upload → 7/7 trường đúng cho cả thẻ Việt (4.2s) lẫn thẻ Nhật (3.0s), upload lại cùng ảnh không sinh bản ghi trùng. Phần của T: 3.7/3.8/3.10 đã merge (PR #12, #13), **chỉ còn 3.9** (30 ảnh mẫu). ⚠️ `requirements.txt` có thêm `phonenumbers` (task 3.6) → **T nhớ `docker compose build api`** sau khi pull |
 | D4 | P2 — F1 OCR | ✅ Xong — 10/10 task ✅ | **Toàn bộ phần của Q xong** (4.1–4.5, 4.10), kiểm chứng trên Chrome thật với container đang chạy: `/cards` lọc/tìm/phân trang đúng, bấm *Xác nhận* chạy trọn luồng, `/cards/upload` upload thật được. 4.6–4.8 của **T** đã merge (PR #15, 2026-09-14) nên D4 đủ task; enrichment gọi thật đạt A5 (10–11 trường có nguồn/công ty). ⚠️ Viết test 4.10 lòi ra một lỗi im lặng trong `normalize.py` (2 số trên 2 dòng dính làm một, mất số thứ hai) — **đã sửa**. ⚠️ `confirm` (4.3) hiện chưa gắn được công ty vì `upsert_company()` của T (task 3.8) chưa có; đã xử lý mềm, không chặn xác nhận |
-| D5 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
+| D5 | P3 — F2 Hồ sơ DN | 🔄 Đang làm — 3/7 task ✅ | **Toàn bộ phần của Q xong (5.1–5.3)**, kiểm chứng trên Chrome thật với container đang chạy: batch 5 file → 3 ảnh quét thật 3.9s/3.2s/3.3s (poll bắt được đúng trạng thái 2 xong + 1 đang chạy, đúng giới hạn 2 luồng), 1 ảnh trùng **trong chính lượt đó** bị bắt, 1 file không phải ảnh chỉ hỏng đúng dòng của nó; review sửa `0912 345 678` → Lưu → form hiện `+84912345678` → Xác nhận → gắn công ty được. ✅ Vướng mắc ghi ở D4 (`confirm` chưa gắn được công ty) **đã hết**: `upsert_company()` của T (task 3.8) có rồi và chạy đúng. Còn **5.4, 5.5, 5.6, 5.8 của T** |
 | D6 | P3 — F2 Hồ sơ DN | ⬜ Chưa làm | |
 | D7 | P4 — F3 RAG | ⬜ Chưa làm | |
 | D8 | P4 — F3 RAG | ⬜ Chưa làm | |
@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 37 / 103 task (D1–D11) hoàn thành (36%) · 2 task đang dở (1.11, 2.7) · Cập nhật lần cuối: 2026-09-15
+**Tổng quan:** 40 / 103 task (D1–D11) hoàn thành (39%) · 2 task đang dở (1.11, 2.7) · Cập nhật lần cuối: 2026-09-15
 
 > ⚠️ **Hai lỗi sổ sách có sẵn, phát hiện khi chốt D4 — cần chủ dự án quyết, Q không tự sửa:**
 > (a) Dòng tổng quan trước ghi **24** trong khi đếm thật các dòng task đánh ✅ là **25** (lệch 1
@@ -246,15 +246,29 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 
 | # | Task | Người | Ưu tiên | Ước tính | Trạng thái |
 |---|------|-------|---------|----------|--------|
-| 5.1 | `templates/cards/detail.html`: ảnh gốc bên trái, form các trường bên phải, tô vàng trường `confidence` thấp, nút Lưu / Xác nhận | Q | M | 2.5h | ⬜ Chưa làm |
-| 5.2 | `POST /api/cards/batch-upload` (nhiều file) + hàng đợi xử lý nền, giới hạn đồng thời, retry có backoff | Q | S | 3h | ⬜ Chưa làm |
-| 5.3 | `templates/cards/batch.html`: theo dõi tiến trình batch (đã xử lý / đang xử lý / lỗi) | Q | S | 2h | ⬜ Chưa làm |
+| 5.1 | `templates/cards/detail.html`: ảnh gốc bên trái, form các trường bên phải, tô vàng trường `confidence` thấp, nút Lưu / Xác nhận | Q | M | 2.5h | ✅ Xong |
+| 5.2 | `POST /api/cards/batch-upload` (nhiều file) + hàng đợi xử lý nền, giới hạn đồng thời, retry có backoff | Q | S | 3h | ✅ Xong |
+| 5.3 | `templates/cards/batch.html`: theo dõi tiến trình batch (đã xử lý / đang xử lý / lỗi) | Q | S | 2h | ✅ Xong |
 | 5.4 | `routers/companies.py` — `POST /{id}/enrich` enrich 1 công ty (primitive để 5.8 gọi lại): chạy nền, cập nhật `company_profiles.status` (draft → generated), chống chạy trùng | T | M | 2h | ⬜ Chưa làm |
 | 5.5 | `routers/companies.py` — `GET /api/companies`, `GET /{id}` (kèm hồ sơ + danh sách liên hệ từ danh thiếp) | T | M | 1.5h | ⬜ Chưa làm |
 | 5.6 | Xử lý lỗi enrich: không tìm thấy thông tin, LLM timeout, kết quả rỗng → trạng thái rõ ràng trả về cho UI | T | M | 1.5h | ⬜ Chưa làm |
 | 5.8 | `routers/companies.py` — **`POST /api/companies/enrich-batch`**: nhận `company_ids[]`, tạo job trong DB, chạy nền qua hàng đợi, **giới hạn đồng thời + retry có backoff** (rủi ro R5), bỏ qua công ty đang chạy dở, trả `job_id`. Kèm `GET /api/companies/enrich-jobs/{job_id}` trả tiến trình từng công ty (chờ / đang chạy / xong / lỗi kèm thông báo) | T | M | 2h | ⬜ Chưa làm |
 
 **Tiêu chí hoàn thành:** Trên trình duyệt: chọn ảnh → xem kết quả trích xuất → sửa → Xác nhận → hiện trong danh sách. Gọi enrich cho 3 công ty thật → mỗi hồ sơ có ≥ 5 trường kèm URL nguồn kiểm chứng được; `POST /api/companies/enrich-batch` với 3 id chạy được cả 3 và `enrich-jobs/{job_id}` phản ánh đúng tiến trình.
+
+> **Ghi chú của Q khi làm 5.2 — job batch danh thiếp nằm trong BỘ NHỚ, không nằm trong DB.**
+> Hàng đợi ở `app/services/card_batch.py` chỉ giữ *tiến trình hiển thị*; kết quả thật đã nằm ở
+> `business_cards` ngay từ lúc nhận request (ảnh lưu xong, bản ghi tạo ở `pending`), nên mất job
+> thì không mất ảnh. Không dựng bảng mới ⇒ **không phát sinh Alembic revision** (quy ước số 5).
+> ⚠️ **5.8 của T ghi rõ "tạo job trong DB" — đây là hai lựa chọn khác nhau cho hai luồng khác
+> nhau, không phải một cái đúng một cái sai**: job enrich chạy hàng phút và người dùng cần xem
+> lại sau, job quét ảnh chạy vài chục giây và chỉ xem trực tiếp. T cứ làm theo 5.8 đã ghi; nếu
+> muốn đổi sang bảng chung thì đó là schema ⇒ báo Q sinh revision, đừng tự tạo.
+>
+> Hai chỗ Q đã sửa ngoài ba file của task, đều là file của Q: `app/services/ocr.py` (đưa
+> `status_and_notes()` từ `routers/cards.py` sang thành hàm public — từ 5.2 có hai đường đi tới
+> cùng một quy tắc vòng đời, để hai bản sao là chắc chắn lệch) và `app/schemas/card.py`
+> (`BatchUploadOut` / `BatchJobOut` / `BatchItemOut`).
 
 ---
 
