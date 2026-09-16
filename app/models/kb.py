@@ -20,6 +20,20 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.config import settings
 from app.core.db import Base
 
+#: Số cụm (`lists`) của index `ivfflat`. **Đo thật 2026-09-16, không lấy theo công thức chung.**
+#:
+#: pgvector khuyên `lists = số dòng / 1000`, nhưng KB của bản demo chỉ cỡ vài trăm chunk
+#: (30 danh thiếp + 10 hồ sơ). Để 100 cụm thì mỗi cụm còn 2–3 dòng, mà một lượt tìm mặc định
+#: chỉ dò **một** cụm (`ivfflat.probes = 1`) — hỏi top-5 nhưng chỉ nhận về 2 kết quả, và không
+#: có lỗi nào báo. 10 cụm giữ mỗi cụm vài chục dòng, đủ cho quy mô này.
+#:
+#: ⚠️ Index này **học phân cụm từ dữ liệu có sẵn đúng lúc nó được tạo**. Migration 0003 chạy khi
+#: `kb_chunks` còn rỗng nên centroid vô nghĩa: đã đo, chèn 3 dòng rồi tìm chỉ ra 1 dòng
+#: (pgvector cũng tự cảnh báo *"ivfflat index created with little data"*). Vì vậy
+#: `POST /api/kb/reindex` **luôn `REINDEX` lại index này ở cuối** — xem
+#: `repositories/kb.py::rebuild_vector_index()`.
+IVFFLAT_LISTS = 10
+
 
 class KBSourceType(StrEnum):
     """Nguồn của một chunk trong Knowledge Base."""
@@ -35,6 +49,20 @@ class KBChunk(Base):
     __table_args__ = (
         # Lọc chunk theo nguồn khi reindex lại một danh thiếp / hồ sơ (task 6.4).
         Index("ix_kb_chunks_source", "source_type", "source_id"),
+        # Vector search (task 6.3, revision 0003). `vector_cosine_ops` phải khớp với toán tử
+        # `<=>` mà `repositories/kb.py::search_similar` dùng — sai opclass thì câu truy vấn vẫn
+        # chạy nhưng bỏ qua index và quét toàn bảng, tức là hỏng về tốc độ chứ không báo lỗi.
+        #
+        # Khai ở đây *và* trong revision 0003: thiếu khai ở model thì `alembic check` coi index
+        # trong DB là thừa và sinh lệnh `drop_index` ở revision sau (Q giữ `alembic check` sạch
+        # từ I-16).
+        Index(
+            "ix_kb_chunks_embedding",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_with={"lists": IVFFLAT_LISTS},
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
