@@ -91,19 +91,10 @@ jobs:
         run: |
           PGPASSWORD=bizcard psql -h localhost -U bizcard -d bizcard_test \
             -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      # Task 6.1 xong (conftest + test thật) nên bỏ nhánh bỏ qua exit code 5: từ nay không thu
+      # thập được test nào là CI phải đỏ.
       - name: pytest
-        run: |
-          set +e
-          pytest --tb=short
-          code=$?
-          set -e
-          # pytest trả 5 khi không thu thập được test nào. Hiện repo mới có stub test rỗng.
-          # TODO: xoá nhánh này sau khi task 6.1 (conftest + test đầu tiên) xong.
-          if [ "$code" -eq 5 ]; then
-            echo "::warning title=Chưa có test::Không thu thập được test nào. Bỏ qua tạm thời — xoá nhánh xử lý này trong ci.yml sau task 6.1."
-            exit 0
-          fi
-          exit "$code"
+        run: pytest --tb=short
 
   secrets:
     name: Secret scan (gitleaks)
