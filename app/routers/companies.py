@@ -1,13 +1,15 @@
+import logging
 import math
 import uuid
 from collections.abc import Sequence
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.templates import templates
 from app.models.company import EnrichJob, EnrichJobItem
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
@@ -17,9 +19,11 @@ from app.schemas.company import (
     CompanyListItem,
     CompanyListOut,
     CompanyProfileOut,
+    CompanyProfileUpdateIn,
     ProfileStatus,
 )
 from app.schemas.enrich_job import (
+    MAX_BATCH_COMPANIES,
     EnrichBatchIn,
     EnrichBatchOut,
     EnrichConflictOut,
@@ -30,12 +34,37 @@ from app.schemas.enrich_job import (
 )
 from app.services import enrich_jobs
 
-router = APIRouter(prefix="/api/companies", tags=["companies"])
+router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PAGE_SIZE = 20
 
 
-@router.get("", response_model=CompanyListOut)
+@router.get("/companies", response_class=HTMLResponse, tags=["ui"])
+async def companies_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "companies/list.html",
+        {
+            "active_nav": "companies",
+            "default_page_size": DEFAULT_PAGE_SIZE,
+            "max_batch_companies": MAX_BATCH_COMPANIES,
+            "max_concurrency": enrich_jobs.MAX_CONCURRENCY,
+        },
+    )
+
+
+@router.get("/companies/{company_id}", response_class=HTMLResponse, tags=["ui"])
+async def company_detail_page(request: Request, company_id: uuid.UUID) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "companies/detail.html",
+        {"active_nav": "companies", "company_id": str(company_id)},
+    )
+
+
+@router.get("/api/companies", response_model=CompanyListOut, tags=["companies"])
 async def list_companies(
     db: Annotated[AsyncSession, Depends(get_db)],
     q: Annotated[
@@ -61,9 +90,10 @@ async def list_companies(
 
 
 @router.post(
-    "/enrich-batch",
+    "/api/companies/enrich-batch",
     response_model=EnrichBatchOut,
     status_code=status.HTTP_202_ACCEPTED,
+    tags=["companies"],
 )
 async def enrich_batch(
     body: EnrichBatchIn,
@@ -71,10 +101,8 @@ async def enrich_batch(
 ) -> EnrichBatchOut:
     missing = set(body.company_ids) - await job_repo.existing_company_ids(db, body.company_ids)
     if missing:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail=f"Không có công ty: {', '.join(sorted(str(company_id) for company_id in missing))}",
-        )
+        names = ", ".join(sorted(str(company_id) for company_id in missing))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Không có công ty: {names}")
     created = await enrich_jobs.create_job(db, body.company_ids)
     await db.commit()
     if created.accepted:
@@ -84,7 +112,7 @@ async def enrich_batch(
     )
 
 
-@router.get("/enrich-jobs/{job_id}", response_model=EnrichJobOut)
+@router.get("/api/companies/enrich-jobs/{job_id}", response_model=EnrichJobOut, tags=["companies"])
 async def get_enrich_job(
     job_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -95,7 +123,7 @@ async def get_enrich_job(
     return to_job_out(job, await job_repo.list_items(db, job_id))
 
 
-@router.get("/{company_id}", response_model=CompanyDetailOut)
+@router.get("/api/companies/{company_id}", response_model=CompanyDetailOut, tags=["companies"])
 async def get_company(
     company_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -115,7 +143,9 @@ async def get_company(
     )
 
 
-@router.get("/{company_id}/contacts", response_model=list[CardOut])
+@router.get(
+    "/api/companies/{company_id}/contacts", response_model=list[CardOut], tags=["companies"]
+)
 async def list_company_contacts(
     company_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -127,10 +157,11 @@ async def list_company_contacts(
 
 
 @router.post(
-    "/{company_id}/enrich",
+    "/api/companies/{company_id}/enrich",
     response_model=EnrichStartOut,
     status_code=status.HTTP_202_ACCEPTED,
     responses={status.HTTP_409_CONFLICT: {"model": EnrichConflictOut}},
+    tags=["companies"],
 )
 async def enrich_company(
     company_id: uuid.UUID,
@@ -152,6 +183,46 @@ async def enrich_company(
     await db.commit()
     enrich_jobs.start(created.job_id)
     return EnrichStartOut(job_id=created.job_id)
+
+
+@router.patch(
+    "/api/companies/{company_id}/profile",
+    response_model=CompanyProfileOut,
+    responses={status.HTTP_409_CONFLICT: {"model": EnrichConflictOut}},
+    tags=["companies"],
+)
+async def update_company_profile(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    company_id: uuid.UUID,
+    body: CompanyProfileUpdateIn,
+) -> CompanyProfileOut | JSONResponse:
+    changes = body.changes()
+
+    if not changes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
+
+    running = await job_repo.active_job_id(db, company_id)
+
+    if running is not None:
+        conflict = EnrichConflictOut(
+            detail="Công ty này đang được tạo hồ sơ, sửa bây giờ sẽ bị ghi đè khi job xong.",
+            existing_id=running,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT, content=conflict.model_dump(mode="json")
+        )
+
+    profile = await company_repo.update_profile(db, company_id, changes)
+
+    if profile is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+
+    await db.commit()
+
+    logger.info("Company %s: sửa tay %s", company_id, ", ".join(sorted(changes)))
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
+
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
 
 
 def page_count(total: int, size: int) -> int:

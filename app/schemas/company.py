@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -82,6 +83,31 @@ class CompanyProfileSchema(BaseModel):
 
     def sourced_field_count(self) -> int:
         return len(self.fields_with_value() - self.fields_missing_source())
+
+
+class CompanyProfileUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    legal_name: str | None = Field(default=None, max_length=255)
+    tax_code: str | None = Field(default=None, max_length=64)
+    founded_year: int | None = Field(default=None, ge=1800, le=2100)
+    size_label: str | None = Field(default=None, max_length=64)
+    employee_range: str | None = Field(default=None, max_length=64)
+    industry: list[str] | None = None
+    products: list[str] | None = None
+    address: str | None = None
+    website: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+    @field_validator("industry", "products")
+    @classmethod
+    def none_as_empty(cls, v: list[str] | None) -> list[str]:
+        return v or []
+
+    def changes(self) -> dict[str, Any]:
+        return self.model_dump(exclude_unset=True)
 
 
 class CompanyProfileOut(CompanyProfileSchema):

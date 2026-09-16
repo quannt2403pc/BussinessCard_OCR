@@ -1,8 +1,9 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import ColumnElement, Select, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -124,6 +125,30 @@ async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None
             CompanyProfile.status == ProfileStatus.DRAFT.value,
         )
     )
+
+
+async def update_profile(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    changes: Mapping[str, Any],
+    *,
+    status: ProfileStatus = ProfileStatus.VERIFIED,
+) -> CompanyProfile | None:
+    profile = await get_profile(db, company_id)
+    if profile is None:
+        return None
+
+    for field, value in changes.items():
+        if field not in PROFILE_COLUMNS:
+            raise ValueError(f"Invalid profile field: {field}")
+        setattr(profile, field, value)
+
+    profile.status = status.value
+    profile.sources = {k: v for k, v in (profile.sources or {}).items() if k not in changes}
+
+    await db.flush()
+
+    return profile
 
 
 def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnElement[bool]]:
