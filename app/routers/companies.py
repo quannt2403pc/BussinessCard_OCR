@@ -1,3 +1,4 @@
+import logging
 import math
 import uuid
 from collections.abc import Sequence
@@ -18,6 +19,7 @@ from app.schemas.company import (
     CompanyListItem,
     CompanyListOut,
     CompanyProfileOut,
+    CompanyProfileUpdateIn,
     ProfileStatus,
 )
 from app.schemas.enrich_job import (
@@ -33,6 +35,8 @@ from app.schemas.enrich_job import (
 from app.services import enrich_jobs
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PAGE_SIZE = 20
 
@@ -179,6 +183,46 @@ async def enrich_company(
     await db.commit()
     enrich_jobs.start(created.job_id)
     return EnrichStartOut(job_id=created.job_id)
+
+
+@router.patch(
+    "/api/companies/{company_id}/profile",
+    response_model=CompanyProfileOut,
+    responses={status.HTTP_409_CONFLICT: {"model": EnrichConflictOut}},
+    tags=["companies"],
+)
+async def update_company_profile(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    company_id: uuid.UUID,
+    body: CompanyProfileUpdateIn,
+) -> CompanyProfileOut | JSONResponse:
+    changes = body.changes()
+
+    if not changes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
+
+    running = await job_repo.active_job_id(db, company_id)
+
+    if running is not None:
+        conflict = EnrichConflictOut(
+            detail="Công ty này đang được tạo hồ sơ, sửa bây giờ sẽ bị ghi đè khi job xong.",
+            existing_id=running,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT, content=conflict.model_dump(mode="json")
+        )
+
+    profile = await company_repo.update_profile(db, company_id, changes)
+
+    if profile is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+
+    await db.commit()
+
+    logger.info("Company %s: sửa tay %s", company_id, ", ".join(sorted(changes)))
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
+
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
 
 
 def page_count(total: int, size: int) -> int:

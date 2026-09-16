@@ -12,6 +12,10 @@
   </div>
   <div class="ml-auto flex items-center gap-2">
     <span id="profile-badge"></span>
+    <button id="btn-edit" type="button"
+            class="hidden rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Sửa hồ sơ
+    </button>
     <button id="btn-enrich" type="button" disabled
             class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
       Tạo hồ sơ
@@ -27,6 +31,26 @@
     Bấm <em>Tạo hồ sơ</em> để hệ thống tra cứu Internet và tổng hợp thông tin có nguồn.
   </p>
 </div>
+
+<section id="edit-panel" class="mt-6 hidden rounded-lg border border-slate-200 bg-white p-5">
+  <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sửa hồ sơ</h2>
+  <p class="mt-1 text-xs text-slate-500">
+    Trường bạn sửa được coi là <strong>đã kiểm bằng người</strong>: nguồn cũ của đúng trường đó bị gỡ
+    (nguồn cũ chỉ chứng minh cho giá trị cũ) và hồ sơ chuyển sang <em>Đã kiểm</em>.
+    Bấm <em>Tạo lại hồ sơ</em> về sau sẽ ghi đè phần sửa tay.
+  </p>
+  <div id="edit-fields" class="mt-4 grid gap-4 sm:grid-cols-2"></div>
+  <div class="mt-4 flex justify-end gap-2">
+    <button id="btn-cancel" type="button"
+            class="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50">
+      Huỷ
+    </button>
+    <button id="btn-save" type="button"
+            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:bg-slate-300">
+      Lưu
+    </button>
+  </div>
+</section>
 
 <div id="profile" class="mt-6 hidden space-y-4">
   <section class="rounded-lg border border-slate-200 bg-white p-5">
@@ -90,8 +114,24 @@
     ["email", "Email"],
   ];
 
+  const EDIT_FIELDS = [
+    ["legal_name", "Tên pháp lý", "text"],
+    ["tax_code", "Mã số thuế", "text"],
+    ["founded_year", "Năm thành lập", "number"],
+    ["size_label", "Quy mô", "text"],
+    ["employee_range", "Nhân sự", "text"],
+    ["address", "Địa chỉ", "text"],
+    ["website", "Website", "text"],
+    ["phone", "Điện thoại", "text"],
+    ["email", "Email", "text"],
+    ["industry", "Ngành nghề (mỗi dòng một mục)", "list"],
+    ["products", "Sản phẩm / dịch vụ (mỗi dòng một mục)", "list"],
+    ["description", "Mô tả", "textarea"],
+  ];
+
   const $ = (id) => document.getElementById(id);
   let pollTimer;
+  let current = null;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -228,6 +268,9 @@
     const badge = $("profile-badge");
     const button = $("btn-enrich");
 
+    current = profile;
+    $("btn-edit").classList.toggle("hidden", !profile);
+
     if (!profile) {
       badge.replaceChildren(el("span", "text-xs text-slate-400", "Chưa có hồ sơ"));
       $("empty").classList.remove("hidden");
@@ -361,6 +404,91 @@
     }
   }
 
+  function editorValue(profile, key, kind) {
+    const value = profile ? profile[key] : null;
+    if (kind === "list") return (value || []).join("\n");
+    return value === null || value === undefined ? "" : String(value);
+  }
+
+  function openEdit() {
+    if (!current) return;
+    clearMessage();
+    $("edit-fields").replaceChildren(...EDIT_FIELDS.map(([key, label, kind]) => {
+      const wide = kind === "list" || kind === "textarea";
+      const wrap = el("label", `${wide ? "sm:col-span-2 " : ""}block text-sm`);
+      wrap.append(el("span", "text-slate-500", label));
+      const input = el(wide ? "textarea" : "input",
+        "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none");
+      if (!wide) input.type = kind;
+      if (wide) input.rows = kind === "textarea" ? 4 : 3;
+      input.id = `edit-${key}`;
+      input.value = editorValue(current, key, kind);
+      wrap.append(input);
+      return wrap;
+    }));
+    $("profile").classList.add("hidden");
+    $("edit-panel").classList.remove("hidden");
+    $("btn-edit").classList.add("hidden");
+    $("btn-enrich").disabled = true;
+  }
+
+  function closeEdit() {
+    $("edit-panel").classList.add("hidden");
+    $("profile").classList.remove("hidden");
+    $("btn-edit").classList.remove("hidden");
+    $("btn-enrich").disabled = false;
+  }
+
+  // Chỉ gửi trường thật sự đổi: gửi cả 12 trường thì trường nào cũng bị coi là sửa tay và
+  // mất hết nguồn, kể cả trường người dùng không đụng tới.
+  function collectChanges() {
+    const changes = {};
+    EDIT_FIELDS.forEach(([key, , kind]) => {
+      const raw = $(`edit-${key}`).value.trim();
+      if (raw === editorValue(current, key, kind).trim()) return;
+      if (kind === "list") {
+        changes[key] = raw ? raw.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+      } else if (kind === "number") {
+        changes[key] = raw ? Number(raw) : null;
+      } else {
+        changes[key] = raw || null;
+      }
+    });
+    return changes;
+  }
+
+  async function saveEdit() {
+    const changes = collectChanges();
+    if (Object.keys(changes).length === 0) {
+      closeEdit();
+      message("Không có thay đổi nào để lưu.", "info");
+      return;
+    }
+
+    clearMessage();
+    $("btn-save").disabled = true;
+    try {
+      const res = await fetch(`/api/companies/${COMPANY_ID}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+    } catch (err) {
+      message(`Không lưu được: ${err.message}`, "error");
+      $("btn-save").disabled = false;
+      return;
+    }
+
+    $("btn-save").disabled = false;
+    closeEdit();
+    await load();
+    message(`Đã lưu ${Object.keys(changes).length} trường, hồ sơ chuyển sang “Đã kiểm”.`, "ok");
+  }
+
+  $("btn-edit").addEventListener("click", openEdit);
+  $("btn-cancel").addEventListener("click", closeEdit);
+  $("btn-save").addEventListener("click", saveEdit);
   $("btn-enrich").addEventListener("click", startEnrich);
   load();
 })();

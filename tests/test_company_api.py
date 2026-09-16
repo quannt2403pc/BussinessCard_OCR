@@ -13,6 +13,7 @@ from app.core.templates import BASE_DIR
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
 from app.repositories import company as company_repo
+from app.repositories import enrich_job as job_repo
 from app.repositories.company import CompanyRow
 from app.routers import companies
 from app.routers.companies import page_count, to_list_item
@@ -42,16 +43,33 @@ def make_card() -> BusinessCard:
     )
 
 
+class FakeSession:
+    def __init__(self) -> None:
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
 @pytest.fixture
-async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncClient]:
+def session() -> FakeSession:
+    return FakeSession()
+
+
+@pytest.fixture
+async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     app.include_router(companies.router)
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-    async def no_db() -> AsyncIterator[None]:
-        yield None
+    async def fake_db() -> AsyncIterator[FakeSession]:
+        yield session
 
-    app.dependency_overrides[get_db] = no_db
+    app.dependency_overrides[get_db] = fake_db
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -233,3 +251,139 @@ async def test_contacts_unknown_company(
 
     monkeypatch.setattr(company_repo, "get_company", nothing)
     assert (await client.get(f"/api/companies/{uuid.uuid4()}/contacts")).status_code == 404
+
+
+def make_profile(**overrides: Any) -> CompanyProfile:
+    values: dict[str, Any] = {
+        "company_id": COMPANY_ID,
+        "tax_code": "0301234567",
+        "status": "verified",
+        "sources": {},
+        "industry": None,
+        "products": None,
+    }
+    values.update(overrides)
+    return CompanyProfile(**values)
+
+
+@pytest.fixture
+def no_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+        return None
+
+    monkeypatch.setattr(job_repo, "active_job_id", nothing)
+
+
+async def test_patch_profile_saves_and_commits(
+    client: httpx.AsyncClient,
+    session: FakeSession,
+    no_running_job: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, Any] = {}
+
+    async def fake_update(
+        db: Any, company_id: uuid.UUID, changes: dict[str, Any]
+    ) -> CompanyProfile:
+        received.update(changes)
+        return make_profile(tax_code=changes.get("tax_code", "0301234567"))
+
+    monkeypatch.setattr(company_repo, "update_profile", fake_update)
+    response = await client.patch(
+        f"/api/companies/{COMPANY_ID}/profile", json={"tax_code": "0309999999"}
+    )
+
+    assert response.status_code == 200
+    assert received == {"tax_code": "0309999999"}
+    assert session.commits == 1
+    body = response.json()
+    assert body["tax_code"] == "0309999999"
+    assert body["status"] == "verified"
+
+
+async def test_patch_profile_sends_only_given_fields(
+    client: httpx.AsyncClient, no_running_job: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received: dict[str, Any] = {}
+
+    async def fake_update(
+        db: Any, company_id: uuid.UUID, changes: dict[str, Any]
+    ) -> CompanyProfile:
+        received.update(changes)
+        return make_profile()
+
+    monkeypatch.setattr(company_repo, "update_profile", fake_update)
+    await client.patch(
+        f"/api/companies/{COMPANY_ID}/profile", json={"phone": None, "industry": None}
+    )
+
+    assert received == {"phone": None, "industry": []}
+
+
+async def test_patch_profile_rejects_empty_body(
+    client: httpx.AsyncClient, session: FakeSession
+) -> None:
+    response = await client.patch(f"/api/companies/{COMPANY_ID}/profile", json={})
+    assert response.status_code == 400
+    assert session.commits == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"status": "verified"},
+        {"sources": {}},
+        {"tax_code": "x" * 65},
+        {"founded_year": 1700},
+    ],
+)
+async def test_patch_profile_rejects_bad_body(
+    client: httpx.AsyncClient, body: dict[str, Any]
+) -> None:
+    response = await client.patch(f"/api/companies/{COMPANY_ID}/profile", json=body)
+    assert response.status_code == 422
+
+
+async def test_patch_profile_without_profile(
+    client: httpx.AsyncClient,
+    session: FakeSession,
+    no_running_job: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, changes: dict[str, Any]) -> None:
+        return None
+
+    monkeypatch.setattr(company_repo, "update_profile", nothing)
+    response = await client.patch(
+        f"/api/companies/{COMPANY_ID}/profile", json={"tax_code": "0301234567"}
+    )
+
+    assert response.status_code == 404
+    assert session.commits == 0
+
+
+async def test_patch_profile_blocked_while_enriching(
+    client: httpx.AsyncClient, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    running_job = uuid.uuid4()
+    calls: list[str] = []
+
+    async def active(db: Any, company_id: uuid.UUID) -> uuid.UUID:
+        return running_job
+
+    async def fake_update(
+        db: Any, company_id: uuid.UUID, changes: dict[str, Any]
+    ) -> CompanyProfile:
+        calls.append("update")
+        return make_profile()
+
+    monkeypatch.setattr(job_repo, "active_job_id", active)
+    monkeypatch.setattr(company_repo, "update_profile", fake_update)
+    response = await client.patch(
+        f"/api/companies/{COMPANY_ID}/profile", json={"tax_code": "0301234567"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["existing_id"] == str(running_job)
+    assert calls == []
+    assert session.commits == 0
