@@ -6,8 +6,10 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.core.db import get_db
+from app.core.templates import BASE_DIR
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
 from app.repositories import company as company_repo
@@ -44,6 +46,7 @@ def make_card() -> BusinessCard:
 async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     app.include_router(companies.router)
+    app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
     async def no_db() -> AsyncIterator[None]:
         yield None
@@ -52,6 +55,23 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncCl
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
+
+
+async def test_list_page_renders(client: httpx.AsyncClient) -> None:
+    response = await client.get("/companies")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Tạo hồ sơ doanh nghiệp" in response.text
+
+
+async def test_detail_page_renders_with_company_id(client: httpx.AsyncClient) -> None:
+    response = await client.get(f"/companies/{COMPANY_ID}")
+    assert response.status_code == 200
+    assert str(COMPANY_ID) in response.text
+
+
+async def test_detail_page_rejects_non_uuid(client: httpx.AsyncClient) -> None:
+    assert (await client.get("/companies/abc")).status_code == 422
 
 
 @pytest.mark.parametrize(

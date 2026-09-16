@@ -1,3 +1,350 @@
-{# Màn hình lập hồ sơ đối tác: checkbox chọn nhiều + nút “Tạo hồ sơ doanh nghiệp” + badge tiến trình (7.10). #}
-{# Chủ sở hữu: T | Task: 6.5 | xem Task.md #}
-{# TODO(T, task 6.5): chưa triển khai. #}
+{% extends "base.html" %}
+
+{% block title %}Doanh nghiệp{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Doanh nghiệp đối tác</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Công ty sinh ra khi bạn xác nhận danh thiếp. Hồ sơ doanh nghiệp
+      <strong>chỉ được tạo khi bạn tích chọn và bấm nút</strong> — hệ thống không tự chạy.
+    </p>
+  </div>
+  <a href="/cards"
+     class="ml-auto rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+    Danh thiếp
+  </a>
+</div>
+
+<section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+  <form id="filters" class="flex flex-wrap items-end gap-3">
+    <label class="flex-1 min-w-[16rem] text-sm">
+      <span class="text-slate-500">Tìm kiếm</span>
+      <input id="f-q" type="search" name="q" placeholder="Tên công ty, tên viết khác…"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+    </label>
+
+    <label class="text-sm">
+      <span class="text-slate-500">Hồ sơ</span>
+      <select id="f-profile" name="has_profile"
+              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+        <option value="">Tất cả</option>
+        <option value="false">Chưa có hồ sơ</option>
+        <option value="true">Đã có hồ sơ</option>
+      </select>
+    </label>
+
+    <button type="reset" id="btn-reset"
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50">
+      Xoá bộ lọc
+    </button>
+    <span id="summary" class="ml-auto text-sm text-slate-500">Đang tải…</span>
+  </form>
+</section>
+
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+<section class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+  <span id="selected-label" class="text-sm text-slate-600">Chưa chọn công ty nào</span>
+  <button id="btn-clear" type="button"
+          class="hidden rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-white">
+    Bỏ chọn
+  </button>
+  <button id="btn-enrich" type="button" disabled
+          class="ml-auto rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+    Tạo hồ sơ doanh nghiệp
+  </button>
+</section>
+
+<section class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+  <table class="w-full text-left text-sm">
+    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+      <tr>
+        <th class="w-10 px-4 py-3">
+          <input id="check-all" type="checkbox" class="h-4 w-4 rounded border-slate-300"
+                 title="Chọn tất cả công ty trong trang này">
+        </th>
+        <th class="px-4 py-3">Công ty</th>
+        <th class="px-4 py-3">Liên hệ</th>
+        <th class="px-4 py-3">Hồ sơ</th>
+        <th class="px-4 py-3">Tạo lúc</th>
+      </tr>
+    </thead>
+    <tbody id="rows" class="divide-y divide-slate-100"></tbody>
+  </table>
+
+  <p id="empty" class="hidden px-4 py-10 text-center text-sm text-slate-500"></p>
+</section>
+
+<nav class="mt-4 flex items-center gap-3 text-sm">
+  <button id="btn-prev" type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+    ← Trang trước
+  </button>
+  <span id="page-label" class="text-slate-500"></span>
+  <button id="btn-next" type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
+    Trang sau →
+  </button>
+</nav>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  "use strict";
+
+  const SIZE = {{ default_page_size }};
+  const MAX_BATCH = {{ max_batch_companies }};
+  const CONCURRENCY = {{ max_concurrency }};
+  const POLL_MS = 3000;
+
+  const BADGES = {
+    generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+    verified:  ["Đã kiểm", "bg-sky-50 text-sky-700 ring-sky-200"],
+    draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const rows = $("rows");
+  const selected = new Map();
+  let page = 1;
+  let pages = 1;
+  let pageIds = [];
+  let pollTimer;
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function message(text, kind) {
+    const box = $("message");
+    box.textContent = text;
+    const tone = {
+      error: "bg-rose-50 text-rose-800",
+      ok: "bg-emerald-50 text-emerald-800",
+      info: "bg-sky-50 text-sky-800",
+    }[kind] || "bg-slate-50 text-slate-700";
+    box.className = `mt-4 rounded-md px-4 py-3 text-sm ${tone}`;
+  }
+
+  function clearMessage() {
+    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString("vi-VN");
+  }
+
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((e) => e.msg).join("; ");
+    } catch (_) { /* body không phải JSON */ }
+    return `Lỗi HTTP ${res.status}`;
+  }
+
+  function profileBadge(status) {
+    if (!status) return el("span", "text-xs text-slate-400", "Chưa có hồ sơ");
+    const [label, tone] = BADGES[status] || [status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    return el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label);
+  }
+
+  function updateSelection() {
+    const count = selected.size;
+    $("selected-label").textContent = count
+      ? `Đã chọn ${count} công ty`
+      : "Chưa chọn công ty nào";
+    $("btn-enrich").disabled = count === 0 || count > MAX_BATCH;
+    $("btn-clear").classList.toggle("hidden", count === 0);
+    if (count > MAX_BATCH) {
+      message(`Mỗi lượt tối đa ${MAX_BATCH} công ty, bạn đang chọn ${count}. Bỏ bớt rồi bấm lại.`, "error");
+    }
+    // "Chọn tất cả" chỉ nói về trang đang xem — chọn cả nghìn công ty ngoài tầm mắt là đốt
+    // hạn mức gọi model mà người dùng không hề thấy.
+    $("check-all").checked = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  }
+
+  function clearSelection() {
+    selected.clear();
+    rows.querySelectorAll("input[type=checkbox]").forEach((box) => { box.checked = false; });
+    updateSelection();
+  }
+
+  function renderRow(company) {
+    const tr = el("tr", "align-top hover:bg-slate-50/60");
+
+    const pick = el("td", "px-4 py-3");
+    const box = el("input", "h-4 w-4 rounded border-slate-300");
+    box.type = "checkbox";
+    box.checked = selected.has(company.id);
+    box.addEventListener("change", () => {
+      if (box.checked) selected.set(company.id, company.display_name);
+      else selected.delete(company.id);
+      updateSelection();
+    });
+    pick.append(box);
+    tr.append(pick);
+
+    const name = el("td", "px-4 py-3");
+    const open = el("a", "font-medium text-sky-700 hover:underline", company.display_name);
+    open.href = `/companies/${company.id}`;
+    name.append(open);
+    name.append(el("div", "text-xs text-slate-400", company.name_normalized));
+    tr.append(name);
+
+    const contacts = el("td", "px-4 py-3 text-slate-800");
+    contacts.append(el("span", null, `${company.contact_count} danh thiếp`));
+    tr.append(contacts);
+
+    const state = el("td", "px-4 py-3");
+    state.append(profileBadge(company.profile_status));
+    tr.append(state);
+
+    tr.append(el("td", "px-4 py-3 text-xs text-slate-500", formatDate(company.profile_generated_at)));
+    return tr;
+  }
+
+  function query() {
+    const params = new URLSearchParams({ page: String(page), size: String(SIZE) });
+    const q = $("f-q").value.trim();
+    const profile = $("f-profile").value;
+    if (q) params.set("q", q);
+    if (profile) params.set("has_profile", profile);
+    return params;
+  }
+
+  async function load() {
+    $("summary").textContent = "Đang tải…";
+    let body;
+    try {
+      const res = await fetch(`/api/companies?${query()}`);
+      if (!res.ok) throw new Error(await readError(res));
+      body = await res.json();
+    } catch (err) {
+      $("summary").textContent = "";
+      message(`Không tải được danh sách: ${err.message}`, "error");
+      return;
+    }
+
+    page = body.page;
+    pages = body.pages;
+    pageIds = body.items.map((company) => company.id);
+    rows.replaceChildren(...body.items.map(renderRow));
+
+    $("summary").textContent = `${body.total} công ty`;
+    $("page-label").textContent = `Trang ${body.page} / ${body.pages}`;
+    $("btn-prev").disabled = body.page <= 1;
+    $("btn-next").disabled = body.page >= body.pages;
+
+    const empty = $("empty");
+    if (body.items.length === 0) {
+      const filtered = $("f-q").value || $("f-profile").value;
+      empty.textContent = filtered
+        ? "Không có công ty nào khớp bộ lọc."
+        : "Chưa có công ty nào. Xác nhận một danh thiếp để công ty xuất hiện ở đây.";
+      empty.classList.remove("hidden");
+    } else {
+      empty.classList.add("hidden");
+    }
+    updateSelection();
+  }
+
+  async function startEnrich() {
+    clearMessage();
+    const ids = [...selected.keys()];
+    $("btn-enrich").disabled = true;
+    let body;
+    try {
+      const res = await fetch("/api/companies/enrich-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company_ids: ids }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      body = await res.json();
+    } catch (err) {
+      message(`Không bắt đầu được: ${err.message}`, "error");
+      updateSelection();
+      return;
+    }
+
+    clearSelection();
+    const skipped = body.skipped
+      ? ` ${body.skipped} công ty bị bỏ qua vì đang chạy dở.`
+      : "";
+    message(`Đang tạo hồ sơ cho ${body.accepted} công ty (tối đa ${CONCURRENCY} công ty cùng lúc).${skipped}`, "info");
+    if (body.accepted) watchJob(body.job_id);
+    else load();
+  }
+
+  async function watchJob(jobId) {
+    clearTimeout(pollTimer);
+    let job;
+    try {
+      const res = await fetch(`/api/companies/enrich-jobs/${jobId}`);
+      if (!res.ok) throw new Error(await readError(res));
+      job = await res.json();
+    } catch (err) {
+      message(`Mất dấu lượt tạo hồ sơ: ${err.message}. Tải lại trang để xem trạng thái mới nhất.`, "error");
+      return;
+    }
+
+    if (!job.finished) {
+      message(`Đang tạo hồ sơ: ${job.done}/${job.total} xong, ${job.running} đang chạy…`, "info");
+      pollTimer = setTimeout(() => watchJob(jobId), POLL_MS);
+      return;
+    }
+
+    await load();
+    if (job.failed) {
+      const reasons = job.items
+        .filter((item) => item.status === "error")
+        .map((item) => `${item.display_name}: ${item.error}`)
+        .join(" · ");
+      message(`Xong ${job.done}/${job.total}. ${job.failed} công ty lỗi — ${reasons}`, "error");
+    } else {
+      message(`Đã tạo xong hồ sơ cho ${job.done} công ty.`, "ok");
+    }
+  }
+
+  let timer;
+  function reload(delay) {
+    clearTimeout(timer);
+    timer = setTimeout(() => { page = 1; load(); }, delay);
+  }
+
+  $("f-q").addEventListener("input", () => reload(300));
+  $("f-profile").addEventListener("change", () => reload(0));
+  $("btn-reset").addEventListener("click", () => reload(0));
+  $("filters").addEventListener("submit", (e) => { e.preventDefault(); reload(0); });
+
+  $("btn-prev").addEventListener("click", () => { if (page > 1) { page -= 1; load(); } });
+  $("btn-next").addEventListener("click", () => { if (page < pages) { page += 1; load(); } });
+
+  $("check-all").addEventListener("change", (e) => {
+    const rowsOnPage = [...rows.querySelectorAll("input[type=checkbox]")];
+    rowsOnPage.forEach((box, index) => {
+      box.checked = e.target.checked;
+      const id = pageIds[index];
+      if (e.target.checked) selected.set(id, id);
+      else selected.delete(id);
+    });
+    updateSelection();
+  });
+
+  $("btn-clear").addEventListener("click", clearSelection);
+
+  $("btn-enrich").addEventListener("click", startEnrich);
+
+  load();
+})();
+</script>
+{% endblock %}
