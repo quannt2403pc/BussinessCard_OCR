@@ -54,7 +54,9 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.templates import templates
 from app.models.card import BusinessCard, CardStatus
+from app.models.kb import KBSourceType
 from app.repositories import card as card_repo
+from app.repositories import kb as kb_repo
 from app.schemas.card import (
     BatchItemOut,
     BatchJobOut,
@@ -66,8 +68,9 @@ from app.schemas.card import (
     CardUpdateIn,
     CardUploadOut,
 )
-from app.services import card_batch, llm, normalize, ocr
+from app.services import card_batch, kb, llm, normalize, ocr
 from app.services import image as image_service
+from app.services.embeddings import EmbeddingError
 
 logger = logging.getLogger(__name__)
 
@@ -448,6 +451,13 @@ async def update_card(
 
     card = await card_repo.update_fields(db, card, _normalize_edits(changes, language=language))
 
+    # Thẻ **đã xác nhận** thì nó đang nằm trong KB, và KB vừa lệch với DB. Index lại ngay ở đây
+    # thay vì chờ ai đó bấm `POST /api/kb/reindex`: sửa sai một số điện thoại rồi vẫn nghe trợ
+    # lý đọc số cũ là lỗi không ai nghĩ tới việc đi tìm. Thẻ chưa xác nhận thì bỏ qua — nó chưa
+    # bao giờ vào KB (`INDEXABLE_CARD_STATUSES`), và luồng review bấm Lưu liên tục.
+    if card.status == CardStatus.CONFIRMED:
+        await _sync_kb(db, card)
+
     logger.info("Card %s: sửa tay %s", card.id, ", ".join(edited))
     return CardDetailOut.model_validate(card)
 
@@ -465,6 +475,11 @@ async def delete_card(
     """
     card = await _get_or_404(db, card_id)
     image_path = card.image_path
+
+    # Gỡ khỏi KB **trong cùng transaction** với việc xoá hàng (`delete_for_source` không commit,
+    # `delete_card` commit cả hai). Bỏ bước này thì chunk mồ côi ở lại và trợ lý vẫn trích dẫn
+    # một danh thiếp đã xoá — dữ liệu người dùng tưởng đã xoá mà vẫn trả lời ra được.
+    await kb_repo.delete_for_source(db, source_type=KBSourceType.CARD, source_id=card.id)
 
     await card_repo.delete_card(db, card)
 
@@ -512,12 +527,17 @@ async def confirm_card(
     await db.commit()
     await db.refresh(card)
 
-    logger.info("Card %s → confirmed (company_id=%s)", card.id, company_id)
+    # Task 7.3 — xác nhận xong là vào Knowledge Base ngay (Luồng 1, Plan.md mục 2.2 bước 7–8).
+    indexed, kb_detail = await _sync_kb(db, card)
+    detail = " ".join(part for part in (detail, kb_detail) if part) or None
+
+    logger.info("Card %s → confirmed (company_id=%s, kb=%s)", card.id, company_id, indexed)
     return CardConfirmOut(
         id=card.id,
         status=card.status,
         company_id=company_id,
         company_matched=company_id is not None,
+        kb_indexed=indexed,
         detail=detail,
     )
 
@@ -655,6 +675,57 @@ def _normalize_edits(changes: dict[str, Any], *, language: str | None) -> dict[s
             out[name] = normalize.squash_spaces(value)
 
     return out
+
+
+async def _sync_kb(db: AsyncSession, card: BusinessCard) -> tuple[bool, str | None]:
+    """Đưa một danh thiếp vào Knowledge Base (task 7.3). Trả `(đã index?, lý do nếu không)`.
+
+    **Không bao giờ làm hỏng thao tác gọi nó**, cùng lý lẽ với `_upsert_company()`: xác nhận danh
+    thiếp là việc của F1 và phải xong được kể cả khi F3 đang hỏng. Service `embedder` chưa lên
+    (máy vừa `docker compose up`, model còn đang nạp) là chuyện thường ngày; để nó chặn nút Xác
+    nhận thì cả luồng nhập liệu đứng vì một thứ chỉ phục vụ trợ lý AI. Bù lại luôn có
+    `POST /api/kb/reindex` để vá sau, nên mất một lượt index không mất dữ liệu.
+
+    **Chạy đồng bộ, không đẩy sang `BackgroundTasks`.** Một danh thiếp là 1–2 chunk, nhúng mất
+    vài chục mili giây trên CPU — rẻ hơn hẳn lời gọi OCR mà chính người dùng này vừa chờ. Đổi lại
+    thì `kb_indexed` trong response là sự thật đã xảy ra, không phải lời hứa.
+
+    ⚠️ **`rollback()` rồi phải `refresh()` ngay.** `Session.rollback()` làm **mọi** object ORM
+    hết hạn, không phụ thuộc `expire_on_commit` — chỗ gọi đọc `card.…` sau đó là một lượt nạp
+    lại đồng bộ giữa hàm async, tức `MissingGreenlet` và HTTP 500. Đúng cái mà hàm này sinh ra
+    để tránh: embedder chết mà vẫn làm hỏng nút Xác nhận. Bắt được khi viết test 7.3; cùng họ
+    với lỗi đã ghi ở `routers/kb.py::_reindex_cards`.
+    """
+    card_id = card.id  # đọc trước: từ đây trở đi `card` có thể hết hạn bất cứ lúc nào
+    try:
+        written = await kb.ingest_card(db, card)
+    except EmbeddingError as exc:
+        await _rollback_and_refresh(db, card)
+        logger.warning("Card %s: không index được vào KB: %s", card_id, exc)
+        return False, (
+            "Chưa đưa được vào cơ sở tri thức của trợ lý AI (service embedder không sẵn sàng). "
+            "Bấm Index lại ở trang Trợ lý AI sau là xong."
+        )
+    except Exception:  # noqa: BLE001 — xem docstring: F3 hỏng không được chặn F1
+        await _rollback_and_refresh(db, card)
+        logger.exception("Card %s: lỗi ngoài dự kiến khi index vào KB", card_id)
+        return False, "Chưa đưa được vào cơ sở tri thức của trợ lý AI (lỗi nội bộ, đã ghi log)."
+
+    if written == 0:
+        # `services/kb.py::_to_chunks()` trả rỗng khi thẻ không còn trường nào có nội dung.
+        logger.info("Card %s: không có nội dung nào để index", card_id)
+        return False, None
+    return True, None
+
+
+async def _rollback_and_refresh(db: AsyncSession, card: BusinessCard) -> None:
+    """Huỷ phần ghi dở của KB rồi nạp lại `card` để chỗ gọi dùng tiếp được.
+
+    Bản thân bản ghi danh thiếp đã commit từ trước, nên `refresh()` chỉ là một câu `SELECT` trên
+    đường lỗi. Rẻ hơn nhiều so với việc để chỗ gọi cầm một object hết hạn.
+    """
+    await db.rollback()
+    await db.refresh(card)
 
 
 async def _upsert_company(db: AsyncSession, raw_name: str) -> tuple[uuid.UUID | None, str | None]:

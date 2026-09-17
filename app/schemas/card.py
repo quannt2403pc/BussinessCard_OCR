@@ -255,12 +255,16 @@ class CardConfirmOut(BaseModel):
     `company_matched=false` **không phải lỗi**: danh thiếp không đọc được tên công ty vẫn được
     xác nhận bình thường, chỉ là không gắn được vào bảng `companies`. `detail` nói rõ vì sao để
     UI hiện đúng lý do thay vì im lặng.
+
+    `kb_indexed=false` đọc y hệt như vậy (task 7.3): thẻ vẫn `confirmed`, chỉ là chưa vào được
+    Knowledge Base của trợ lý AI — vá lại bằng `POST /api/kb/reindex`.
     """
 
     id: uuid.UUID
     status: str
     company_id: uuid.UUID | None = None
     company_matched: bool = False
+    kb_indexed: bool = False
     detail: str | None = None
 
 
