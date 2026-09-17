@@ -99,6 +99,7 @@
   const MAX_BATCH = {{ max_batch_companies }};
   const CONCURRENCY = {{ max_concurrency }};
   const POLL_MS = 3000;
+  const STORAGE_KEY = "enrich-jobs";
 
   const BADGES = {
     generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
@@ -106,13 +107,40 @@
     draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
   };
 
+  const JOB_BADGES = {
+    pending: ["⏳ Đang chờ", "bg-slate-50 text-slate-600 ring-slate-200"],
+    running: ["⏳ Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
+    done:    ["✅ Xong", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+    error:   ["❌ Lỗi", "bg-rose-50 text-rose-700 ring-rose-200"],
+  };
+
   const $ = (id) => document.getElementById(id);
   const rows = $("rows");
   const selected = new Map();
+  // Trạng thái từng công ty trong các job đang theo dõi: company_id -> item của enrich-jobs.
+  const jobState = new Map();
+  const activeJobs = new Set();
   let page = 1;
   let pages = 1;
   let pageIds = [];
+  let pageCompanies = [];
   let pollTimer;
+
+  // Giữ job_id qua lần tải lại trang: F5 giữa chừng là chuyện rất thường, mất job_id thì badge
+  // biến mất trong khi job vẫn đang chạy ở server.
+  function storeJobs() {
+    try {
+      if (activeJobs.size) sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...activeJobs]));
+      else sessionStorage.removeItem(STORAGE_KEY);
+    } catch (_) { /* trình duyệt chặn sessionStorage: chỉ mất khả năng theo dõi sau khi F5 */ }
+  }
+
+  function restoreJobs() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
+      if (Array.isArray(stored)) stored.forEach((jobId) => activeJobs.add(jobId));
+    } catch (_) { /* dữ liệu hỏng thì bỏ qua */ }
+  }
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -178,6 +206,47 @@
     updateSelection();
   }
 
+  function isBusy(company) {
+    const item = jobState.get(company.id);
+    return Boolean(item) && (item.status === "pending" || item.status === "running");
+  }
+
+  function stateCell(company) {
+    const cell = el("td", "px-4 py-3");
+    const item = jobState.get(company.id);
+    if (!item) {
+      cell.append(profileBadge(company.profile_status));
+      return cell;
+    }
+
+    const [label, tone] = JOB_BADGES[item.status] || [item.status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    cell.append(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+
+    if (item.status === "done" && item.sourced_fields !== null && item.sourced_fields !== undefined) {
+      cell.append(el("div", "mt-1 text-xs text-slate-500", `${item.sourced_fields} trường có nguồn`));
+    }
+    if (item.status === "error") {
+      // Cắt ngắn cho vừa dòng, `title` giữ nguyên văn để rê chuột đọc đủ.
+      const reason = el("div", "mt-1 max-w-xs truncate text-xs text-rose-700", item.error || "Không rõ lý do");
+      reason.title = item.error || "";
+      cell.append(reason);
+      const retry = el(
+        "button",
+        "mt-1 rounded-md border border-rose-200 px-2 py-0.5 text-xs text-rose-700 transition hover:bg-rose-50",
+        "Chạy lại",
+      );
+      retry.type = "button";
+      retry.addEventListener("click", () => rerunCompany(company));
+      cell.append(retry);
+    }
+    return cell;
+  }
+
+  function renderRows() {
+    rows.replaceChildren(...pageCompanies.map(renderRow));
+    updateSelection();
+  }
+
   function renderRow(company) {
     const tr = el("tr", "align-top hover:bg-slate-50/60");
 
@@ -185,6 +254,9 @@
     const box = el("input", "h-4 w-4 rounded border-slate-300");
     box.type = "checkbox";
     box.checked = selected.has(company.id);
+    // Cong ty dang chay thi chon cung vo ich: enrich-batch se tra ve `skipped`.
+    box.disabled = isBusy(company);
+    if (box.disabled) box.title = "Đang tạo hồ sơ, không chọn được";
     box.addEventListener("change", () => {
       if (box.checked) selected.set(company.id, company.display_name);
       else selected.delete(company.id);
@@ -204,9 +276,7 @@
     contacts.append(el("span", null, `${company.contact_count} danh thiếp`));
     tr.append(contacts);
 
-    const state = el("td", "px-4 py-3");
-    state.append(profileBadge(company.profile_status));
-    tr.append(state);
+    tr.append(stateCell(company));
 
     tr.append(el("td", "px-4 py-3 text-xs text-slate-500", formatDate(company.profile_generated_at)));
     return tr;
@@ -237,6 +307,7 @@
     page = body.page;
     pages = body.pages;
     pageIds = body.items.map((company) => company.id);
+    pageCompanies = body.items;
     rows.replaceChildren(...body.items.map(renderRow));
 
     $("summary").textContent = `${body.total} công ty`;
@@ -260,6 +331,7 @@
   async function startEnrich() {
     clearMessage();
     const ids = [...selected.keys()];
+    const selectedNames = new Map(selected);
     $("btn-enrich").disabled = true;
     let body;
     try {
@@ -281,38 +353,104 @@
       ? ` ${body.skipped} công ty bị bỏ qua vì đang chạy dở.`
       : "";
     message(`Đang tạo hồ sơ cho ${body.accepted} công ty (tối đa ${CONCURRENCY} công ty cùng lúc).${skipped}`, "info");
-    if (body.accepted) watchJob(body.job_id);
-    else load();
+    if (body.accepted) {
+      ids.forEach((id) => markPending(id, selectedNames.get(id)));
+      renderRows();
+      trackJob(body.job_id);
+    } else {
+      load();
+    }
   }
 
-  async function watchJob(jobId) {
+  function trackJob(jobId) {
+    activeJobs.add(jobId);
+    storeJobs();
+    pollJobs();
+  }
+
+  function markPending(companyId, displayName) {
+    if (!jobState.has(companyId)) {
+      jobState.set(companyId, {
+        company_id: companyId,
+        display_name: displayName,
+        status: "pending",
+        error: null,
+        sourced_fields: null,
+      });
+    }
+  }
+
+  async function pollJobs() {
     clearTimeout(pollTimer);
-    let job;
-    try {
-      const res = await fetch(`/api/companies/enrich-jobs/${jobId}`);
-      if (!res.ok) throw new Error(await readError(res));
-      job = await res.json();
-    } catch (err) {
-      message(`Mất dấu lượt tạo hồ sơ: ${err.message}. Tải lại trang để xem trạng thái mới nhất.`, "error");
+    if (activeJobs.size === 0) return;
+
+    const totals = { total: 0, done: 0, failed: 0, running: 0 };
+    const finished = [];
+    let completedJobs = 0;
+
+    await Promise.all([...activeJobs].map(async (jobId) => {
+      let job;
+      try {
+        const res = await fetch(`/api/companies/enrich-jobs/${jobId}`);
+        if (!res.ok) throw new Error(await readError(res));
+        job = await res.json();
+      } catch (_) {
+        // Job không còn tra được (id lạ, hoặc bản ghi đã bị xoá): bỏ theo dõi thay vì poll mãi.
+        finished.push(jobId);
+        return;
+      }
+      job.items.forEach((item) => jobState.set(item.company_id, item));
+      totals.total += job.total;
+      totals.done += job.done;
+      totals.failed += job.failed;
+      totals.running += job.running;
+      if (job.finished) {
+        finished.push(jobId);
+        completedJobs += 1;
+      }
+    }));
+
+    finished.forEach((jobId) => activeJobs.delete(jobId));
+    storeJobs();
+    renderRows();
+
+    if (activeJobs.size > 0) {
+      message(`Đang tạo hồ sơ: ${totals.done}/${totals.total} xong, ${totals.running} đang chạy…`, "info");
+      pollTimer = setTimeout(pollJobs, POLL_MS);
       return;
     }
 
-    if (!job.finished) {
-      message(`Đang tạo hồ sơ: ${job.done}/${job.total} xong, ${job.running} đang chạy…`, "info");
-      pollTimer = setTimeout(() => watchJob(jobId), POLL_MS);
-      return;
-    }
-
+    // Tải lại danh sách để lấy trạng thái hồ sơ và ngày tạo thật; badge job vẫn giữ trên dòng
+    // nhờ `jobState`, nên người dùng thấy rõ lượt vừa chạy đụng tới những công ty nào.
     await load();
-    if (job.failed) {
-      const reasons = job.items
-        .filter((item) => item.status === "error")
-        .map((item) => `${item.display_name}: ${item.error}`)
-        .join(" · ");
-      message(`Xong ${job.done}/${job.total}. ${job.failed} công ty lỗi — ${reasons}`, "error");
-    } else {
-      message(`Đã tạo xong hồ sơ cho ${job.done} công ty.`, "ok");
+    if (totals.failed) {
+      message(`Xong ${totals.done}/${totals.total}. ${totals.failed} công ty lỗi — lý do ghi ngay ở dòng tương ứng.`, "error");
+    } else if (completedJobs) {
+      message(`Đã tạo xong hồ sơ cho ${totals.done} công ty.`, "ok");
     }
+  }
+
+  async function rerunCompany(company) {
+    clearMessage();
+    let body;
+    try {
+      const res = await fetch(`/api/companies/${company.id}/enrich`, { method: "POST" });
+      body = await res.json();
+      if (res.status === 409) {
+        message(`${company.display_name} đang được tạo hồ sơ, đợi lượt đang chạy xong.`, "info");
+        if (body.existing_id) trackJob(body.existing_id);
+        return;
+      }
+      if (!res.ok) throw new Error(body.detail || `Lỗi HTTP ${res.status}`);
+    } catch (err) {
+      message(`Không chạy lại được: ${err.message}`, "error");
+      return;
+    }
+
+    markPending(company.id, company.display_name);
+    renderRows();
+    message(`Đang tạo lại hồ sơ cho ${company.display_name}.`, "info");
+    trackJob(body.job_id);
   }
 
   let timer;
@@ -344,7 +482,8 @@
 
   $("btn-enrich").addEventListener("click", startEnrich);
 
-  load();
+  restoreJobs();
+  load().then(pollJobs);
 })();
 </script>
 {% endblock %}
