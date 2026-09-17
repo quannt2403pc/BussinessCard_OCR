@@ -12,7 +12,8 @@ from app.models.company import Company, EnrichJob, EnrichJobItem
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.routers import companies
-from app.services import enrich_jobs
+from app.services import enrich_jobs, kb
+from app.services.embeddings import EmbedderUnavailableError
 from app.services.enrich_jobs import (
     BACKOFF_SECONDS,
     MAX_ATTEMPTS,
@@ -337,3 +338,117 @@ async def test_job_unknown(client: httpx.AsyncClient, monkeypatch: pytest.Monkey
     monkeypatch.setattr(job_repo, "get_job", nothing)
     response = await client.get(f"/api/companies/enrich-jobs/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+class FakeDb:
+    def __init__(self, profile: Any) -> None:
+        self.profile = profile
+        self.commits = 0
+
+    async def get(self, model: Any, pk: Any) -> Any:
+        return self.profile
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+class FakeSessionFactory:
+    def __init__(self, profile: Any) -> None:
+        self.db = FakeDb(profile)
+
+    def __call__(self) -> "FakeSessionFactory":
+        return self
+
+    async def __aenter__(self) -> FakeDb:
+        return self.db
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+async def test_index_profile_sends_profile_to_kb(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = object()
+    received: list[Any] = []
+
+    async def fake_ingest(db: Any, given: Any) -> int:
+        received.append(given)
+        return 3
+
+    monkeypatch.setattr(enrich_jobs, "SessionLocal", FakeSessionFactory(profile))
+    monkeypatch.setattr(kb, "ingest_company_profile", fake_ingest)
+
+    await enrich_jobs.index_profile(uuid.uuid4())
+    assert received == [profile]
+
+
+async def test_index_profile_skips_missing_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[Any] = []
+
+    async def fake_ingest(db: Any, given: Any) -> int:
+        called.append(given)
+        return 1
+
+    monkeypatch.setattr(enrich_jobs, "SessionLocal", FakeSessionFactory(None))
+    monkeypatch.setattr(kb, "ingest_company_profile", fake_ingest)
+
+    await enrich_jobs.index_profile(uuid.uuid4())
+    assert called == []
+
+
+async def test_index_profile_swallows_embedder_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken(db: Any, given: Any) -> int:
+        raise EmbedderUnavailableError("embedder chet")
+
+    monkeypatch.setattr(enrich_jobs, "SessionLocal", FakeSessionFactory(object()))
+    monkeypatch.setattr(kb, "ingest_company_profile", broken)
+
+    # Khong duoc nem ra ngoai: ho so da luu roi, KB dung lai duoc bang POST /api/kb/reindex.
+    # Nem ra thi run_with_retry se goi lai LLM them 2 luot cho mot su co khong lien quan.
+    await enrich_jobs.index_profile(uuid.uuid4())
+
+
+async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    company_id = uuid.uuid4()
+    profile_id = uuid.uuid4()
+    order: list[str] = []
+
+    class Saved:
+        id = profile_id
+
+    class Profile:
+        llm_model = "gemini-3-flash"
+        generated_at = None
+
+        def sourced_field_count(self) -> int:
+            return 7
+
+    async def fake_get_company(db: Any, cid: uuid.UUID) -> Company:
+        return Company(id=cid, display_name="ABC", name_normalized="abc")
+
+    async def fake_contacts(db: Any, cid: uuid.UUID) -> list[Any]:
+        return []
+
+    async def fake_draft(db: Any, cid: uuid.UUID) -> None:
+        return None
+
+    async def fake_enrich(name: str, hints: Any) -> Profile:
+        return Profile()
+
+    async def fake_save(db: Any, cid: uuid.UUID, profile: Any, **kwargs: Any) -> Saved:
+        order.append("save")
+        return Saved()
+
+    async def fake_index(pid: uuid.UUID) -> None:
+        order.append(f"index:{pid}")
+
+    monkeypatch.setattr(enrich_jobs, "SessionLocal", FakeSessionFactory(None))
+    monkeypatch.setattr(company_repo, "get_company", fake_get_company)
+    monkeypatch.setattr(company_repo, "list_contacts", fake_contacts)
+    monkeypatch.setattr(company_repo, "ensure_draft_profile", fake_draft)
+    monkeypatch.setattr(company_repo, "save_profile", fake_save)
+    monkeypatch.setattr(enrich_jobs, "enrich_company", fake_enrich)
+    monkeypatch.setattr(enrich_jobs, "build_hints", lambda cards: {})
+    monkeypatch.setattr(enrich_jobs, "index_profile", fake_index)
+
+    assert await enrich_jobs.enrich_and_save(company_id) == 7
+    assert order == ["save", f"index:{profile_id}"]

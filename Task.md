@@ -84,7 +84,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | D11 | P7 — Bàn giao | ⬜ Chưa làm | |
 | D12–D15 | Dự phòng | ⬜ Chưa dùng | Không có task đặt trước |
 
-**Tổng quan:** 44 / 103 task (D1–D11) hoàn thành (43%) · 10 task đang dở (1.11, 2.7, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8) · Cập nhật lần cuối: 2026-09-16
+**Tổng quan:** 44 / 103 task (D1–D11) hoàn thành (43%) · 11 task đang dở (1.11, 2.7, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 7.5) · Cập nhật lần cuối: 2026-09-16
 
 > ⚠️ **Hai lỗi sổ sách có sẵn, phát hiện khi chốt D4 — cần chủ dự án quyết, Q không tự sửa:**
 > (a) Dòng tổng quan trước ghi **24** trong khi đếm thật các dòng task đánh ✅ là **25** (lệch 1
@@ -302,7 +302,7 @@ Chi tiết đầy đủ kèm trích dẫn mã nguồn: [`docs/cliproxy-notes.md`
 | 7.2 | Hybrid search: kết hợp vector + full-text (`tsvector`) để bắt tốt tên riêng, email, SĐT | Q | S | 2.5h | ⬜ Chưa làm |
 | 7.3 | Auto-ingest KB khi confirm danh thiếp (hook trong `cards.py`) | Q | M | 1.5h | ⬜ Chưa làm |
 | 7.4 | Test retrieval với 10 truy vấn mẫu, đo recall thủ công, tinh chỉnh chunk size & top-k | Q | M | 2h | ⬜ Chưa làm |
-| 7.5 | Gọi `kb.ingest_company_profile()` ở cuối luồng enrich (trong `enrichment.py`) | T | M | 0.5h | ⬜ Chưa làm |
+| 7.5 | Gọi `kb.ingest_company_profile()` ở cuối luồng enrich (trong `enrichment.py`) | T | M | 0.5h | 🔄 Đang làm — 95%, mã + test + kiểm chứng xong, chờ merge. `enrich_and_save()` gọi `index_profile()` **sau khi đã commit hồ sơ, trong session riêng** — không dùng `commit=False` như docstring của Q gợi ý, vì `index_documents()` gọi embedder trước rồi mới ghi DB nên dùng chung session sẽ giữ transaction mở suốt 60s timeout (bẫy đã tránh ở 5.4). Đổi lại hồ sơ và chunk không nguyên tử — chấp nhận được vì KB dựng lại được bằng `POST /api/kb/reindex`. **Index hỏng chỉ ghi log, không làm hỏng lượt enrich**: bắt rộng kèm `logger.exception` (giữ traceback); để lỗi lan ra thì `run_with_retry` gọi lại LLM thêm 2 lượt cho sự cố không liên quan. Gọi cùng hàm đó ở `PATCH /api/companies/{id}/profile` (6.8) để sửa tay xong KB không giữ bản cũ — nếu không, trợ lý AI ở D8 sẽ trả lời bằng dữ liệu cũ. Hàm để **công khai** (`index_profile`, không phải `_index_profile`) vì router cũng gọi — đúng điều đã phàn nàn Q ở **I-17**. **Kiểm trong Docker với embedder thật**: enrich FPT Software → 11 trường có nguồn, KB có **2 chunk** đúng nội dung (MST, tên pháp lý), `meta.kind=company_profile`; enrich lần 2 → **vẫn 2 chunk, không nhân đôi** (`source_id` neo theo **id công ty** chứ không phải id hồ sơ — thiết kế của Q ở `build_profile_document`); **tắt embedder rồi enrich lần 3 → job vẫn `done`, `attempts=1`, hồ sơ vẫn lưu, log có traceback**. Dữ liệu thử đã xoá. `tests/test_company_enrich_jobs.py` thêm **4 test** (gọi đúng hồ sơ, hồ sơ đã bị xoá thì bỏ qua, embedder chết không ném lỗi, thứ tự lưu rồi mới index) — tổng 265 test |
 | 7.6 | `routers/export.py`: export CSV/JSON danh thiếp + hồ sơ DN (router riêng, không đụng `cards.py`) | T | S | 2h | ⬜ Chưa làm |
 | 7.7 | `routers/stats.py` + `templates/dashboard.html`: tổng danh thiếp, đã xác nhận, số công ty, số hồ sơ, tỉ lệ cần review | T | S | 2.5h | ⬜ Chưa làm |
 | 7.8 | Đo độ chính xác OCR trên 30 ảnh mẫu (do T chuẩn bị ở 3.9), so với `samples/expected.json` → `docs/accuracy.md` | Q | M | 2h | ⬜ Chưa làm |

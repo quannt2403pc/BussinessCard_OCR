@@ -8,9 +8,11 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal
+from app.models.company import CompanyProfile
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.schemas.enrich_job import JobItemStatus
+from app.services import kb
 from app.services.enrichment import EnrichmentParseError, build_hints, enrich_company
 from app.services.llm import (
     LLMBlockedError,
@@ -168,7 +170,7 @@ async def enrich_and_save(company_id: uuid.UUID) -> int:
         raise NoSourcedDataError(name)
 
     async with SessionLocal() as db:
-        await company_repo.save_profile(
+        saved = await company_repo.save_profile(
             db,
             company_id,
             profile,
@@ -176,7 +178,20 @@ async def enrich_and_save(company_id: uuid.UUID) -> int:
             generated_at=profile.generated_at,
         )
         await db.commit()
+    await index_profile(saved.id)
     return sourced
+
+
+async def index_profile(profile_id: uuid.UUID) -> None:
+    try:
+        async with SessionLocal() as db:
+            profile = await db.get(CompanyProfile, profile_id)
+            if profile is None:
+                return
+            chunks = await kb.ingest_company_profile(db, profile)
+        logger.info("Hồ sơ %s: đã index %d chunk vào KB", profile_id, chunks)
+    except Exception:
+        logger.exception("Không index được hồ sơ %s", profile_id)
 
 
 async def _process(job_id: uuid.UUID, item_id: uuid.UUID, semaphore: asyncio.Semaphore) -> None:
