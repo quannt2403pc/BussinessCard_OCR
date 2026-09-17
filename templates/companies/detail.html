@@ -83,6 +83,27 @@
 
   <p id="generated-note" class="text-xs text-slate-400"></p>
 </div>
+<section class="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+  <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Người liên hệ</h2>
+  <p class="mt-1 text-xs text-slate-500">
+    Lấy từ danh thiếp đã gắn với công ty này. Bấm vào tên để mở lại tấm danh thiếp gốc.
+  </p>
+  <div class="mt-3 overflow-hidden rounded-md border border-slate-200">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="px-4 py-2">Họ tên / Chức vụ</th>
+          <th class="px-4 py-2">Liên hệ</th>
+          <th class="px-4 py-2">Trạng thái</th>
+          <th class="px-4 py-2">Ngày quét</th>
+        </tr>
+      </thead>
+      <tbody id="contact-rows" class="divide-y divide-slate-100"></tbody>
+    </table>
+    <p id="contact-empty" class="hidden px-4 py-6 text-center text-sm text-slate-500"></p>
+  </div>
+</section>
+
 {% endblock %}
 
 {% block scripts %}
@@ -320,6 +341,7 @@
       `${company.contact_count} danh thiếp · tên chuẩn hoá: ${company.name_normalized}`;
     $("aliases").replaceChildren(...company.aliases.map((alias) =>
       el("span", "rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600", alias)));
+    renderContacts(company.contacts || []);
     renderProfile(company);
   }
 
@@ -401,6 +423,48 @@
       message(`Không tạo được hồ sơ: ${item.error}`, "error");
     } else if (item) {
       message(`Đã tạo hồ sơ với ${item.sourced_fields} trường có nguồn.`, "ok");
+    }
+  }
+
+  const CARD_BADGES = {
+    pending:      ["Chưa quét được", "bg-rose-50 text-rose-700 ring-rose-200"],
+    needs_review: ["Chờ duyệt",      "bg-amber-50 text-amber-700 ring-amber-200"],
+    confirmed:    ["Đã xác nhận",    "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+  };
+
+  function contactRow(card) {
+    const tr = el("tr", "align-top hover:bg-slate-50/60");
+
+    const who = el("td", "px-4 py-2");
+    // Link ngược card ↔ company: từ hồ sơ công ty mở thẳng tấm danh thiếp gốc (task 7.9).
+    const open = el("a", "font-medium text-sky-700 hover:underline", card.full_name || "(chưa có tên)");
+    open.href = `/cards/${card.id}`;
+    who.append(open);
+    who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
+    tr.append(who);
+
+    const contact = el("td", "px-4 py-2");
+    contact.append(el("div", "text-slate-800", card.email || "—"));
+    contact.append(el("div", "text-xs text-slate-500", card.phone || "—"));
+    tr.append(contact);
+
+    const state = el("td", "px-4 py-2");
+    const [label, tone] = CARD_BADGES[card.status] || [card.status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    state.append(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    tr.append(state);
+
+    tr.append(el("td", "px-4 py-2 text-xs text-slate-500", formatDate(card.uploaded_at)));
+    return tr;
+  }
+
+  function renderContacts(contacts) {
+    const empty = $("contact-empty");
+    $("contact-rows").replaceChildren(...contacts.map(contactRow));
+    if (contacts.length === 0) {
+      empty.textContent = "Chưa có danh thiếp nào gắn với công ty này.";
+      empty.classList.remove("hidden");
+    } else {
+      empty.classList.add("hidden");
     }
   }
 

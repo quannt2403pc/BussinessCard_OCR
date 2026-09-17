@@ -218,10 +218,8 @@ async def update_company_profile(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
     await db.commit()
-
+    await enrich_jobs.index_profile(profile.id)
     logger.info("Company %s: sửa tay %s", company_id, ", ".join(sorted(changes)))
-    return CompanyProfileOut.model_validate(profile, from_attributes=True)
-
     return CompanyProfileOut.model_validate(profile, from_attributes=True)
 
 
