@@ -1,3 +1,323 @@
-{# Khung chat + thẻ trích dẫn có link. #}
+{# Khung chat trợ lý AI: câu trả lời + thẻ trích dẫn bấm được + gợi ý câu hỏi. #}
 {# Chủ sở hữu: Q | Task: 8.4 | xem Task.md #}
-{# TODO(Q, task 8.4): chưa triển khai. #}
+{#
+  Trang giữ hội thoại trong bộ nhớ trình duyệt và gửi `session_id` kèm mỗi câu hỏi (task 8.3).
+  Mở lại bằng `/assistant?session=<uuid>` thì nạp lại lịch sử từ `GET /api/chat/{id}`.
+
+  Dấu [n] trong câu trả lời được server đánh số lại cho khớp thứ tự thẻ trích dẫn bên dưới
+  (`services/assistant.py::extract_citations`) — ở đây chỉ việc biến chúng thành nút bấm.
+#}
+{% extends "base.html" %}
+
+{% block title %}Trợ lý AI{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-slate-900">Trợ lý AI</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Hỏi về danh thiếp đã xác nhận và hồ sơ doanh nghiệp đã lập. Trợ lý chỉ trả lời dựa trên
+      dữ liệu đã nhập và luôn kèm nguồn.
+    </p>
+  </div>
+  <div class="ml-auto flex items-center gap-2">
+    <select id="f-scope"
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700">
+      <option value="">Toàn bộ dữ liệu</option>
+      <option value="card">Chỉ danh thiếp</option>
+      <option value="company_profile">Chỉ hồ sơ doanh nghiệp</option>
+    </select>
+    <button id="new-chat" type="button"
+            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+      Hội thoại mới
+    </button>
+  </div>
+</div>
+
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+
+<section id="thread" class="mt-6 space-y-5"></section>
+
+<div id="samples" class="mt-6">
+  <div class="text-xs uppercase tracking-wide text-slate-400">Thử hỏi</div>
+  <div class="mt-2 flex flex-wrap gap-2">
+    {% for question in sample_questions %}
+    <button type="button" data-sample="{{ question }}"
+            class="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition hover:border-sky-300 hover:text-sky-700">
+      {{ question }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+
+<form id="ask" class="sticky bottom-4 mt-6 flex items-end gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+  <textarea id="question" rows="1" required maxlength="2000"
+            placeholder="Hỏi một câu… (Enter để gửi, Shift+Enter xuống dòng)"
+            class="max-h-40 flex-1 resize-none border-0 px-2 py-2 text-sm text-slate-800 focus:outline-none"></textarea>
+  <button id="send" type="submit"
+          class="rounded-md bg-sky-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+    Gửi
+  </button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const thread = $("thread");
+
+  let sessionId = new URLSearchParams(location.search).get("session");
+  let busy = false;
+
+  // --- tiện ích ------------------------------------------------------------
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function message(text, tone) {
+    const box = $("message");
+    if (!text) { box.className = "mt-4 hidden"; return; }
+    const colours = tone === "warn"
+      ? "bg-amber-50 text-amber-800"
+      : "bg-rose-50 text-rose-800";
+    box.textContent = text;
+    box.className = `mt-4 rounded-md px-4 py-3 text-sm ${colours}`;
+  }
+
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") return body.detail;
+      // 422 của FastAPI: detail là mảng lỗi từng trường.
+      if (Array.isArray(body.detail) && body.detail.length) {
+        return body.detail[0].msg || `Lỗi HTTP ${res.status}`;
+      }
+    } catch (_) { /* body không phải JSON */ }
+    return `Lỗi HTTP ${res.status}`;
+  }
+
+  // --- vẽ hội thoại --------------------------------------------------------
+
+  function addQuestion(text) {
+    const row = el("div", "flex justify-end");
+    row.appendChild(el(
+      "div",
+      "max-w-2xl whitespace-pre-wrap rounded-lg bg-sky-600 px-4 py-2.5 text-sm text-white",
+      text,
+    ));
+    thread.appendChild(row);
+    return row;
+  }
+
+  /**
+   * Biến các dấu [n] trong câu trả lời thành nút bấm cuộn tới đúng thẻ trích dẫn.
+   *
+   * Dựng bằng createElement + textContent chứ không innerHTML: nội dung này do model sinh ra
+   * từ dữ liệu người dùng nhập (tên công ty, ghi chú trên danh thiếp). Ghép chuỗi HTML ở đây là
+   * mở đúng một đường XSS đi từ ảnh danh thiếp tới trình duyệt.
+   */
+  function renderAnswer(box, text, citations, key) {
+    const pattern = /\[(\d+)\]/g;
+    let last = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match.index > last) box.appendChild(document.createTextNode(text.slice(last, match.index)));
+      const index = Number(match[1]);
+      if (index >= 1 && index <= citations.length) {
+        const mark = el("a", "mx-0.5 rounded bg-sky-100 px-1 text-xs font-medium text-sky-700 no-underline hover:bg-sky-200", `[${index}]`);
+        mark.href = `#${key}-${index}`;
+        box.appendChild(mark);
+      } else {
+        box.appendChild(document.createTextNode(match[0]));
+      }
+      last = pattern.lastIndex;
+    }
+    if (last < text.length) box.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function renderCitations(citations, key) {
+    const wrap = el("div", "mt-3 space-y-2");
+    wrap.appendChild(el("div", "text-xs uppercase tracking-wide text-slate-400", "Nguồn"));
+
+    citations.forEach((citation, position) => {
+      const number = position + 1;
+      const card = el("a", "block rounded-md border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-sky-300 hover:bg-white");
+      card.id = `${key}-${number}`;
+      card.href = citation.url;
+
+      const head = el("div", "flex items-baseline gap-2");
+      head.appendChild(el("span", "text-xs font-semibold text-sky-700", `[${number}]`));
+      head.appendChild(el("span", "text-sm font-medium text-slate-800", citation.title));
+      if (typeof citation.score === "number") {
+        head.appendChild(el("span", "ml-auto text-xs text-slate-400", citation.score.toFixed(2)));
+      }
+      card.appendChild(head);
+      card.appendChild(el("div", "mt-1 text-xs text-slate-600", citation.snippet));
+      wrap.appendChild(card);
+
+      if (citation.source_urls && citation.source_urls.length) {
+        const refs = el("div", "flex flex-wrap gap-2 pl-3 text-xs");
+        refs.appendChild(el("span", "text-slate-400", "Nguồn tham khảo:"));
+        citation.source_urls.forEach((url) => {
+          const link = el("a", "text-slate-500 underline hover:text-sky-700", hostOf(url));
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          refs.appendChild(link);
+        });
+        wrap.appendChild(refs);
+      }
+    });
+
+    return wrap;
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch (_) { return url; }
+  }
+
+  let answerCount = 0;
+
+  function addAnswer(text, citations) {
+    const key = `c${++answerCount}`;
+    const row = el("div", "flex justify-start");
+    const bubble = el("div", "max-w-3xl rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm");
+
+    const body = el("div", "whitespace-pre-wrap text-sm text-slate-800");
+    renderAnswer(body, text, citations || [], key);
+    bubble.appendChild(body);
+
+    if (citations && citations.length) {
+      bubble.appendChild(renderCitations(citations, key));
+    } else {
+      bubble.appendChild(el("div", "mt-2 text-xs text-slate-400", "Không có nguồn nào được trích dẫn."));
+    }
+
+    row.appendChild(bubble);
+    thread.appendChild(row);
+    return row;
+  }
+
+  function addPending() {
+    const row = el("div", "flex justify-start");
+    row.appendChild(el(
+      "div",
+      "rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-400",
+      "Đang tra cứu dữ liệu đã nhập…",
+    ));
+    thread.appendChild(row);
+    scrollDown();
+    return row;
+  }
+
+  function scrollDown() {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+
+  // --- gửi câu hỏi ---------------------------------------------------------
+
+  async function ask(text) {
+    if (busy || !text.trim()) return;
+    busy = true;
+    $("send").disabled = true;
+    message("");
+    $("samples").classList.add("hidden");
+
+    addQuestion(text);
+    const pending = addPending();
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          session_id: sessionId,
+          filters: { source_type: $("f-scope").value || null, company_id: null },
+        }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+
+      const data = await res.json();
+      sessionId = data.session_id;
+      pending.remove();
+      addAnswer(data.answer, data.citations);
+
+      if (data.context_chunks === 0) {
+        message("Không tìm thấy dữ liệu liên quan trong Knowledge Base cho câu hỏi này.", "warn");
+      }
+    } catch (err) {
+      pending.remove();
+      message(`Không hỏi được: ${err.message}`);
+    } finally {
+      busy = false;
+      $("send").disabled = false;
+      scrollDown();
+    }
+  }
+
+  // --- nạp lại một phiên đã có --------------------------------------------
+
+  async function loadSession(id) {
+    try {
+      const res = await fetch(`/api/chat/${id}`);
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      data.messages.forEach((item) => {
+        if (item.role === "user") addQuestion(item.content);
+        else addAnswer(item.content, item.citations);
+      });
+      if (data.messages.length) $("samples").classList.add("hidden");
+    } catch (err) {
+      sessionId = null;
+      message(`Không mở lại được hội thoại: ${err.message}`, "warn");
+    }
+  }
+
+  // --- gắn sự kiện ---------------------------------------------------------
+
+  $("ask").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const box = $("question");
+    const text = box.value;
+    box.value = "";
+    box.style.height = "auto";
+    ask(text);
+  });
+
+  $("question").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      $("ask").requestSubmit();
+    }
+  });
+
+  $("question").addEventListener("input", (event) => {
+    event.target.style.height = "auto";
+    event.target.style.height = `${event.target.scrollHeight}px`;
+  });
+
+  document.querySelectorAll("[data-sample]").forEach((button) => {
+    button.addEventListener("click", () => ask(button.dataset.sample));
+  });
+
+  $("new-chat").addEventListener("click", () => {
+    sessionId = null;
+    thread.replaceChildren();
+    answerCount = 0;
+    message("");
+    $("samples").classList.remove("hidden");
+    history.replaceState(null, "", "/assistant");
+  });
+
+  if (sessionId) loadSession(sessionId);
+})();
+</script>
+{% endblock %}

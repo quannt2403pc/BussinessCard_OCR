@@ -239,6 +239,7 @@ async def search(
     top_k: int = TOP_K,
     min_similarity: float = MIN_SIMILARITY,
     source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
     hybrid: bool = True,
     client: httpx.AsyncClient | None = None,
 ) -> list[Hit]:
@@ -247,6 +248,11 @@ async def search(
     Trả về **danh sách rỗng** khi không có gì đủ liên quan — đó là một câu trả lời hợp lệ, không
     phải lỗi. D8 nhận rỗng thì nói "không có thông tin trong dữ liệu đã nhập" thay vì để model
     tự bịa từ mấy chunk gần nhất.
+
+    `source_type` / `company_id` là bộ lọc metadata của task 8.5 — thu hẹp KB **trước** khi tìm
+    (chỉ danh thiếp, chỉ hồ sơ DN, hoặc chỉ một công ty). Lọc ở tầng SQL chứ không sàng lại kết
+    quả trong Python: sàng sau thì hỏi top-5 trong phạm vi một công ty sẽ nhận về 0–1 dòng vì
+    bốn chỗ đã bị các công ty khác chiếm mất.
 
     `hybrid=False` tắt nhánh full-text; chỉ dùng để **đo riêng từng nhánh** ở task 7.4.
     """
@@ -261,10 +267,17 @@ async def search(
         top_k=candidates,
         min_similarity=min_similarity,
         source_type=source_type,
+        company_id=company_id,
         client=client,
     )
     text_hits = (
-        await text_search(db, text_query, top_k=candidates, source_type=source_type)
+        await text_search(
+            db,
+            text_query,
+            top_k=candidates,
+            source_type=source_type,
+            company_id=company_id,
+        )
         if hybrid
         else []
     )
@@ -287,6 +300,7 @@ async def vector_search(
     top_k: int = TOP_K,
     min_similarity: float = MIN_SIMILARITY,
     source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> list[Hit]:
     """Nhánh vector (task 7.1): nhúng câu hỏi → top-k cosine → cắt theo ngưỡng.
@@ -297,7 +311,9 @@ async def vector_search(
     truy hồi tụt đi một cách không truy ra được (Plan.md mục 2.6).
     """
     vector = await embeddings.embed_query(query, client=client)
-    rows = await kb_repo.search_similar(db, vector, top_k=top_k, source_type=source_type)
+    rows = await kb_repo.search_similar(
+        db, vector, top_k=top_k, source_type=source_type, company_id=company_id
+    )
 
     hits: list[Hit] = []
     for chunk, distance in rows:
@@ -324,6 +340,7 @@ async def text_search(
     *,
     top_k: int = TOP_K,
     source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> list[Hit]:
     """Nhánh full-text (task 7.2): khớp từ khoá trên `kb_chunks.content`.
 
@@ -338,7 +355,11 @@ async def text_search(
     công cụ nào để trả lời một câu hỏi thuần ngữ nghĩa.
     """
     rows = await kb_repo.search_fulltext(
-        db, query_terms(query), top_k=top_k, source_type=source_type
+        db,
+        query_terms(query),
+        top_k=top_k,
+        source_type=source_type,
+        company_id=company_id,
     )
     return [_hit(chunk, score=0.0, text_rank=rank, matched_by="text") for chunk, rank in rows]
 
