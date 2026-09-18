@@ -14,6 +14,7 @@ import json
 import pytest
 
 from app.models.card import CardStatus
+from app.prompts import ocr as ocr_prompt
 from app.schemas.card import CardExtraction
 from app.services import ocr
 from app.services.llm import LLMBlockedError, LLMError
@@ -197,3 +198,32 @@ async def test_extract_card_tu_choi_anh_rong_truoc_khi_goi_mang(cliproxy):
         await ocr.extract_card(b"")
 
     assert len(cliproxy.calls) == 0
+
+
+# --------------------------------------------------------------------------- prompt (task 9.3)
+
+
+def test_prompt_quy_dinh_thu_tu_uu_tien_cho_hai_so_dien_thoai():
+    """Bản cũ viết "số di động **hoặc** số đứng đầu" — hai vế chỉ về hai số khác nhau.
+
+    Đo ở task 9.3 trên thẻ Nhật (in `TEL: 03-…` trước, `携帯: 090-…` sau): model chọn số di
+    động. Lựa chọn hợp lý, nhưng khi nó đến từ hành vi ngầm của model chứ không từ prompt thì
+    đổi model là đổi kết quả — mà `phone` là trường dùng để tra cứu và đối chiếu.
+    """
+    rule = ocr_prompt.SYSTEM_PROMPT
+    assert "hoặc số đứng đầu" not in rule
+    # Thứ tự ưu tiên phải xuất hiện theo đúng chiều a → b, không phải hai lựa chọn ngang hàng.
+    assert rule.index("a. Có số di động") < rule.index("b. Không phân biệt được")
+
+
+def test_prompt_liet_ke_nhan_so_dien_thoai_cua_ca_bon_ngon_ngu():
+    """Thẻ Nhật ghi `携帯`, thẻ Trung ghi `电话` — bản cũ chỉ liệt kê nhãn tiếng Anh."""
+    for label in ("Tel:", "携帯:", "电话:", "휴대폰:"):
+        assert label in ocr_prompt.SYSTEM_PROMPT
+
+
+def test_prompt_van_giu_ba_quy_tac_chong_bia():
+    """Ba quy tắc này đo được là đang chạy đúng ở 9.3 — đừng sửa kèm khi chỉnh quy tắc 4."""
+    assert "CHỈ ghi những gì NHÌN THẤY" in ocr_prompt.SYSTEM_PROMPT
+    assert "Không tự suy ra trường này từ trường khác" in ocr_prompt.SYSTEM_PROMPT
+    assert "GIỮ NGUYÊN chữ viết gốc" in ocr_prompt.SYSTEM_PROMPT

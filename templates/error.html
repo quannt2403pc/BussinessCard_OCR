@@ -1,0 +1,75 @@
+{# Trang lỗi dùng chung cho mọi mã HTTP + màn hình "chưa kết nối OAuth". #}
+{# Chủ sở hữu: Q | Task: 9.4 | xem Task.md #}
+{#
+  Biến truyền vào từ `app/core/errors.py::_html_error`:
+      status_code, title, message, hint, request_id, show_oauth
+  `show_oauth` = True khi thông điệp lỗi có nhắc tới /settings — ca hay gặp nhất của bản demo
+  (token OAuth nằm trong volume `cliproxy_auths`, xoá volume là mất).
+#}
+{% extends "base.html" %}
+
+{% block title %}Lỗi {{ status_code }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl">
+
+  {% if show_oauth %}
+  {# --- Màn hình riêng: chưa kết nối OAuth. Một câu, một nút. --- #}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 p-6">
+    <div class="flex items-start gap-3">
+      <span class="mt-0.5 text-2xl leading-none" aria-hidden="true">&#9888;</span>
+      <div>
+        <h1 class="text-xl font-semibold text-amber-900">Chưa kết nối CLIProxy</h1>
+        <p class="mt-2 text-amber-900/80">{{ message }}</p>
+        <p class="mt-3 text-sm text-amber-900/70">
+          Mọi tính năng dùng AI — quét danh thiếp, lập hồ sơ doanh nghiệp, trợ lý hỏi–đáp —
+          đều đi qua kết nối này. Các trang khác vẫn xem được bình thường.
+        </p>
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <a href="/settings"
+             class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700">
+            Đi tới Cài đặt để kết nối
+          </a>
+          <button type="button" onclick="history.back()"
+                  class="rounded-md border border-amber-300 px-4 py-2 text-sm text-amber-900 transition hover:bg-amber-100">
+            Quay lại
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% else %}
+  {# --- Trang lỗi chung --- #}
+  <div class="rounded-lg border border-slate-200 bg-white p-6">
+    <div class="text-sm font-medium uppercase tracking-wide text-slate-400">
+      Lỗi {{ status_code }}
+    </div>
+    <h1 class="mt-1 text-2xl font-semibold text-slate-900">{{ title }}</h1>
+
+    <p class="mt-3 text-slate-600">{{ message }}</p>
+
+    {% if hint %}
+    <p class="mt-2 text-sm text-slate-500">{{ hint }}</p>
+    {% endif %}
+
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      <a href="/"
+         class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
+        Về trang chủ
+      </a>
+      <button type="button" onclick="history.back()"
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-50">
+        Quay lại
+      </button>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Mã tra cứu: cùng chuỗi với `request_id` in trong mọi dòng log của lượt này (task 9.5), và
+     cùng giá trị với header `X-Request-ID`. Người dùng đọc được một chuỗi ngắn để báo lỗi. #}
+  <p class="mt-4 text-xs text-slate-400">
+    Mã tra cứu: <code class="rounded bg-slate-100 px-1 font-mono text-slate-500">{{ request_id }}</code>
+  </p>
+</div>
+{% endblock %}

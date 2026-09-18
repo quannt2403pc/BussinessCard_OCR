@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import settings
+from app.core.errors import register_exception_handlers
+from app.core.logging import RequestContextMiddleware, setup_logging
 from app.routers import ROUTER_MODULES, iter_routers
 
 logger = logging.getLogger(__name__)
@@ -28,10 +30,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Chuẩn bị thư mục upload và ghi log những router đã sẵn sàng."""
-    # uvicorn chỉ gắn handler cho logger của nó, log của app sẽ rơi vào hư không.
-    # Cấu hình logging đầy đủ (request id, thời gian gọi LLM) là task 9.5.
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+    # Cấu hình logging ở đây chứ không ở cấp module: `lifespan` **không chạy** khi test gọi app
+    # qua `httpx.ASGITransport`, nên pytest giữ nguyên cấu hình logging của chính nó.
+    setup_logging(settings.log_level)
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,6 +51,13 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Request id + đo thời gian xử lý (task 9.5). Thêm trước khi gắn router để mọi request — kể cả
+# request bị router từ chối bằng 404 — đều có một dòng log và một `X-Request-ID` trả về.
+app.add_middleware(RequestContextMiddleware)
+
+# Xử lý lỗi toàn cục (task 9.4): HTML cho người dùng, JSON cho API, cùng một chỗ quyết định.
+register_exception_handlers(app)
 
 # Router khai sẵn cho cả 7 module; module nào chưa có `router` thì bỏ qua (xem routers/__init__.py).
 for _name, _router in iter_routers():

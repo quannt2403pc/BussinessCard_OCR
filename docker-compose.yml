@@ -6,15 +6,23 @@
 #   embedder  build ./embedder       :8001   sentence-transformers (T dựng ở task 3.10)
 #   adminer   adminer                :8080   xem DB khi debug
 #
-# Chạy:
-#   cp .env.example .env                                  # điền CLIPROXY_MGMT_KEY
-#   cp cliproxy/config.example.yaml cliproxy/config.yaml   # secret-key trùng key trên
+# Chạy (task 9.1 — máy sạch, đúng một lệnh):
 #   docker compose up -d
-#   docker compose exec api alembic upgrade head
 #   curl localhost:8000/health   -> {"status":"ok"}
 #
-# ⚠️ Bỏ bước `cp` thứ hai thì Docker thấy đường dẫn bind mount không tồn tại và **tạo một
-# thư mục** tên `config.yaml` → cliproxy khởi động lỗi với thông báo rất khó đoán.
+# Hai bước `cp` thủ công trước đây đã bỏ:
+#   * `.env`  — mọi biến bên dưới đều có mặc định `${VAR:-…}`, thiếu `.env` vẫn chạy. Chép
+#     `.env.example` thành `.env` chỉ khi muốn đổi giá trị.
+#   * `cliproxy/config.yaml` — service `cliproxy-init` tự tạo từ bản mẫu ở lần chạy đầu.
+#     ⚠️ Đây không phải tiện nghi mà là **sửa một cái bẫy**: thiếu file, Docker thấy đường dẫn
+#     bind mount không tồn tại và **tạo một thư mục** tên `config.yaml`, cliproxy chết kèm
+#     thông báo không đoán ra nguyên nhân.
+#
+# `alembic upgrade head` cũng không phải gõ tay nữa — `docker-entrypoint.sh` chạy trước uvicorn
+# (task 9.2). Tắt bằng `RUN_MIGRATIONS=0`.
+#
+# Nạp dữ liệu mẫu cho demo (task 9.2):
+#   docker compose exec api python -m scripts.seed
 
 name: businesscard-ocr
 
@@ -45,6 +53,12 @@ services:
       # chết để trang /settings còn hiện được trạng thái "Chưa kết nối" (task 2.4, 9.4).
       cliproxy:
         condition: service_started
+      # Cùng lý do, cộng thêm một lý do riêng: embedder nạp model mất vài chục giây
+      # (`start_period: 60s`). Chờ `service_healthy` là mỗi lần `up` phải ngồi nhìn màn hình
+      # chờ ngót một phút mới mở được trang danh thiếp, trong khi F1 không cần embedder.
+      # Embedder chết thì các đường dùng nó trả 503 kèm thông báo rõ ràng (task 9.4).
+      embedder:
+        condition: service_started
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://bizcard:change-me@db:5432/bizcard}
       CLIPROXY_BASE_URL: ${CLIPROXY_BASE_URL:-http://cliproxy:8317}
@@ -57,6 +71,12 @@ services:
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      # --- Vận hành (task 9.5 / 9.2) ---
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEBUG: ${DEBUG:-false}
+      # Entrypoint chạy `alembic upgrade head` trước uvicorn. Đặt 0 khi cố ý muốn lên với
+      # schema hiện tại (ví dụ đang gỡ lỗi một migration hỏng).
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
     ports:
       - "8000:8000"
     volumes:
@@ -67,6 +87,10 @@ services:
       - ./static:/app/static
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
+      # `scripts/` cũng mount: `python -m scripts.seed` (9.2) và `scripts/eval_retrieval.py`
+      # (7.4) chạy trong container này, sửa script mà phải rebuild image thì vòng lặp đo đạc
+      # chậm hẳn đi.
+      - ./scripts:/app/scripts
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test:
@@ -76,6 +100,26 @@ services:
       retries: 5
       start_period: 20s
     restart: unless-stopped
+
+  cliproxy-init:
+    # Chủ sở hữu: Q | Task: 9.1
+    #
+    # Một lệnh `cp` chạy đúng một lần, để máy sạch không phải gõ tay bước nào (tiêu chí A1).
+    # Dùng **đúng image của cliproxy** chứ không kéo thêm alpine/busybox: image đó đã tải rồi,
+    # thêm một image nữa là thêm một thứ phải tải trên máy mới.
+    #
+    # Không ghi đè nếu file đã có — `secret-key` trong `config.yaml` bị CLIProxy băm lại và ghi
+    # đè ngay lần khởi động đầu, chép đè lên là xoá mất key thật của máy đó.
+    image: ${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    #
+    # Viết trên **một dòng**: dạng `>` của YAML giữ nguyên xuống dòng ở những dòng thụt sâu hơn,
+    # nên script nhiều dòng vào tới `sh` là `Syntax error: "&&" unexpected` (đã vấp thật).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "if [ -f /conf/config.yaml ]; then echo 'cliproxy/config.yaml da co - giu nguyen'; else cp /conf/config.example.yaml /conf/config.yaml && echo 'da tao cliproxy/config.yaml tu ban mau - secret-key mac dinh: change-me'; fi"
+    volumes:
+      - ./cliproxy:/conf
+    restart: "no"
 
   cliproxy:
     # Chủ sở hữu: Q | Task: 2.1
@@ -87,9 +131,27 @@ services:
     # `:latest` không tái lập được — upstream đẩy bản mới là hành vi đổi. Chốt xong ở 2.1 thì
     # ghim theo tag phiên bản hoặc digest, đặt qua biến CLIPROXY_IMAGE trong .env.
     image: ${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    depends_on:
+      cliproxy-init:
+        condition: service_completed_successfully
+    # Mount **thư mục** `./cliproxy` rồi trỏ `-config` vào file bên trong, thay vì bind mount
+    # thẳng `./cliproxy/config.yaml` như trước.
+    #
+    # Đây là bản sửa một cái bẫy đo được ngày 2026-09-18: `depends_on` **không** bảo vệ được
+    # bind mount kiểu file. Compose tạo container của mọi service **trước** khi chạy service
+    # nào, và Docker dựng đường dẫn bind mount ngay lúc *create* — nên khi `cliproxy-init` còn
+    # chưa chạy thì Docker đã kịp tạo một **thư mục** rỗng tên `config.yaml`. Mount cả thư mục
+    # thì không còn đường dẫn nào để Docker tự bịa ra: `./cliproxy` luôn tồn tại trong repo.
+    #
+    # `-config` là cờ có sẵn của CLIProxy (`CLIProxyAPI --help`), không phải mẹo.
+    command: ["./CLIProxyAPI", "-config", "/conf/config.yaml"]
     volumes:
-      # File này KHÔNG commit (chứa management key) — tạo từ config.example.yaml, xem đầu file.
-      - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml
+      # `config.yaml` KHÔNG commit (chứa management key) — `cliproxy-init` tạo từ bản mẫu.
+      # CLIProxy băm `secret-key` rồi ghi đè lại chính file này, nên phải ghi được.
+      #
+      # Cái giá của việc mount cả thư mục: CLIProxy còn ghi thêm `static/management.html`
+      # (~2.8MB, bảng điều khiển của nó) vào đây mỗi lần khởi động → đã cho vào `.gitignore`.
+      - ./cliproxy:/conf
       # Token OAuth phải sống qua restart, nếu không mỗi lần up lại phải đăng nhập lại (rủi ro R1).
       - cliproxy_auths:/root/.cli-proxy-api
     ports:

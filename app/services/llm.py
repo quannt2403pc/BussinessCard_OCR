@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.core.logging import log_llm_call
 from app.services.cliproxy_client import (
     CliProxyAuthError,
     CliProxyClient,
@@ -199,33 +201,55 @@ async def generate_content(
             timeout=LLM_TIMEOUT,
         )
 
+    # Đo quanh **cả** nhánh hỏng, không chỉ nhánh chạy được (task 9.5): lời gọi treo 120 giây
+    # rồi timeout là con số đáng ghi nhất trong cả file log, mà ghi sau `return` thì không bao
+    # giờ thấy nó.
+    started = time.perf_counter()
     try:
         if client is not None:
-            return await _call(client)
-        async with CliProxyClient(timeout=LLM_TIMEOUT) as proxy:
-            return await _call(proxy)
-    except CliProxyAuthError as exc:
-        raise LLMNotConnectedError(
-            "CLIProxy từ chối credential đang có (401/403) — token hỏng hoặc hết hạn. "
-            "Vào /settings bấm 'Kết nối CLIProxy (OAuth)' để đăng nhập lại."
-        ) from exc
-    except CliProxyNoCredentialError as exc:
-        # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, nhưng dán lên
-        # UI thì rối. Đẩy vào log, trả cho người dùng đúng một câu và một việc cần làm.
-        logger.info("CLIProxy báo thiếu credential: %s", exc.message)
-        raise LLMNotConnectedError(
-            "Chưa kết nối OAuth: CLIProxy không có credential nào cho channel "
-            f"{settings.cliproxy_auth_provider!r}. Vào /settings bấm 'Kết nối CLIProxy (OAuth)'."
-        ) from exc
-    except CliProxyResponseError as exc:
-        if exc.status_code == 400 and "unknown provider for model" in str(exc.message).lower():
-            raise await _explain_unknown_provider(model_name, exc, client) from exc
-        raise LLMError(f"CLIProxy từ chối lời gọi model: {exc.message}") from exc
+            data = await _call(client)
+        else:
+            async with CliProxyClient(timeout=LLM_TIMEOUT) as proxy:
+                data = await _call(proxy)
     except CliProxyError as exc:
-        raise LLMError(f"Không gọi được model qua CLIProxy: {exc.message}") from exc
+        log_llm_call(model_name, time.perf_counter() - started, None, error=type(exc).__name__)
+        raise await _translate_error(model_name, exc, client) from exc
+
+    log_llm_call(model_name, time.perf_counter() - started, data.get("usageMetadata"))
+    return data
 
 
 # --------------------------------------------------------------------------- nội bộ
+
+
+async def _translate_error(
+    model_name: str,
+    exc: CliProxyError,
+    client: CliProxyClient | None,
+) -> LLMError:
+    """Dịch lỗi tầng CLIProxy thành lỗi tầng LLM — bảng bốn dòng ở đầu file.
+
+    Tách khỏi `generate_content()` để đúng một chỗ ghi log thời gian gọi (9.5) dùng được cho
+    cả nhánh chạy được lẫn bốn nhánh hỏng, thay vì rải `log_llm_call()` vào từng `except`.
+    """
+    if isinstance(exc, CliProxyAuthError):
+        return LLMNotConnectedError(
+            "CLIProxy từ chối credential đang có (401/403) — token hỏng hoặc hết hạn. "
+            "Vào /settings bấm 'Kết nối CLIProxy (OAuth)' để đăng nhập lại."
+        )
+    if isinstance(exc, CliProxyNoCredentialError):
+        # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, nhưng dán lên
+        # UI thì rối. Đẩy vào log, trả cho người dùng đúng một câu và một việc cần làm.
+        logger.info("CLIProxy báo thiếu credential: %s", exc.message)
+        return LLMNotConnectedError(
+            "Chưa kết nối OAuth: CLIProxy không có credential nào cho channel "
+            f"{settings.cliproxy_auth_provider!r}. Vào /settings bấm 'Kết nối CLIProxy (OAuth)'."
+        )
+    if isinstance(exc, CliProxyResponseError):
+        if exc.status_code == 400 and "unknown provider for model" in str(exc.message).lower():
+            return await _explain_unknown_provider(model_name, exc, client)
+        return LLMError(f"CLIProxy từ chối lời gọi model: {exc.message}")
+    return LLMError(f"Không gọi được model qua CLIProxy: {exc.message}")
 
 
 async def _explain_unknown_provider(
