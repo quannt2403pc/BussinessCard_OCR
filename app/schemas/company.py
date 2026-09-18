@@ -71,6 +71,11 @@ class CompanyProfileSchema(BaseModel):
             return []
         return v
 
+    @field_validator("sources", mode="before")
+    @classmethod
+    def none_as_empty_sources(cls, v: object) -> object:
+        return {} if v is None else v
+
     def fields_with_value(self) -> set[str]:
         filled = set()
         for name in SOURCED_FIELDS:

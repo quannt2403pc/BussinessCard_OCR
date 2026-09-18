@@ -5,9 +5,13 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard
+from app.models.company import Company, CompanyProfile
 from app.prompts.enrichment import build_research_prompt, build_structure_prompt
+from app.repositories import company as company_repo
 from app.schemas.company import ProfileStatus
 from app.services.cliproxy_client import CliProxyClient
 from app.services.enrichment import (
@@ -375,3 +379,89 @@ def test_value_longer_than_db_column_is_cleared_not_truncated() -> None:
 async def test_enrich_company_rejects_blank_name() -> None:
     with pytest.raises(ValueError):
         await enrich_company("   ")
+
+
+async def saved_profiles(db: AsyncSession, company: Company) -> list[CompanyProfile]:
+    rows = await db.scalars(
+        select(CompanyProfile)
+        .where(CompanyProfile.company_id == company.id)
+        .execution_options(populate_existing=True)
+    )
+    return list(rows)
+
+
+async def add_company(db: AsyncSession) -> Company:
+    company = Company(display_name="Công ty TNHH ABC", name_normalized="abc")
+    db.add(company)
+    await db.flush()
+    return company
+
+
+async def test_db_saved_profile_keeps_only_sourced_fields(db_session: AsyncSession) -> None:
+    company = await add_company(db_session)
+    profile = validate(
+        {
+            "tax_code": "0301234567",
+            "founded_year": 2005,
+            "address": "1 Lê Lợi",
+            "sources": {
+                "tax_code": [{"url": TAX_PAGE, "title": "MST"}],
+                "address": [{"url": "https://fake-directory.vn/abc"}],
+            },
+        }
+    )
+
+    await company_repo.save_profile(
+        db_session, company.id, profile, llm_model="gemini-3-flash", generated_at=NOW
+    )
+    [stored] = await saved_profiles(db_session, company)
+
+    assert stored.tax_code == "0301234567"
+    assert stored.founded_year is None
+    assert stored.address is None
+    assert set(stored.sources or {}) == {"tax_code"}
+    assert stored.sources["tax_code"][0]["url"] == TAX_PAGE
+    assert stored.status == ProfileStatus.GENERATED.value
+
+
+async def test_db_first_enrich_turns_draft_into_generated(db_session: AsyncSession) -> None:
+    company = await add_company(db_session)
+    await company_repo.ensure_draft_profile(db_session, company.id)
+    [draft] = await saved_profiles(db_session, company)
+
+    profile = validate({"tax_code": "0301234567", "sources": {"tax_code": [{"url": TAX_PAGE}]}})
+    await company_repo.save_profile(db_session, company.id, profile, generated_at=NOW)
+    [stored] = await saved_profiles(db_session, company)
+
+    assert stored.id == draft.id
+    assert stored.status == ProfileStatus.GENERATED.value
+    assert stored.generated_at == NOW.replace(tzinfo=None)
+
+
+async def test_db_regenerate_overwrites_manual_edit_in_place(db_session: AsyncSession) -> None:
+    company = await add_company(db_session)
+    db_session.add(
+        CompanyProfile(
+            company_id=company.id,
+            tax_code="0309999999",
+            size_label="SME",
+            status=ProfileStatus.VERIFIED.value,
+            sources={},
+        )
+    )
+    await db_session.flush()
+    [manual] = await saved_profiles(db_session, company)
+
+    profile = validate({"tax_code": "0301234567", "sources": {"tax_code": [{"url": TAX_PAGE}]}})
+    await company_repo.save_profile(db_session, company.id, profile, generated_at=NOW)
+    [stored] = await saved_profiles(db_session, company)
+    count = await db_session.scalar(
+        select(func.count()).where(CompanyProfile.company_id == company.id)
+    )
+
+    assert count == 1
+    assert stored.id == manual.id
+    assert stored.tax_code == "0301234567"
+    assert stored.size_label is None
+    assert stored.status == ProfileStatus.GENERATED.value
+    assert set(stored.sources or {}) == {"tax_code"}
