@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import SessionLocal
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
+from app.repositories import company as company_repo
 from app.schemas.export import (
     CSV_BOM,
     EXPORT_BATCH_SIZE,
@@ -64,19 +65,12 @@ def _cards_select(card_status: str | None) -> Select[Any]:
 
 
 def _companies_select() -> Select[Any]:
-    card_count = (
-        select(func.count(BusinessCard.id))
-        .where(BusinessCard.company_id == Company.id)
-        .correlate(Company)
-        .scalar_subquery()
-        .label("card_count")
-    )
     return (
         select(
             Company.id.label("company_id"),
             Company.display_name,
             Company.aliases,
-            card_count,
+            company_repo.contact_count().label("contact_count"),
             CompanyProfile.status.label("profile_status"),
             CompanyProfile.legal_name,
             CompanyProfile.tax_code,

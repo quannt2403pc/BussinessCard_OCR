@@ -3,9 +3,9 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, delete, func, or_, select
+from sqlalchemy import ColumnElement, ScalarSelect, Select, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -178,16 +178,20 @@ def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnE
     return conditions
 
 
-def _company_rows() -> Select[tuple[Company, int, str | None, datetime | None]]:
-    contact_count = (
+def contact_count() -> ScalarSelect[int]:
+    return (
         select(func.count(BusinessCard.id))
         .where(BusinessCard.company_id == Company.id)
         .correlate(Company)
         .scalar_subquery()
     )
-    return select(
-        Company, contact_count, CompanyProfile.status, CompanyProfile.generated_at
-    ).outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
+
+
+def _company_rows() -> Select[tuple[Company, int, str | None, datetime | None]]:
+    profile_status = cast(ColumnElement[str | None], CompanyProfile.status)
+    return select(Company, contact_count(), profile_status, CompanyProfile.generated_at).outerjoin(
+        CompanyProfile, CompanyProfile.company_id == Company.id
+    )
 
 
 def _to_company_row(

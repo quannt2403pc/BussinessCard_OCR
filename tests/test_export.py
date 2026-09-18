@@ -126,7 +126,7 @@ async def test_companies_export_includes_company_without_profile(
     assert rows[1][rows[0].index("profile_status")] == ""
     assert rows[1][rows[0].index("legal_name")] == ""
     assert rows[1][rows[0].index("sources")] == ""
-    assert rows[1][rows[0].index("card_count")] == "0"
+    assert rows[1][rows[0].index("contact_count")] == "0"
 
 
 async def test_companies_export_profile_lists_and_sources(
@@ -154,7 +154,7 @@ async def test_companies_export_profile_lists_and_sources(
     rows = read_csv(await client.get("/api/export/companies.csv"))
     cells = dict(zip(rows[0], rows[1], strict=True))
 
-    assert cells["card_count"] == "2"
+    assert cells["contact_count"] == "2"
     assert cells["industry"] == "Phần mềm; Dịch vụ CNTT"
     assert json.loads(cells["sources"])["legal_name"][0]["url"] == "https://masothue.com/abc"
 
