@@ -32,6 +32,13 @@
   </p>
 </div>
 
+<div id="drafting" class="mt-6 hidden rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-6 py-10 text-center">
+  <p class="text-sm text-slate-700">Hồ sơ đang được tạo.</p>
+  <p class="mt-1 text-xs text-slate-500">
+    Trang tự cập nhật khi tra cứu xong. Chờ quá lâu thì bấm <em>Tạo hồ sơ</em> để chạy lại.
+  </p>
+</div>
+
 <section id="edit-panel" class="mt-6 hidden rounded-lg border border-slate-200 bg-white p-5">
   <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sửa hồ sơ</h2>
   <p class="mt-1 text-xs text-slate-500">
@@ -150,8 +157,20 @@
     ["description", "Mô tả", "textarea"],
   ];
 
+  const FIELD_LABELS = Object.fromEntries([
+    ...IDENTITY_FIELDS,
+    ...CONTACT_FIELDS,
+    ["industry", "Ngành nghề"],
+    ["products", "Sản phẩm / dịch vụ"],
+    ["description", "Mô tả"],
+  ]);
+
+  const DRAFT_POLL_LIMIT = 60;
+
   const $ = (id) => document.getElementById(id);
   let pollTimer;
+  let draftTimer;
+  let draftPolls = 0;
   let current = null;
 
   function el(tag, className, text) {
@@ -279,7 +298,8 @@
       link.rel = "noopener";
       li.append(link);
       li.append(el("div", "break-all text-xs text-slate-400", ref.url));
-      li.append(el("div", "text-xs text-slate-500", `Dùng cho: ${fields.join(", ")}`));
+      const labels = fields.map((field) => FIELD_LABELS[field] || field);
+      li.append(el("div", "text-xs text-slate-500", `Dùng cho: ${labels.join(", ")}`));
       return li;
     }));
   }
@@ -289,8 +309,33 @@
     const badge = $("profile-badge");
     const button = $("btn-enrich");
 
-    current = profile;
-    $("btn-edit").classList.toggle("hidden", !profile);
+    const drafting = Boolean(profile) && profile.status === "draft";
+    const wasDrafting = draftPolls > 0;
+
+    current = drafting ? null : profile;
+    clearTimeout(draftTimer);
+    $("btn-edit").classList.toggle("hidden", !current);
+    $("drafting").classList.toggle("hidden", !drafting);
+
+    if (drafting) {
+      const [label, tone] = BADGES.draft;
+      badge.replaceChildren(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+      $("empty").classList.add("hidden");
+      $("profile").classList.add("hidden");
+      button.textContent = "Tạo hồ sơ";
+      button.disabled = false;
+      watchDraft();
+      return;
+    }
+
+    draftPolls = 0;
+    if (wasDrafting) {
+      if (profile) {
+        message("Hồ sơ đã tạo xong.", "ok");
+      } else {
+        message("Lượt tạo hồ sơ đã kết thúc nhưng không lưu được hồ sơ nào. Bấm Tạo hồ sơ để thử lại.", "error");
+      }
+    }
 
     if (!profile) {
       badge.replaceChildren(el("span", "text-xs text-slate-400", "Chưa có hồ sơ"));
@@ -399,8 +444,18 @@
     watchJob(body.job_id);
   }
 
+  function watchDraft() {
+    if (draftPolls >= DRAFT_POLL_LIMIT) {
+      message("Hồ sơ vẫn đang tạo sau 3 phút — lượt chạy có thể đã dừng giữa chừng. Bấm Tạo hồ sơ để chạy lại.", "info");
+      return;
+    }
+    draftPolls += 1;
+    draftTimer = setTimeout(load, POLL_MS);
+  }
+
   async function watchJob(jobId) {
     clearTimeout(pollTimer);
+    clearTimeout(draftTimer);
     let job;
     try {
       const res = await fetch(`/api/companies/enrich-jobs/${jobId}`);

@@ -459,10 +459,26 @@
     trackJob(body.job_id);
   }
 
+  function applyUrlFilters() {
+    const params = new URLSearchParams(location.search);
+    $("f-q").value = params.get("q") || "";
+    const profile = params.get("has_profile");
+    if (profile === "true" || profile === "false") $("f-profile").value = profile;
+  }
+
+  function syncUrl() {
+    const params = new URLSearchParams();
+    const q = $("f-q").value.trim();
+    if (q) params.set("q", q);
+    if ($("f-profile").value) params.set("has_profile", $("f-profile").value);
+    const search = params.toString();
+    history.replaceState(null, "", search ? `?${search}` : location.pathname);
+  }
+
   let timer;
   function reload(delay) {
     clearTimeout(timer);
-    timer = setTimeout(() => { page = 1; load(); }, delay);
+    timer = setTimeout(() => { page = 1; syncUrl(); load(); }, delay);
   }
 
   $("f-q").addEventListener("input", () => reload(300));
@@ -488,6 +504,7 @@
 
   $("btn-enrich").addEventListener("click", startEnrich);
 
+  applyUrlFilters();
   restoreJobs();
   load().then(pollJobs);
 })();

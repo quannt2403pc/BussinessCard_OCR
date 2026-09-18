@@ -6,17 +6,22 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.models.company import Company, EnrichJob, EnrichJobItem
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.routers import companies
+from app.schemas.enrich_job import JobItemStatus
 from app.services import enrich_jobs, kb
 from app.services.embeddings import EmbedderUnavailableError
 from app.services.enrich_jobs import (
     BACKOFF_SECONDS,
     MAX_ATTEMPTS,
+    STALE_AFTER,
+    STALE_MESSAGE,
     CompanyGoneError,
     JobCreated,
     NoSourcedDataError,
@@ -30,6 +35,7 @@ from app.services.llm import (
     LLMInvalidModelError,
     LLMNotConnectedError,
 )
+from app.services.normalize_company import normalize_company_name
 
 JOB_ID = uuid.uuid4()
 COMPANY_ID = uuid.uuid4()
@@ -452,3 +458,121 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
 
     assert await enrich_jobs.enrich_and_save(company_id) == 7
     assert order == ["save", f"index:{profile_id}"]
+
+
+async def add_company(db: AsyncSession, display_name: str) -> Company:
+    company = Company(
+        display_name=display_name, name_normalized=normalize_company_name(display_name)
+    )
+    db.add(company)
+    await db.flush()
+    return company
+
+
+async def item_status(db: AsyncSession, item_id: uuid.UUID) -> tuple[str, str | None]:
+    row = (
+        await db.execute(
+            select(EnrichJobItem.status, EnrichJobItem.error)
+            .where(EnrichJobItem.id == item_id)
+            .execution_options(populate_existing=True)
+        )
+    ).one()
+    return row.status, row.error
+
+
+async def test_db_second_active_item_for_same_company_is_rejected(
+    db_session: AsyncSession,
+) -> None:
+    company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
+    first_job = await job_repo.create_job(db_session)
+    second_job = await job_repo.create_job(db_session)
+
+    first = await job_repo.add_item(db_session, first_job, company.id)
+    second = await job_repo.add_item(db_session, second_job, company.id)
+
+    assert first is not None
+    assert second is None
+    assert await job_repo.active_job_id(db_session, company.id) == first_job
+
+
+async def test_db_running_item_still_blocks_a_new_one(db_session: AsyncSession) -> None:
+    company = await add_company(db_session, "Hanwha Precision Vietnam")
+    job_id = await job_repo.create_job(db_session)
+    item_id = await job_repo.add_item(db_session, job_id, company.id)
+    assert item_id is not None
+
+    assert await job_repo.claim_item(db_session, item_id) == company.id
+    assert await job_repo.claim_item(db_session, item_id) is None
+    assert (
+        await job_repo.add_item(db_session, await job_repo.create_job(db_session), company.id)
+        is None
+    )
+
+
+@pytest.mark.parametrize("final", [JobItemStatus.DONE, JobItemStatus.ERROR])
+async def test_db_finished_item_frees_the_company(
+    db_session: AsyncSession, final: JobItemStatus
+) -> None:
+    company = await add_company(db_session, "Công ty CP Sữa Mộc Châu")
+    job_id = await job_repo.create_job(db_session)
+    item_id = await job_repo.add_item(db_session, job_id, company.id)
+    assert item_id is not None
+    await job_repo.finish_item(db_session, item_id, status=final)
+
+    again = await job_repo.add_item(db_session, await job_repo.create_job(db_session), company.id)
+
+    assert again is not None
+    assert await job_repo.active_job_id(db_session, company.id) is not None
+
+
+async def test_db_stale_items_expire_and_fresh_ones_stay(db_session: AsyncSession) -> None:
+    stale_company = await add_company(db_session, "Alpha Stale")
+    fresh_company = await add_company(db_session, "Beta Fresh")
+    job_id = await job_repo.create_job(db_session)
+    stale = await job_repo.add_item(db_session, job_id, stale_company.id)
+    fresh = await job_repo.add_item(db_session, job_id, fresh_company.id)
+    assert stale is not None and fresh is not None
+    await job_repo.claim_item(db_session, stale)
+    await db_session.execute(
+        update(EnrichJobItem)
+        .where(EnrichJobItem.id == stale)
+        .values(started_at=datetime(2020, 1, 1))
+    )
+
+    expired = await job_repo.expire_stale_items(
+        db_session, older_than=STALE_AFTER, message=STALE_MESSAGE
+    )
+
+    assert expired == 1
+    assert await item_status(db_session, stale) == (JobItemStatus.ERROR.value, STALE_MESSAGE)
+    assert await item_status(db_session, fresh) == (JobItemStatus.PENDING.value, None)
+
+
+async def test_db_create_job_dedupes_input_and_reports_busy_companies(
+    db_session: AsyncSession,
+) -> None:
+    idle = await add_company(db_session, "Alpha Idle")
+    busy = await add_company(db_session, "Beta Busy")
+    running = await job_repo.create_job(db_session)
+    await job_repo.add_item(db_session, running, busy.id)
+
+    created = await enrich_jobs.create_job(db_session, [idle.id, idle.id, busy.id])
+
+    assert created.accepted == 1
+    assert created.skipped == [busy.id]
+    assert await job_repo.pending_item_ids(db_session, created.job_id) != []
+
+
+async def test_db_create_job_with_nothing_accepted_is_finished(db_session: AsyncSession) -> None:
+    busy = await add_company(db_session, "Beta Busy")
+    await job_repo.add_item(db_session, await job_repo.create_job(db_session), busy.id)
+
+    created = await enrich_jobs.create_job(db_session, [busy.id])
+    job = await db_session.scalar(
+        select(EnrichJob)
+        .where(EnrichJob.id == created.job_id)
+        .execution_options(populate_existing=True)
+    )
+
+    assert created.accepted == 0
+    assert job is not None and job.finished_at is not None

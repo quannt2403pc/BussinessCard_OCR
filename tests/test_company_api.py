@@ -7,6 +7,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.templates import BASE_DIR
@@ -17,8 +19,21 @@ from app.repositories import enrich_job as job_repo
 from app.repositories.company import CompanyRow
 from app.routers import companies
 from app.routers.companies import page_count, to_list_item
+from app.services import enrich_jobs
+from app.services.normalize_company import normalize_company_name
 
 COMPANY_ID = uuid.uuid4()
+
+
+@pytest.fixture(autouse=True)
+def indexed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    calls: list[uuid.UUID] = []
+
+    async def record(profile_id: uuid.UUID) -> None:
+        calls.append(profile_id)
+
+    monkeypatch.setattr(enrich_jobs, "index_profile", record)
+    return calls
 
 
 def make_company(**overrides: Any) -> Company:
@@ -387,3 +402,204 @@ async def test_patch_profile_blocked_while_enriching(
     assert response.json()["existing_id"] == str(running_job)
     assert calls == []
     assert session.commits == 0
+
+
+@pytest.fixture
+async def db_client(db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
+    app = FastAPI()
+    app.include_router(companies.router)
+
+    async def real_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = real_db
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        yield http
+
+
+async def add_company(
+    db: AsyncSession, display_name: str, aliases: list[str] | None = None
+) -> Company:
+    company = Company(
+        display_name=display_name,
+        name_normalized=normalize_company_name(display_name),
+        aliases=aliases,
+    )
+    db.add(company)
+    await db.flush()
+    return company
+
+
+async def add_card(db: AsyncSession, company: Company, full_name: str) -> BusinessCard:
+    card = BusinessCard(
+        image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
+        image_hash=uuid.uuid4().hex * 2,
+        status="confirmed",
+        full_name=full_name,
+        company_id=company.id,
+    )
+    db.add(card)
+    await db.flush()
+    return card
+
+
+async def add_profile(db: AsyncSession, company: Company, **values: Any) -> CompanyProfile:
+    profile = CompanyProfile(company_id=company.id, **{"status": "generated", **values})
+    db.add(profile)
+    await db.flush()
+    return profile
+
+
+async def listed_names(client: httpx.AsyncClient, **params: Any) -> list[str]:
+    response = await client.get("/api/companies", params=params)
+    assert response.status_code == 200
+    return [item["display_name"] for item in response.json()["items"]]
+
+
+async def test_db_list_searches_name_alias_and_normalized_key(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    await add_company(db_session, "Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
+    await add_company(db_session, "Hanwha Precision Vietnam", ["한화정밀기계"])
+
+    assert await listed_names(db_client, q="logistics") == ["Công ty TNHH Logistics Đại Việt"]
+    assert await listed_names(db_client, q="한화") == ["Hanwha Precision Vietnam"]
+    assert await listed_names(db_client, q="dai viet") == ["Công ty TNHH Logistics Đại Việt"]
+    assert await listed_names(db_client, q="  hanwha   precision ") == ["Hanwha Precision Vietnam"]
+
+
+async def test_db_list_treats_like_wildcards_literally(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    await add_company(db_session, "Công ty 100% Việt")
+    await add_company(db_session, "Hanwha Precision Vietnam")
+
+    assert await listed_names(db_client, q="%") == ["Công ty 100% Việt"]
+    assert await listed_names(db_client, q="_") == []
+
+
+async def test_db_list_filters_by_profile_state(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    generated = await add_company(db_session, "Alpha Generated")
+    draft = await add_company(db_session, "Beta Draft")
+    await add_company(db_session, "Gamma None")
+    verified = await add_company(db_session, "Delta Verified")
+    await add_profile(db_session, generated)
+    await add_profile(db_session, draft, status="draft")
+    await add_profile(db_session, verified, status="verified")
+
+    assert await listed_names(db_client, has_profile="true") == [
+        "Alpha Generated",
+        "Delta Verified",
+    ]
+    assert await listed_names(db_client, has_profile="false") == ["Beta Draft", "Gamma None"]
+
+
+async def test_db_list_paginates_and_counts_contacts(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    alpha = await add_company(db_session, "Alpha")
+    await add_company(db_session, "Beta")
+    await add_company(db_session, "Gamma")
+    await add_card(db_session, alpha, "Người 1")
+    await add_card(db_session, alpha, "Người 2")
+
+    first = (await db_client.get("/api/companies", params={"size": 2})).json()
+    second = (await db_client.get("/api/companies", params={"size": 2, "page": 2})).json()
+
+    assert [item["display_name"] for item in first["items"]] == ["Alpha", "Beta"]
+    assert [item["display_name"] for item in second["items"]] == ["Gamma"]
+    assert (first["total"], first["pages"]) == (3, 2)
+    assert first["items"][0]["contact_count"] == 2
+
+
+async def test_db_detail_returns_profile_and_own_contacts_only(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    company = await add_company(db_session, "Công ty CP Sữa Mộc Châu")
+    other = await add_company(db_session, "Hanwha Precision Vietnam")
+    await add_profile(db_session, company, tax_code="0100233468", industry=["Sản xuất sữa"])
+    await add_card(db_session, company, "Trần Thị Bình")
+    await add_card(db_session, company, "Lê Văn Cường")
+    await add_card(db_session, other, "Kim Min-jun")
+
+    response = await db_client.get(f"/api/companies/{company.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["profile"]["tax_code"] == "0100233468"
+    assert body["profile"]["industry"] == ["Sản xuất sữa"]
+    assert body["contact_count"] == 2
+    assert sorted(card["full_name"] for card in body["contacts"]) == [
+        "Lê Văn Cường",
+        "Trần Thị Bình",
+    ]
+
+
+async def test_db_patch_profile_persists_and_drops_only_edited_sources(
+    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+) -> None:
+    company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
+    profile = await add_profile(
+        db_session,
+        company,
+        tax_code="0301234567",
+        legal_name="Công ty TNHH Logistics Đại Việt",
+        sources={
+            "tax_code": [{"url": "https://masothue.com/0301234567"}],
+            "legal_name": [{"url": "https://daiviet-logistics.vn"}],
+        },
+    )
+
+    response = await db_client.patch(
+        f"/api/companies/{company.id}/profile", json={"tax_code": "0309999999"}
+    )
+
+    assert response.status_code == 200
+    stored = await db_session.scalar(
+        select(CompanyProfile)
+        .where(CompanyProfile.company_id == company.id)
+        .execution_options(populate_existing=True)
+    )
+    assert stored is not None
+    assert stored.tax_code == "0309999999"
+    assert stored.status == "verified"
+    assert set(stored.sources or {}) == {"legal_name"}
+    assert indexed == [profile.id]
+
+
+async def test_db_patch_profile_blocked_by_active_enrich_item(
+    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+) -> None:
+    company = await add_company(db_session, "Hanwha Precision Vietnam")
+    await add_profile(db_session, company, tax_code="0312345678")
+    job_id = await job_repo.create_job(db_session)
+    await job_repo.add_item(db_session, job_id, company.id)
+
+    response = await db_client.patch(
+        f"/api/companies/{company.id}/profile", json={"tax_code": "0300000000"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["existing_id"] == str(job_id)
+    stored = await db_session.scalar(
+        select(CompanyProfile.tax_code).where(CompanyProfile.company_id == company.id)
+    )
+    assert stored == "0312345678"
+    assert indexed == []
+
+
+async def test_db_detail_while_first_enrich_is_running(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
+    await company_repo.ensure_draft_profile(db_session, company.id)
+
+    response = await db_client.get(f"/api/companies/{company.id}")
+
+    assert response.status_code == 200
+    profile = response.json()["profile"]
+    assert profile["status"] == "draft"
+    assert profile["sources"] == {}
