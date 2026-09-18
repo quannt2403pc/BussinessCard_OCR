@@ -65,7 +65,7 @@ class CompanyExportRow(ExportRow):
     company_id: uuid.UUID
     display_name: str
     aliases: list[str] = Field(default_factory=list)
-    card_count: int
+    contact_count: int
     profile_status: ProfileStatus | None = None
     legal_name: str | None = None
     tax_code: str | None = None

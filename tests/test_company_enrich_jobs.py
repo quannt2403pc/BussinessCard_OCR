@@ -1,6 +1,7 @@
 import uuid
-from collections.abc import AsyncIterator
-from datetime import datetime
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -10,10 +11,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.models.company import Company, EnrichJob, EnrichJobItem
+from app.models.company import Company, CompanyProfile, EnrichJob, EnrichJobItem
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.routers import companies
+from app.schemas.company import CompanyProfileOut, ProfileStatus
 from app.schemas.enrich_job import JobItemStatus
 from app.services import enrich_jobs, kb
 from app.services.embeddings import EmbedderUnavailableError
@@ -576,3 +578,213 @@ async def test_db_create_job_with_nothing_accepted_is_finished(db_session: Async
 
     assert created.accepted == 0
     assert job is not None and job.finished_at is not None
+
+
+class SharedSession:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    def __call__(self) -> "SharedSession":
+        return self
+
+    async def __aenter__(self) -> AsyncSession:
+        return self.session
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+@dataclass
+class Pipeline:
+    outcomes: dict[str, list[object]] = field(default_factory=dict)
+    calls: list[str] = field(default_factory=list)
+    indexed: list[uuid.UUID] = field(default_factory=list)
+
+    async def enrich(self, name: str, hints: Any = None, **kwargs: Any) -> CompanyProfileOut:
+        self.calls.append(name)
+        result = self.outcomes[name].pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        assert isinstance(result, CompanyProfileOut)
+        return result
+
+    async def index(self, profile_id: uuid.UUID) -> None:
+        self.indexed.append(profile_id)
+
+
+@dataclass(frozen=True)
+class ItemState:
+    status: str
+    error: str | None
+    attempts: int
+    sourced_fields: int | None
+
+
+@pytest.fixture
+def pipeline(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> Pipeline:
+    fake = Pipeline()
+    monkeypatch.setattr(enrich_jobs, "SessionLocal", SharedSession(db_session))
+    monkeypatch.setattr(enrich_jobs, "MAX_CONCURRENCY", 1)
+    monkeypatch.setattr(enrich_jobs, "BACKOFF_SECONDS", (0.0, 0.0))
+    monkeypatch.setattr(enrich_jobs, "enrich_company", fake.enrich)
+    monkeypatch.setattr(enrich_jobs, "index_profile", fake.index)
+    return fake
+
+
+def sourced_profile() -> CompanyProfileOut:
+    return CompanyProfileOut.model_validate(
+        {
+            "tax_code": "0301234567",
+            "sources": {"tax_code": [{"url": "https://masothue.com/0301234567"}]},
+            "llm_model": "gemini-3-flash",
+            "generated_at": datetime(2026, 9, 18, tzinfo=UTC),
+            "status": ProfileStatus.GENERATED,
+        }
+    )
+
+
+async def run_enrich(
+    db: AsyncSession, pipeline: Pipeline, outcomes: dict[str, Sequence[object]]
+) -> uuid.UUID:
+    companies = [await add_company(db, name) for name in outcomes]
+    pipeline.outcomes.update({name: list(values) for name, values in outcomes.items()})
+    created = await enrich_jobs.create_job(db, [company.id for company in companies])
+    await enrich_jobs.run_job(created.job_id)
+    return created.job_id
+
+
+async def item_states(db: AsyncSession, job_id: uuid.UUID) -> dict[str, ItemState]:
+    rows = await db.execute(
+        select(
+            Company.display_name,
+            EnrichJobItem.status,
+            EnrichJobItem.error,
+            EnrichJobItem.attempts,
+            EnrichJobItem.sourced_fields,
+        )
+        .join(Company, Company.id == EnrichJobItem.company_id)
+        .where(EnrichJobItem.job_id == job_id)
+    )
+    return {
+        row.display_name: ItemState(row.status, row.error, row.attempts, row.sourced_fields)
+        for row in rows
+    }
+
+
+async def profile_status(db: AsyncSession, display_name: str) -> str | None:
+    return await db.scalar(
+        select(CompanyProfile.status)
+        .join(Company, Company.id == CompanyProfile.company_id)
+        .where(Company.display_name == display_name)
+    )
+
+
+async def job_finished(db: AsyncSession, job_id: uuid.UUID) -> bool:
+    finished_at = await db.scalar(select(EnrichJob.finished_at).where(EnrichJob.id == job_id))
+    return finished_at is not None
+
+
+async def test_db_run_job_saves_every_company_and_closes_the_job(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    job_id = await run_enrich(
+        db_session, pipeline, {"Alpha": [sourced_profile()], "Beta": [sourced_profile()]}
+    )
+
+    states = await item_states(db_session, job_id)
+    assert {name: state.status for name, state in states.items()} == {
+        "Alpha": "done",
+        "Beta": "done",
+    }
+    assert states["Alpha"].sourced_fields == 1
+    assert await profile_status(db_session, "Alpha") == ProfileStatus.GENERATED.value
+    assert len(pipeline.indexed) == 2
+    assert await job_finished(db_session, job_id)
+
+
+async def test_db_run_job_isolates_a_failing_company(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    job_id = await run_enrich(
+        db_session,
+        pipeline,
+        {"Alpha": [sourced_profile()], "Beta": [NoSourcedDataError("Beta")]},
+    )
+
+    states = await item_states(db_session, job_id)
+    assert states["Alpha"].status == "done"
+    assert states["Beta"].status == "error"
+    assert "nguồn kiểm chứng" in (states["Beta"].error or "")
+    assert await profile_status(db_session, "Alpha") == ProfileStatus.GENERATED.value
+    assert await profile_status(db_session, "Beta") is None
+    assert await job_finished(db_session, job_id)
+
+
+async def test_db_run_job_retries_transient_errors_until_success(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    job_id = await run_enrich(
+        db_session,
+        pipeline,
+        {"Alpha": [LLMError("timeout"), EnrichmentParseError("junk"), sourced_profile()]},
+    )
+
+    state = (await item_states(db_session, job_id))["Alpha"]
+    assert (state.status, state.attempts) == ("done", 3)
+    assert pipeline.calls == ["Alpha"] * 3
+
+
+async def test_db_run_job_gives_up_after_max_attempts(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    job_id = await run_enrich(db_session, pipeline, {"Alpha": [LLMError("timeout")] * MAX_ATTEMPTS})
+
+    state = (await item_states(db_session, job_id))["Alpha"]
+    assert (state.status, state.attempts) == ("error", MAX_ATTEMPTS)
+    assert (state.error or "").startswith(f"Thử {MAX_ATTEMPTS} lượt vẫn hỏng")
+    assert await profile_status(db_session, "Alpha") is None
+
+
+async def test_db_run_job_aborts_remaining_items_when_cliproxy_is_not_connected(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    offline = [LLMNotConnectedError("no auth")]
+    job_id = await run_enrich(
+        db_session, pipeline, {"Alpha": offline, "Beta": offline, "Gamma": offline}
+    )
+
+    states = await item_states(db_session, job_id)
+    assert len(pipeline.calls) == 1
+    assert {state.status for state in states.values()} == {"error"}
+    assert all("Chưa kết nối CLIProxy" in (state.error or "") for state in states.values())
+    assert await job_finished(db_session, job_id)
+
+
+async def test_db_failed_regeneration_keeps_the_existing_profile(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    company = await add_company(db_session, "Alpha")
+    db_session.add(CompanyProfile(company_id=company.id, tax_code="0309999999", status="verified"))
+    await db_session.flush()
+    pipeline.outcomes["Alpha"] = [NoSourcedDataError("Alpha")]
+
+    created = await enrich_jobs.create_job(db_session, [company.id])
+    await enrich_jobs.run_job(created.job_id)
+
+    assert (await item_states(db_session, created.job_id))["Alpha"].status == "error"
+    assert await profile_status(db_session, "Alpha") == "verified"
+
+
+async def test_db_unexpected_error_still_closes_item_and_job(
+    db_session: AsyncSession, pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(db: Any, company_id: uuid.UUID) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(company_repo, "discard_draft_profile", broken)
+    job_id = await run_enrich(db_session, pipeline, {"Alpha": [NoSourcedDataError("Alpha")]})
+
+    state = (await item_states(db_session, job_id))["Alpha"]
+    assert state.status == "error"
+    assert state.error == "Lỗi ngoài dự kiến (RuntimeError)."
+    assert await job_finished(db_session, job_id)
