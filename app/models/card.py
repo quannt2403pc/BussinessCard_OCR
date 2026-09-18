@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,14 @@ class BusinessCard(Base):
     """Một ảnh danh thiếp đã quét cùng các trường trích xuất được."""
 
     __tablename__ = "business_cards"
+    __table_args__ = (
+        # Đề xuất số 1 của `docs/db-tuning.md` (T đo ở task 9.8), migration `0004` ở task 9.2.
+        # **Một index phục vụ cả hai chiều đọc**: `GET /api/cards` sắp xếp `uploaded_at DESC,
+        # id DESC`, còn export của T duyệt keyset `(uploaded_at, id)` tăng dần — Postgres quét
+        # btree được theo cả hai chiều nên không cần index thứ hai.
+        # Số đo: danh sách thẻ trang 1 2.46 → 0.02 ms; export mỗi lô 6.62 → 0.35 ms.
+        Index("ix_business_cards_uploaded_at_id", "uploaded_at", "id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 

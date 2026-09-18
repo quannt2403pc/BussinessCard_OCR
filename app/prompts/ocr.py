@@ -19,6 +19,21 @@ phải dựng thêm một lớp ánh xạ tên. Đổi khoá ở đây thì ph�
 ⚠️ Prompt có ghi "chỉ trả JSON, không bọc trong khối ```". **Đừng tin là đủ**: đo thật ở task
 2.3 cho thấy `gemini-3-flash` vẫn bọc (I-15). `services/ocr.py` bắt buộc phải gỡ hàng rào code
 trước khi `json.loads()`.
+
+Cập nhật task 9.3 (2026-09-18) — đo trên ba danh thiếp Hàn/Nhật/Trung, chạy bằng
+`python -m scripts.check_multilang_ocr`:
+
+* **Ba lớp phòng thủ ở trên đứng vững.** Chữ bản địa được giữ nguyên ở cả ba thẻ (`김민준`,
+  `田中 太郎`, `李伟`), không thẻ nào bị phiên âm sang Latin; `language_detected` đúng cả ba;
+  thẻ song ngữ Hàn–Anh lấy đúng mặt chữ Hàn như quy tắc 3 yêu cầu. **Không sửa gì ở quy tắc
+  1–3** — sửa một prompt đang đúng chỉ để "có sửa" là cách nhanh nhất làm nó hỏng.
+* **Quy tắc 4 có hai vế mâu thuẫn**, và đó là chỗ duy nhất phải sửa. Bản cũ viết *"số di động
+  **hoặc** số đứng đầu vào `phone`"* — thẻ Nhật in `TEL: 03-…` trước rồi `携帯: 090-…` sau, hai
+  vế chỉ về hai số khác nhau, model tự chọn số di động. Lựa chọn đó **hợp lý nhưng không do
+  prompt quy định**: nó là hành vi ngầm của model, đổi model hoặc đổi phiên bản là đổi theo,
+  mà `phone` lại là trường dùng để tra cứu và đối chiếu. Nay xếp thành thứ tự ưu tiên a → b,
+  và liệt kê nhãn số điện thoại của cả bốn ngôn ngữ (bản cũ chỉ có nhãn tiếng Anh, trong khi
+  thẻ Nhật/Trung ghi `携帯`/`电话`).
 """
 
 #: Bảy trường bắt buộc của tiêu chí A3 (Plan.md mục 8) — "ngày upload" do hệ thống tự ghi nên
@@ -72,8 +87,13 @@ QUY TẮC TỐI QUAN TRỌNG — đọc kỹ trước khi trả lời:
    `full_name` và `company_name_raw`.
 
 4. Số điện thoại: chép nguyên định dạng in trên thẻ, kể cả dấu `+`, ngoặc và dấu cách; KHÔNG
-   tự đổi sang định dạng khác (hệ thống có bước chuẩn hoá riêng). Bỏ nhãn "Tel:", "Mobile:".
-   Thẻ in nhiều số: số di động hoặc số đứng đầu vào `phone`, số còn lại vào `phone_alt`.
+   tự đổi sang định dạng khác (hệ thống có bước chuẩn hoá riêng). Bỏ nhãn đứng trước số, ở
+   mọi ngôn ngữ: "Tel:", "Mobile:", "TEL:", "携帯:", "电话:", "휴대폰:", "ĐT:".
+   Thẻ in nhiều số thì theo ĐÚNG thứ tự ưu tiên sau, không đổi:
+   a. Có số di động phân biệt được (nhãn "Mobile"/"Cell"/"携帯"/"手机"/"휴대폰", hoặc đầu số di
+      động của nước đó) → số đó vào `phone`.
+   b. Không phân biệt được số nào là di động → số **in trước** vào `phone`.
+   Số còn lại vào `phone_alt`. Nhiều hơn hai số thì bỏ từ số thứ ba trở đi.
 
 5. `confidence` phải phản ánh thật mức độ chắc chắn khi ĐỌC CHỮ: 1.0 = chữ rõ, chắc chắn đúng
    từng ký tự; 0.5 = đoán được nhưng có ký tự mờ/nhoè; 0.0 = trường để `null`. Đừng chấm 1.0

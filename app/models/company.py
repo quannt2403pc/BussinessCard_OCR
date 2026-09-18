@@ -10,6 +10,15 @@ from app.core.db import Base
 
 class Company(Base):
     __tablename__ = "companies"
+    __table_args__ = (
+        # ⚠️ Dòng này do **Q** thêm ở task 9.2 vào file của **T** — ngoại lệ có yêu cầu sẵn:
+        # `docs/db-tuning.md` mục 5 (T viết ở 9.8) đề nghị Q thêm đúng dòng này **cùng PR** với
+        # migration `0004`, vì khai model mà chưa có migration thì `alembic check` báo lệch
+        # ngay, còn tách hai PR thì giữa chừng `main` luôn ở trạng thái lệch. **T xác nhận khi
+        # review PR.** Không có thay đổi nào khác của Q trong file này.
+        # Số đo của T: danh sách công ty trang 1 2.13 → 0.11 ms; export mỗi lô 5.18 → 0.76 ms.
+        Index("ix_companies_display_name_id", "display_name", "id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name_normalized: Mapped[str] = mapped_column(

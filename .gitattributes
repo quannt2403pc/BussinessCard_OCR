@@ -1,0 +1,18 @@
+# Chu so huu: Q | Task: 9.2 | xem Task.md
+#
+# Ca hai may dev deu la Windows va `git config core.autocrlf` = true, tuc git **doi LF thanh
+# CRLF luc checkout**. Voi file .md/.py thi vo hai, nhung:
+#
+#   docker-entrypoint.sh la thu container `api` chay dau tien, trong Linux.
+#   CRLF o dong `#!/bin/sh` bien thanh `/bin/sh\r` -> container chet ngay voi
+#   "exec /usr/local/bin/docker-entrypoint.sh: no such file or directory",
+#   mot thong bao khong he nhac gi toi ky tu xuong dong.
+#
+# Bay nay KHONG lo ra o may da viet file (file o do von la LF), chi lo ra o may **clone moi ve**
+# - tuc dung luc nguoi thu hai thu chay du an. Vi vay ep LF cho moi script shell.
+*.sh text eol=lf
+
+# Cung ly do: Dockerfile va file cau hinh duoc doc trong container Linux.
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # --- Ứng dụng ---
     app_name: str = "BusinessCard_OCR"
     debug: bool = False
+    #: Mức log gốc (task 9.5): DEBUG | INFO | WARNING | ERROR. DEBUG in thêm dòng access của
+    #: `/health` và `/static/*` — hữu ích khi soi healthcheck, ồn khi chạy lâu.
+    log_level: str = "INFO"
 
     # --- Database ---
     database_url: str = "postgresql+psycopg://bizcard:change-me@db:5432/bizcard"

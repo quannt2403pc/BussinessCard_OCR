@@ -54,6 +54,10 @@ CLAUDE.local.md
 secrets/
 cliproxy/config.yaml
 cliproxy/auths/
+# Tu task 9.1, container cliproxy mount ca thu muc `cliproxy/` (de `cliproxy-init` tao duoc
+# config.yaml, xem ghi chu trong docker-compose.yml) nen CLIProxy ghi them bang dieu khien
+# ~2.8MB vao day moi lan khoi dong. Khong phai file cua ta.
+cliproxy/static/
 
 # ============================================================
 # Python

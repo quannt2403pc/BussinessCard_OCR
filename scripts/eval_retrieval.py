@@ -41,6 +41,7 @@ from app.core.config import settings
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.services import embeddings, kb, retriever
+from app.services.normalize_company import normalize_company_name
 
 NOW = datetime(2026, 9, 17, 9, 0, tzinfo=UTC)
 
@@ -49,6 +50,24 @@ TOP_KS = (1, 3, 5)
 
 #: Các mức trần chunk đem so, quanh `kb.CHUNK_MAX_CHARS` hiện tại.
 CHUNK_SIZES = (400, 700, 1000)
+
+#: Định danh của bộ dữ liệu cố định, khai ở đây để **`scripts/seed.py` (9.2) dùng chung**.
+#:
+#: Script này rollback nên không cần biết đã seed lần nào chưa; `seed.py` thì commit, nên phải
+#: nhận ra được dữ liệu mẫu của lần chạy trước để không nạp chồng thành hai bản. Chép danh sách
+#: sang file kia là mở đường cho hai bên lệch nhau trong im lặng — `seed.py` có bước đối chiếu
+#: lại với dữ liệu thật vừa tạo và báo lỗi nếu lệch.
+SEED_COMPANY_NAMES: tuple[str, ...] = (
+    "Công ty TNHH Logistics Đại Việt",
+    "Công ty CP Sữa Mộc Châu",
+    "Hanwha Precision Vietnam",
+)
+SEED_CARD_EMAILS: tuple[str, ...] = (
+    "an.nguyen@daiviet-logistics.vn",
+    "binh.tran@mocchaumilk.vn",
+    "minjun.kim@hanwha.co.kr",
+    "tanaka@tokyotech.co.jp",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,10 +360,15 @@ def _cut(text: str, limit: int) -> str:
 
 
 def _company(display_name: str, aliases: list[str]) -> Company:
+    # `name_normalized` dùng **đúng hàm chuẩn hoá của T**, không phải một chuỗi hex ngẫu nhiên
+    # như bản đầu: `scripts/seed.py` (9.2) commit bộ dữ liệu này vào DB thật, mà khoá ngẫu nhiên
+    # thì lần sau người dùng xác nhận một danh thiếp của đúng công ty đó, `upsert_company()`
+    # không khớp được và tạo ra bản ghi công ty thứ hai. Khoá này không nằm trong nội dung chunk
+    # nên số đo truy hồi của 7.4 không đổi.
     return Company(
         id=uuid.uuid4(),
         display_name=display_name,
-        name_normalized=f"{uuid.uuid4().hex[:12]}",
+        name_normalized=normalize_company_name(display_name),
         aliases=aliases,
     )
 
