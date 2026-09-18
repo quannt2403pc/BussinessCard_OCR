@@ -213,12 +213,41 @@ async def profile_batch(
     return [(profile, company) for profile, company in rows.all()]
 
 
+def scope_filters(
+    *,
+    source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
+) -> list[ColumnElement[bool]]:
+    """Điều kiện thu hẹp phạm vi tìm kiếm, dùng chung cho **cả hai** nhánh (task 8.5).
+
+    Một hàm chứ không chép hai lần: hai nhánh lọc lệch nhau thì kết quả trộn ra một tập hỗn hợp
+    nửa trong phạm vi nửa ngoài — trợ lý trích dẫn đúng một công ty mà người dùng không hề chọn,
+    và không có lỗi nào báo.
+
+    `company_id` đọc từ **metadata** chứ không từ cột: `kb_chunks.source_id` là id danh thiếp ở
+    chunk danh thiếp nhưng lại là id **công ty** ở chunk hồ sơ (xem `services/kb.py::
+    build_profile_document`), nên lọc theo cột sẽ bỏ sót đúng một nửa. `services/kb.py` ghi
+    `metadata.company_id` cho cả hai loại nguồn chính là để có một khoá chung như thế này.
+
+    Danh thiếp chưa gắn công ty có `metadata.company_id = null`; `->> 'company_id'` trả `NULL`
+    nên nó không bao giờ khớp — đúng ý: chưa biết thuộc công ty nào thì không thuộc phạm vi
+    công ty nào cả.
+    """
+    filters: list[ColumnElement[bool]] = []
+    if source_type is not None:
+        filters.append(KBChunk.source_type == str(source_type))
+    if company_id is not None:
+        filters.append(KBChunk.meta["company_id"].astext == str(company_id))
+    return filters
+
+
 async def search_similar(
     db: AsyncSession,
     embedding: Sequence[float],
     *,
     top_k: int = 5,
     source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Sequence[tuple[KBChunk, float]]:
     """Top-k chunk gần nhất theo **khoảng cách cosine** (0 = trùng khớp, 2 = ngược hướng).
 
@@ -227,6 +256,11 @@ async def search_similar(
 
     Toán tử `<=>` là thứ index `ivfflat … vector_cosine_ops` phục vụ; đổi sang khoảng cách khác
     (L2, tích vô hướng) thì câu truy vấn vẫn chạy nhưng **bỏ qua index** và quét toàn bảng.
+
+    Lọc phạm vi (task 8.5) là mệnh đề `WHERE` **bên cạnh** index vector, tức Postgres lọc rồi mới
+    lấy `LIMIT` — cái bẫy quen thuộc của ANN là lọc sau khi index đã cắt còn k dòng thì kết quả
+    rỗng dù dữ liệu có thật. Ở đây không dính vì `VECTOR_PROBES = lists` quét hết mọi cụm; nếu
+    sau này hạ `probes` xuống thì phải đo lại đúng trường hợp lọc hẹp (một công ty ít chunk).
     """
     # `SET LOCAL` chứ không `SET`: chỉ có hiệu lực tới hết transaction hiện tại, nên không rò
     # sang request khác đang dùng chung connection trong pool. Không truyền được tham số bind cho
@@ -235,8 +269,8 @@ async def search_similar(
 
     distance = KBChunk.embedding.cosine_distance(list(embedding)).label("distance")
     query = select(KBChunk, distance).order_by(distance).limit(top_k)
-    if source_type is not None:
-        query = query.where(KBChunk.source_type == str(source_type))
+    for condition in scope_filters(source_type=source_type, company_id=company_id):
+        query = query.where(condition)
 
     rows = await db.execute(query)
     return [(chunk, float(value)) for chunk, value in rows.all()]
@@ -261,6 +295,7 @@ async def search_fulltext(
     *,
     top_k: int = 5,
     source_type: KBSourceType | str | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Sequence[tuple[KBChunk, float]]:
     """Top-k chunk chứa **ít nhất một** trong `terms`, kèm điểm `ts_rank_cd` (càng lớn càng khớp).
 
@@ -300,8 +335,8 @@ async def search_fulltext(
     query = (
         select(KBChunk, rank).where(tsvector.op("@@")(tsquery)).order_by(rank.desc()).limit(top_k)
     )
-    if source_type is not None:
-        query = query.where(KBChunk.source_type == str(source_type))
+    for condition in scope_filters(source_type=source_type, company_id=company_id):
+        query = query.where(condition)
 
     rows = await db.execute(query)
     return [(chunk, float(value)) for chunk, value in rows.all()]
