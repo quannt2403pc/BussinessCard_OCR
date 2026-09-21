@@ -65,6 +65,38 @@ async def active_job_id(db: AsyncSession, company_id: uuid.UUID) -> uuid.UUID | 
     )
 
 
+async def active_items(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    stmt = select(EnrichJobItem.id, EnrichJobItem.company_id).where(
+        EnrichJobItem.status.in_(ACTIVE_JOB_ITEM_STATUSES)
+    )
+    if job_id is not None:
+        stmt = stmt.where(EnrichJobItem.job_id == job_id)
+    if company_id is not None:
+        stmt = stmt.where(EnrichJobItem.company_id == company_id)
+    rows = await db.execute(stmt.order_by(EnrichJobItem.id))
+    return [(item_id, owner) for item_id, owner in rows.tuples()]
+
+
+async def cancel_items(db: AsyncSession, item_ids: Sequence[uuid.UUID], message: str) -> int:
+    if not item_ids:
+        return 0
+    result = await db.execute(
+        update(EnrichJobItem)
+        .where(
+            EnrichJobItem.id.in_(item_ids),
+            EnrichJobItem.status.in_(ACTIVE_JOB_ITEM_STATUSES),
+        )
+        .values(status=JobItemStatus.CANCELLED.value, error=message, finished_at=func.now())
+        .execution_options(synchronize_session=False)
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
 async def get_job(db: AsyncSession, job_id: uuid.UUID) -> EnrichJob | None:
     return await db.get(EnrichJob, job_id)
 

@@ -7,13 +7,14 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.templates import BASE_DIR
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
+from app.models.kb import KBChunk, KBSourceType
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.repositories.company import CompanyRow
@@ -73,6 +74,18 @@ class FakeSession:
 @pytest.fixture
 def session() -> FakeSession:
     return FakeSession()
+
+
+@pytest.fixture
+def no_related(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def none_by_tax(db: Any, company_id: uuid.UUID, tax_code: str | None) -> list[Company]:
+        return []
+
+    async def none_by_domain(db: Any, company_id: uuid.UUID) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(company_repo, "same_tax_code", none_by_tax)
+    monkeypatch.setattr(company_repo, "same_domain", none_by_domain)
 
 
 @pytest.fixture
@@ -147,7 +160,13 @@ async def test_list_passes_filters_and_paginates(
     )
 
     assert response.status_code == 200
-    assert received == {"q": "abc", "has_profile": False, "page": 3, "size": 20}
+    assert received == {
+        "q": "abc",
+        "has_profile": False,
+        "archived": False,
+        "page": 3,
+        "size": 20,
+    }
     body = response.json()
     assert (body["total"], body["page"], body["size"], body["pages"]) == (41, 3, 20, 3)
     assert body["items"][0]["contact_count"] == 2
@@ -166,7 +185,13 @@ async def test_list_uses_defaults(
     response = await client.get("/api/companies")
 
     assert response.status_code == 200
-    assert received == {"q": None, "has_profile": None, "page": 1, "size": 20}
+    assert received == {
+        "q": None,
+        "has_profile": None,
+        "archived": False,
+        "page": 1,
+        "size": 20,
+    }
     assert response.json() == {"items": [], "total": 0, "page": 1, "size": 20, "pages": 1}
 
 
@@ -176,7 +201,7 @@ async def test_list_rejects_bad_paging(client: httpx.AsyncClient, params: dict[s
 
 
 async def test_detail_with_profile_and_contacts(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, no_related: None
 ) -> None:
     async def fake_row(db: Any, company_id: uuid.UUID) -> CompanyRow:
         return CompanyRow(make_company(aliases=None), 1, "generated", datetime(2026, 9, 15, 8, 0))
@@ -221,7 +246,7 @@ async def test_detail_with_profile_and_contacts(
 
 
 async def test_detail_without_profile(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, no_related: None
 ) -> None:
     async def fake_row(db: Any, company_id: uuid.UUID) -> CompanyRow:
         return CompanyRow(make_company(aliases=["ABC Co"]), 0, None, None)
@@ -603,3 +628,177 @@ async def test_db_detail_while_first_enrich_is_running(
     profile = response.json()["profile"]
     assert profile["status"] == "draft"
     assert profile["sources"] == {}
+
+
+SOURCED = {"tax_code": [{"url": "https://masothue.com/0101248141"}]}
+
+
+async def add_kb_chunk(db: AsyncSession, company: Company) -> None:
+    db.add(
+        KBChunk(
+            source_type=KBSourceType.COMPANY_PROFILE.value,
+            source_id=company.id,
+            content="Hồ sơ FPT",
+        )
+    )
+    await db.flush()
+
+
+async def kb_chunks_of(db: AsyncSession, company: Company) -> int:
+    count = await db.scalar(
+        select(func.count()).where(
+            KBChunk.source_type == KBSourceType.COMPANY_PROFILE.value,
+            KBChunk.source_id == company.id,
+        )
+    )
+    return int(count or 0)
+
+
+async def stored_status(db: AsyncSession, company: Company) -> str | None:
+    return await db.scalar(
+        select(CompanyProfile.status)
+        .where(CompanyProfile.company_id == company.id)
+        .execution_options(populate_existing=True)
+    )
+
+
+async def test_db_archive_hides_profile_from_list_and_kb(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    fpt = await add_company(db_session, "Tập đoàn FPT")
+    await add_company(db_session, "Hanwha Precision Vietnam")
+    await add_profile(db_session, fpt, tax_code="0101248141", sources=SOURCED)
+    await add_kb_chunk(db_session, fpt)
+
+    response = await db_client.post(f"/api/companies/{fpt.id}/profile/archive")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "archived"
+    assert await stored_status(db_session, fpt) == "archived"
+    assert await kb_chunks_of(db_session, fpt) == 0
+    assert await listed_names(db_client) == ["Hanwha Precision Vietnam"]
+    assert await listed_names(db_client, has_profile="false") == ["Hanwha Precision Vietnam"]
+    assert await listed_names(db_client, q="fpt") == []
+    assert await listed_names(db_client, archived="true") == ["Tập đoàn FPT"]
+
+
+async def test_db_restore_brings_profile_back_with_inferred_status(
+    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+) -> None:
+    generated = await add_company(db_session, "Alpha")
+    edited = await add_company(db_session, "Beta")
+    first = await add_profile(
+        db_session, generated, tax_code="0101248141", sources=SOURCED, status="archived"
+    )
+    await add_profile(
+        db_session, edited, tax_code="0309999999", size_label="SME", status="archived"
+    )
+
+    alpha = await db_client.post(f"/api/companies/{generated.id}/profile/restore")
+    beta = await db_client.post(f"/api/companies/{edited.id}/profile/restore")
+
+    assert (alpha.status_code, alpha.json()["status"]) == (200, "generated")
+    assert (beta.status_code, beta.json()["status"]) == (200, "verified")
+    assert first.id in indexed
+    assert await listed_names(db_client) == ["Alpha", "Beta"]
+
+
+async def test_db_archive_and_restore_reject_wrong_states(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    bare = await add_company(db_session, "Alpha")
+    drafting = await add_company(db_session, "Beta")
+    live = await add_company(db_session, "Gamma")
+    await add_profile(db_session, drafting, status="draft")
+    await add_profile(db_session, live, tax_code="0101248141", sources=SOURCED)
+
+    assert (await db_client.post(f"/api/companies/{bare.id}/profile/archive")).status_code == 404
+    assert (
+        await db_client.post(f"/api/companies/{drafting.id}/profile/archive")
+    ).status_code == 409
+    assert (await db_client.post(f"/api/companies/{live.id}/profile/restore")).status_code == 409
+
+
+async def test_db_patch_is_refused_while_profile_is_archived(
+    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+) -> None:
+    company = await add_company(db_session, "Alpha")
+    await add_profile(db_session, company, tax_code="0101248141", status="archived")
+
+    response = await db_client.patch(
+        f"/api/companies/{company.id}/profile", json={"tax_code": "0309999999"}
+    )
+
+    assert response.status_code == 409
+    assert await stored_status(db_session, company) == "archived"
+    assert indexed == []
+
+
+async def test_db_cancel_endpoints(db_session: AsyncSession, db_client: httpx.AsyncClient) -> None:
+    company = await add_company(db_session, "Alpha")
+    idle = await add_company(db_session, "Beta")
+    job_id = await job_repo.create_job(db_session)
+    item_id = await job_repo.add_item(db_session, job_id, company.id)
+    assert item_id is not None
+    await job_repo.claim_item(db_session, item_id)
+    await company_repo.ensure_draft_profile(db_session, company.id)
+
+    nothing = await db_client.post(f"/api/companies/{idle.id}/enrich/cancel")
+    unknown = await db_client.post(f"/api/companies/{uuid.uuid4()}/enrich/cancel")
+    missing_job = await db_client.post(f"/api/companies/enrich-jobs/{uuid.uuid4()}/cancel")
+    job = await db_client.post(f"/api/companies/enrich-jobs/{job_id}/cancel")
+
+    assert (nothing.status_code, unknown.status_code, missing_job.status_code) == (409, 404, 404)
+    assert job.status_code == 200
+    assert (job.json()["cancelled"], job.json()["running"]) == (1, 0)
+    assert job.json()["items"][0]["status"] == "cancelled"
+    assert await stored_status(db_session, company) is None
+
+
+async def test_db_detail_lists_same_tax_code_and_same_domain(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    group = await add_company(db_session, "Tập đoàn FPT")
+    twin = await add_company(db_session, "Công ty Cổ phần FPT Việt Nam")
+    japan = await add_company(db_session, "FPTジャパン株式会社")
+    stranger = await add_company(db_session, "Hanwha Precision Vietnam")
+    await add_profile(db_session, group, tax_code="0101248141", sources=SOURCED)
+    await add_profile(db_session, twin, tax_code=" 0101248141 ", sources=SOURCED)
+    await add_profile(db_session, japan, tax_code="5010701021223")
+    for company, email, website in (
+        (group, "khoa@fpt.com", None),
+        (japan, "tanaka@fpt.com", "https://fpt.com"),
+        (stranger, "kim@gmail.com", None),
+    ):
+        db_session.add(
+            BusinessCard(
+                image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
+                image_hash=uuid.uuid4().hex * 2,
+                status="confirmed",
+                company_id=company.id,
+                email=email,
+                website=website,
+            )
+        )
+    await db_session.flush()
+
+    body = (await db_client.get(f"/api/companies/{group.id}")).json()
+
+    assert [ref["display_name"] for ref in body["same_tax_code"]] == [
+        "Công ty Cổ phần FPT Việt Nam"
+    ]
+    assert body["same_domain"] == [
+        {"id": str(japan.id), "display_name": "FPTジャパン株式会社", "domains": ["fpt.com"]}
+    ]
+
+
+async def test_db_cancel_clears_a_draft_left_after_its_item_expired(
+    db_session: AsyncSession, db_client: httpx.AsyncClient
+) -> None:
+    company = await add_company(db_session, "Alpha")
+    await company_repo.ensure_draft_profile(db_session, company.id)
+
+    response = await db_client.post(f"/api/companies/{company.id}/enrich/cancel")
+
+    assert (response.status_code, response.json()) == (200, {"cancelled": 0})
+    assert await stored_status(db_session, company) is None

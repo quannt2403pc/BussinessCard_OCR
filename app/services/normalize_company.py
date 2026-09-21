@@ -6,7 +6,7 @@ Chủ sở hữu: T | Task: 3.7 | xem Task.md
 import unicodedata
 from collections.abc import Iterable
 
-_VI_ENTITIES = ("công ty", "cty")
+_VI_ENTITIES = ("tổng công ty", "công ty", "cty", "tập đoàn")
 _VI_LLC = ("trách nhiệm hữu hạn", "tnhh")
 _VI_MEMBERS = (
     "một thành viên",
@@ -48,6 +48,7 @@ _RAW_SUFFIXES = (
     "co",
     "corporation",
     "corp",
+    "group",
     "incorporated",
     "inc",
     "llc",

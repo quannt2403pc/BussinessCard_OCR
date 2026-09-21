@@ -26,6 +26,7 @@ class ProfileStatus(StrEnum):
     DRAFT = "draft"
     GENERATED = "generated"
     VERIFIED = "verified"
+    ARCHIVED = "archived"
 
 
 class SourceRef(BaseModel):
@@ -149,10 +150,21 @@ class CompanyListOut(BaseModel):
     pages: int
 
 
+class CompanyRef(BaseModel):
+    id: uuid.UUID
+    display_name: str
+
+
+class RelatedCompany(CompanyRef):
+    domains: list[str]
+
+
 class CompanyDetailOut(CompanyListItem):
     aliases: list[str]
     profile: CompanyProfileOut | None = None
     contacts: list[CardOut]
+    same_tax_code: list[CompanyRef] = Field(default_factory=list)
+    same_domain: list[RelatedCompany] = Field(default_factory=list)
 
     @field_validator("aliases", mode="before")
     @classmethod
