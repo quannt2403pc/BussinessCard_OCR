@@ -23,7 +23,7 @@ Tiêu chí D10 đếm Blocker/Critical **trên cả hai file bug**, nên thang n
 | B2-02 | Major | *"Tập đoàn"*, *"Tổng công ty"*, *"Group"* không được bỏ khi chuẩn hoá → cùng một pháp nhân (CTCP FPT) ra 3 khoá, sinh 3 công ty | 2026-09-18, thẻ FPT tiếng Việt + tiếng Nhật | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-03 | Major | Không huỷ được lượt tạo hồ sơ đang chạy/đang chờ; hồ sơ `draft` kẹt sau khi api khởi động lại không có cách gỡ | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-04 | Minor | Không ẩn được hồ sơ không còn cần dùng → làm loãng danh sách, ô tìm kiếm và câu trả lời của trợ lý AI | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
-| B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | ⬜ Chưa sửa |
+| B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | 🔄 Đã sửa, chờ merge (nhánh `feature-b2-05-fail-fast`) |
 
 ## Chi tiết
 
@@ -119,5 +119,12 @@ client LLM của Q vốn đã tự thử 3 lần bên dưới → 9 lần gọi 
 **Hướng sửa:** lỗi kết nối tới CLIProxy (không phân giải được tên máy, từ chối kết nối) nên xếp như *chưa kết nối* —
 không thử lại, dừng cả lô với lời nhắc `docker compose up -d cliproxy`. Cần Q xác nhận client LLM có ném một loại lỗi
 riêng cho trường hợp này không; nếu chưa thì phân biệt theo thông điệp là cách tạm, dễ vỡ.
+
+**Đã sửa (2026-09-21):** không cần Q đổi gì. `llm.py` ném `LLMError(...) from CliProxyUnavailableError`, và client
+của Q đặt `status_code=None` khi hết lượt vì **lỗi mạng** (khác với 5xx, có mã). `is_unreachable()` trong
+`services/enrich_jobs.py` đọc đúng `__cause__` đó — phân biệt theo kiểu, không theo thông điệp. Lỗi mạng → **không
+thử lại ở tầng job** (client đã tự thử 3 lần), báo ngay kèm lời nhắc `docker compose up -d cliproxy`. 5xx vẫn thử lại
+như cũ. Không dừng cả lô: timeout đọc cũng rơi vào nhánh này, mà một công ty tra cứu chậm không có nghĩa CLIProxy chết.
+Test: `test_describe_failure` (2 dòng mới), `test_unreachable_proxy_is_not_retried`. Chưa đo lại TS-08 trong Docker.
 
 **Mức Minor:** lỗi vẫn hiện đúng và đọc được, chỉ chậm; buổi demo đã có phương án dự phòng (video) khi mất kết nối.
