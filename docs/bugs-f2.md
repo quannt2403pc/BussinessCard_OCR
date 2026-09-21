@@ -23,7 +23,7 @@ Tiêu chí D10 đếm Blocker/Critical **trên cả hai file bug**, nên thang n
 | B2-02 | Major | *"Tập đoàn"*, *"Tổng công ty"*, *"Group"* không được bỏ khi chuẩn hoá → cùng một pháp nhân (CTCP FPT) ra 3 khoá, sinh 3 công ty | 2026-09-18, thẻ FPT tiếng Việt + tiếng Nhật | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-03 | Major | Không huỷ được lượt tạo hồ sơ đang chạy/đang chờ; hồ sơ `draft` kẹt sau khi api khởi động lại không có cách gỡ | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-04 | Minor | Không ẩn được hồ sơ không còn cần dùng → làm loãng danh sách, ô tìm kiếm và câu trả lời của trợ lý AI | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
-| B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | 🔄 Đã sửa, chờ merge (nhánh `feature-b2-05-fail-fast`) |
+| B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | ✅ Đã sửa 2026-09-21 (PR #31) |
 
 ## Chi tiết
 
