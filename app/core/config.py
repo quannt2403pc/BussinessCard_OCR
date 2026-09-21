@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     #: `/health` và `/static/*` — hữu ích khi soi healthcheck, ồn khi chạy lâu.
     log_level: str = "INFO"
 
+    secret_key: str = "dev-only-secret-change-me"
+    session_max_age_days: int = 7
+    session_cookie_secure: bool = False
+
     # --- Database ---
     database_url: str = "postgresql+psycopg://bizcard:change-me@db:5432/bizcard"
 

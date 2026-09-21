@@ -31,6 +31,7 @@ ROUTER_MODULES: tuple[str, ...] = (
     "kb",  # Q — task 6.4
     "stats",  # T — task 7.7
     "export",  # T — task 7.6
+    "auth",  # T — task 12.2
 )
 
 

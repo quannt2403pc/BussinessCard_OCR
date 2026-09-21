@@ -70,6 +70,9 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      SECRET_KEY: ${SECRET_KEY:-dev-only-secret-change-me}
+      SESSION_MAX_AGE_DAYS: ${SESSION_MAX_AGE_DAYS:-7}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
       # --- Vận hành (task 9.5 / 9.2) ---
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
