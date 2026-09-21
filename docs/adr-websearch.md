@@ -1,127 +1,103 @@
 # ADR — Tìm kiếm Internet qua CLIProxy cho enrichment (F2)
 
-> Chủ sở hữu: **T** · Task **2.7** · Ngày: **2026-09-10**
-> Trạng thái: **⏸️ CHƯA CHỐT — bị chặn bởi task 2.1 của Q**
-> Script: [`scripts/spike_websearch.py`](../scripts/spike_websearch.py) *(đã viết, chưa chạy lần nào)*
+> Chủ sở hữu: **T** · Task **2.7** · Mở: 2026-09-10 · **Chốt: 2026-09-21**
+> Trạng thái: **✅ ĐÃ CHỐT** — đã chạy thật trên 3 mốc (2026-09-11, 09-14, 09-21), đang dùng trong
+> `services/enrichment.py` (4.7, 4.8) và đạt tiêu chí A5 (`docs/profile-quality.md`, 10.9)
+> Script: [`scripts/spike_websearch.py`](../scripts/spike_websearch.py) · [`scripts/spike_profile_quality.py`](../scripts/spike_profile_quality.py)
 
 ---
 
-## 1. Vì sao chưa chốt được
+## 1. Quyết định
 
-Task 2.7 đòi "chốt cách gọi" tìm kiếm Internet. Muốn chốt thì phải **gọi thật** một lần và
-nhìn kết quả trả về. Hiện chưa gọi được:
-
-| Điều kiện | Trạng thái |
-|---|---|
-| Service `cliproxy` trong `docker-compose.yml` | ❌ Chưa có — task **2.1** của **Q** |
-| OAuth đã kết nối | ❌ Chưa — task **2.5** của **Q** |
-| Danh sách model hỗ trợ web search | ❌ Chỉ đọc được **sau khi** OAuth xong (mục 3) |
-
-→ Phần đo đạc dời sang thời điểm Q xong 2.1 + 2.5. ADR này ghi lại **những gì đã xác định
-chắc chắn từ mã nguồn** để lúc đó chỉ việc chạy script, không phải khảo sát lại từ đầu.
+| # | Quyết định | Lý do (số đo ở mục 2) |
+|---|------------|------------------------|
+| **Q1** | Bật tìm kiếm bằng tool **`{"googleSearch": {}}`** trên endpoint Gemini gốc `POST /v1beta/models/<LLM_MODEL>:generateContent`, gọi qua `llm.generate_content()` để nhận JSON thô | Cần đọc `candidates[0].groundingMetadata.groundingChunks[].web` — `generate_text()` chỉ trả chữ |
+| **Q2** | **Gọi hai lượt.** Lượt 1: bật `googleSearch`, prompt tra cứu **văn xuôi**, **không** `systemInstruction`, **không** đặc tả JSON. Lượt 2: **không** bật tool, chỉ xếp kết quả lượt 1 vào JSON và chỉ được trích URL có trong danh sách grounding | Có `systemInstruction` hoặc đặc tả JSON dài thì response **mất hẳn `groundingMetadata`** (5/5 lần, 2026-09-14) — model vẫn tra cứu nhưng không trả nguồn nào |
+| **Q3** | `web.uri` là link redirect của Vertex → **theo redirect đúng 1 lần** (timeout 5 s), lưu URL gốc vào `company_profiles.sources`, giữ `web.title` làm nhãn tên miền. Không theo được thì **bỏ nguồn đó**, không hỏng cả hồ sơ | Link redirect trả `302` ra trang gốc thật nhưng có thể hết hạn; nguồn lưu phải bấm được lâu dài |
+| **Q4** | Một trường chỉ được giữ khi có nguồn **thuộc tên miền trong danh sách grounding**; không có thì để `null` (luật 4.8) | Chống bịa (R4): URL model tự gõ ra ngoài grounding không được tin |
+| **Q5** | **Không chọn model theo cờ `supports_web_search`.** Chọn bằng một lời gọi thật (`spike_websearch.py --model …` hoặc `spike_profile_quality.py`) | Cờ cho kết quả **khác nhau theo tài khoản và thời điểm** — âm tính giả 11/11 ngày 09-11, khớp thực tế ngày 09-21 |
+| **Q6** | Model: **`gemini-3-flash`** là mặc định của dự án; **`gemini-3.6-flash-high`** cũng đã kiểm, dùng được | Cả hai đạt A5, 10/10 MST khớp trang nguồn (10.9) |
 
 ---
 
-## 2. Đã chắc chắn (đọc mã nguồn CLIProxyAPI, commit `7fac6b15`)
+## 2. Số đo
 
-### 2.1 CLIProxy CÓ hỗ trợ Google Search grounding
+### 2026-09-11 — Q chạy `spike_websearch.py` ngay sau khi OAuth xong (ghi ở **I-12**)
 
-Không phải suy đoán — executor của antigravity nhận diện tool này:
+| Câu hỏi của ADR | Kết quả |
+|-----------------|---------|
+| Model nào có `supports_web_search`? | Cờ báo **`không` cho cả 11/11 model** — kể cả model thực tế tra cứu được → cờ cho **âm tính giả** |
+| Gọi `tools: [{"googleSearch": {}}]` có chạy? | **Có** trên `gemini-3-flash`: `HTTP 200`, 3 `groundingChunks` (`masothue.com`, `vnr500.vn`, `vsd.vn`) cho câu hỏi MST của FPT |
+| `web.uri` có phải URL thật? | **Không** — là link redirect Vertex, **nhưng sống**: gọi thẳng trả `302` + `Location` là trang gốc (`fptsoftware.com/en`…), theo tiếp ra `200`; `web.title` chứa đúng tên miền |
 
-| Điều | Bằng chứng trong mã nguồn |
-|---|---|
+### 2026-09-14 — T chạy enrichment thật lần đầu (4.7)
+
+- Gọi **một lượt** (có `systemInstruction` / đặc tả JSON) → `groundingMetadata` **biến mất 5/5 lần** → 4.8 loại sạch
+  → hồ sơ trắng. Bỏ đặc tả ra thì 3/3 lần còn 2–5 nguồn. → Quyết định **Q2**.
+- Sau khi tách hai lượt, `gemini-3-flash`: FPT Software **10**, Vinamilk **11**, Hòa Phát **11** trường có nguồn,
+  15–22 s/công ty; **21/22 URL nguồn mở ra `200`** (còn lại `topcv.vn` trả `403` vì chặn bot).
+- Đã thử và bỏ hướng "tin link redirect do model tự chèn vào văn bản": link thật trả `302`, link sửa/bịa trả `404`
+  nên chống giả được, nhưng model không phải lần nào cũng chèn (2/3 công ty ra URL thường).
+
+### 2026-09-21 — T đo 10 công ty thật + 1 công ty bịa, 2 model (10.9)
+
+| | `gemini-3-flash` | `gemini-3.6-flash-high` |
+|---|---|---|
+| ≥ 5 trường có nguồn | 10/10 | 10/10 |
+| Đủ 5 trường A5 | 9/10 | 8/10 |
+| **MST tìm thấy đúng trong trang nguồn đã trích** | **10/10** | **10/10** |
+| Công ty bịa tên | 0 trường | 0 trường |
+| Trung vị | 43 s | 32 s |
+
+Cùng ngày, `spike_websearch.py --list-models` với tài khoản đang dùng: cờ `supports_web_search` báo **CÓ cho mọi model
+Gemini** (9 model) và **không** cho `claude-*`, `gpt-oss-*` — lần này **khớp** hành vi thật, **ngược** với số đo
+09-11. Cờ phụ thuộc tài khoản / thời điểm CLIProxy nạp `fetchAvailableModels`, nên không dùng làm căn cứ (**Q5**).
+
+---
+
+## 3. Hệ quả và rủi ro còn lại
+
+| Rủi ro | Mức | Ai cần biết |
+|--------|-----|-------------|
+| **Grounding rất nhạy với prompt.** Sửa prompt lượt 1 (ví dụ thêm hướng dẫn "ưu tiên cổng đăng ký kinh doanh" ở 9.7) có thể làm mất nguồn mà không có lỗi nào báo | Cao | T (9.7): mọi thay đổi prompt phải chạy lại `spike_profile_quality.py` trước khi merge |
+| `generate_text(..., system=…, tools=[TOOL_GOOGLE_SEARCH])` sẽ **không có nguồn** | Trung bình | Q: nếu F3 muốn tra cứu Internet thì phải theo **Q2** |
+| Kết quả tìm kiếm thay đổi theo ngày — một công ty 5/5 hôm nay có thể 4/5 lần sau | Thấp | Bình thường; A5 đo trên 10 công ty, không trên một công ty |
+| Một số trang chặn bot (`topcv.vn` → `403`) | Thấp | Nguồn vẫn hợp lệ với người dùng bấm từ trình duyệt; chỉ ảnh hưởng việc kiểm tự động |
+| Link redirect Vertex hết hạn | Đã xử lý | **Q3** lưu URL gốc ngay lúc tạo hồ sơ |
+| Tài khoản Google Workspace không lấy được `project_id` → mọi lời gọi `400` dù badge *Đã kết nối* | Trung bình | Người dùng: đăng nhập Gmail cá nhân (`docs/user-guide.md` mục 8) |
+
+---
+
+## 4. Ảnh hưởng tới các task khác
+
+| Task | Người | Theo quyết định nào | Trạng thái |
+|------|-------|---------------------|------------|
+| 2.3 `services/llm.py` | Q | `TOOL_GOOGLE_SEARCH`, `generate_content()` trả JSON thô | ✅ |
+| 4.7 `services/enrichment.py` | T | Q1, Q2, Q3 | ✅ |
+| 4.8 Lọc nguồn | T | Q4 | ✅ |
+| 6.6 Khối *Nguồn tham khảo* | T | Q3 — hiện URL gốc, nhãn là tên miền | ✅ |
+| 9.7 Nâng chất lượng hồ sơ | T | Rủi ro mục 3 dòng đầu | ⬜ |
+| 10.9 Đo chất lượng hồ sơ | T | Q5, Q6 | ✅ |
+
+---
+
+## Phụ lục — đã kiểm trong mã nguồn CLIProxyAPI (commit `7fac6b15`, 2026-09-10)
+
+Phần này viết **trước** khi gọi được thật; cả ba điểm đều đã được số đo ở mục 2 xác nhận.
+
+| Điều | Bằng chứng |
+|------|-----------|
 | Tên tool là **`googleSearch`** (camelCase) | `internal/runtime/executor/antigravity_executor.go:829` — `tool.Get("googleSearch").Exists()` |
-| Kết quả nằm ở `groundingMetadata.groundingChunks` | `internal/runtime/executor/helps/antigravity_grounding_urls.go:71-74` |
-| Có **hai** đường dẫn khả dĩ | Cùng file: `response.candidates.0.groundingMetadata.groundingChunks` **hoặc** `candidates.0.groundingMetadata.groundingChunks` — script thử cả hai |
+| Kết quả ở `groundingMetadata.groundingChunks`, có thể nằm dưới `response.candidates.0` hoặc `candidates.0` | `internal/runtime/executor/helps/antigravity_grounding_urls.go:71-74` |
 | Mỗi chunk có `web.uri` + `web.title` | `internal/translator/antigravity/claude/web_search.go:267+` |
+| `supports_web_search` không có trong `models.json` tĩnh, được nạp lúc chạy từ `fetchAvailableModels.webSearchModelIds` | `internal/registry/model_registry.go:65-67` |
 
-### 2.2 Cách gọi dự kiến
+Cách gọi đã dùng:
 
 ```jsonc
-POST /v1beta/models/<model>:generateContent
+POST /v1beta/models/<LLM_MODEL>:generateContent
 {
-  "contents": [{"role": "user", "parts": [{"text": "..."}]}],
+  "contents": [{"role": "user", "parts": [{"text": "<prompt tra cứu dạng văn xuôi>"}]}],
   "tools": [{"googleSearch": {}}]
 }
 ```
-
----
-
-## 3. 🚨 Rủi ro lớn nhất: không biết model nào tra cứu được Internet
-
-`ModelInfo.SupportsWebSearch` được khai ở `internal/registry/model_registry.go:65-67`:
-
-```go
-// SupportsWebSearch indicates this Antigravity model is listed by
-// fetchAvailableModels.webSearchModelIds and can execute native googleSearch.
-SupportsWebSearch bool `json:"supports_web_search,omitempty"`
-```
-
-Điểm mấu chốt: **`supports_web_search` KHÔNG có trong `models.json` tĩnh.** Đã kiểm — khoá của
-mỗi model antigravity chỉ gồm `id, object, owned_by, type, display_name, name, description,
-context_length, max_completion_tokens, thinking, supportedInputModalities,
-supportedOutputModalities`. Trường này được CLIProxy nạp **lúc chạy** từ
-`fetchAvailableModels.webSearchModelIds` của Antigravity.
-
-→ Danh sách model tra cứu được Internet **chỉ biết sau khi OAuth thành công**.
-
-### Vì sao điều này đáng lo cho F2
-
-Toàn bộ thiết kế chống bịa R4 (`prompts/enrichment.py`, task 2.9) đứng trên giả định model
-**tra cứu được Internet và trả về URL nguồn thật**. Nếu `gemini-3-flash` (model đề xuất ở
-I-03) hoá ra không nằm trong `webSearchModelIds`, thì:
-
-- Model sẽ trả lời bằng **kiến thức nội tại**, không có nguồn → đúng kịch bản bịa thông tin.
-- `sources` rỗng → task 4.8 loại sạch mọi trường → hồ sơ trắng → **trượt tiêu chí A5**
-  (≥ 5 trường có nguồn).
-
-**Phương án nếu xảy ra:** đổi sang model khác trong `antigravity` có `supports_web_search: true`
-(ưu tiên `gemini-3.1-pro-low` hoặc `gemini-pro-agent` vì bản "pro"/"agent" thường có tool).
-Nếu **không model nào** hỗ trợ → phải dựng bước tìm kiếm riêng ngoài LLM, việc này lớn, phải
-báo Q và cân nhắc cắt phạm vi ngay trong D2.
-
----
-
-## 4. Còn phải đo — làm ngay khi Q xong 2.1 + 2.5
-
-Chạy theo thứ tự:
-
-```bash
-python scripts/spike_websearch.py --list-models         # (1)
-python scripts/spike_websearch.py --model <model đã chọn>  # (2)(3)
-```
-
-| # | Câu hỏi | Vì sao quan trọng |
-|---|---|---|
-| 1 | Model nào có `supports_web_search: true`? | Quyết định `LLM_MODEL` cho F2 — xem mục 3 |
-| 2 | Gọi có `tools: [{"googleSearch": {}}]` thì trả 200 hay lỗi? | Xác nhận cách gọi ở mục 2.2 |
-| 3 | **`groundingChunks[].web.uri` có phải URL thật không?** | Câu quan trọng nhất — xem dưới |
-
-### Vì sao câu 3 là câu quan trọng nhất
-
-Gemini grounding thường trả URI dạng **redirect của Vertex** (`vertexaisearch.cloud.google.com/
-grounding-api-redirect/...`) chứ không phải link gốc. Nếu đúng vậy:
-
-- URL lưu vào `company_profiles.sources` sẽ là link trung gian, **có thể hết hạn**.
-- Người dùng bấm vào ô "Nguồn tham khảo" (task 6.6) có thể ra trang lỗi → hỏng đúng thứ
-  thuyết phục nhất của F2: chứng minh thông tin có thật.
-- Tiêu chí A5 đòi nguồn **"kiểm chứng được"** — link chết thì không kiểm chứng được.
-
-**Phải mở thử vài URL bằng tay**, không chỉ nhìn có URL là xong. Nếu là link redirect thì cân
-nhắc: theo redirect một lần rồi lưu URL cuối, hoặc yêu cầu model trích thêm tên miền gốc trong
-phần text.
-
----
-
-## 5. Ảnh hưởng tới các task khác
-
-| Task | Người | Phụ thuộc gì vào ADR này |
-|---|---|---|
-| 4.7 `services/enrichment.py` | T | Cách bật tool + đường dẫn đọc grounding |
-| 4.8 Validate nguồn | T | URL có mở được không quyết định luật lọc |
-| 2.3 `services/llm.py` | Q | `generate_text()` phải cho truyền `tools` xuống |
-| 9.7 Nâng chất lượng hồ sơ | T | Có chặn được domain / ưu tiên cổng đăng ký DN không |
-
-> **Lưu ý cho Q (task 2.3):** `services/llm.py` cần cho phép truyền tham số `tools` xuống
-> `generateContent`. Nếu hàm chỉ nhận mỗi prompt thì F2 không bật được tìm kiếm.
-> Đây là chữ ký hàm nên chốt sớm — báo ở daily sync.
