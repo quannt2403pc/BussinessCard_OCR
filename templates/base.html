@@ -21,11 +21,16 @@
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
 
+  {# I-26: `/dashboard` (task 7.7 của T) là trang chính thức trong `docs/api.md` mục 7 nhưng
+     trước 10.2 không có lối vào nào từ nav — phải bấm nút trên /companies hoặc gõ thẳng URL.
+     Chủ file này là Q nên T không tự thêm được; thêm ở đây là đúng quy ước số 2. Khoá
+     'dashboard' khớp `active_nav` mà `routers/stats.py::dashboard_page` truyền xuống. #}
   {% set nav_items = [
-    ('cards',     'Danh thiếp',  '/cards'),
-    ('companies', 'Doanh nghiệp','/companies'),
-    ('assistant', 'Trợ lý AI',   '/assistant'),
-    ('settings',  'Cài đặt',     '/settings')
+    ('cards',     'Danh thiếp',   '/cards'),
+    ('companies', 'Doanh nghiệp', '/companies'),
+    ('assistant', 'Trợ lý AI',    '/assistant'),
+    ('dashboard', 'Bảng số liệu', '/dashboard'),
+    ('settings',  'Cài đặt',      '/settings')
   ] %}
 
   <header class="border-b border-slate-200 bg-white">

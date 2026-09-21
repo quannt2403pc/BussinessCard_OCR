@@ -365,6 +365,51 @@
   $("btn-prev").addEventListener("click", () => { if (page > 1) { page -= 1; load(); } });
   $("btn-next").addEventListener("click", () => { if (page < pages) { page += 1; load(); } });
 
+  // --- bộ lọc trên URL (I-27) -----------------------------------------------
+
+  // Dashboard (7.7 của T) có hai ô *Đã xác nhận* / *Chờ duyệt* link sang `/cards?status=…`.
+  // Trước 10.2 trang này chỉ đọc bộ lọc từ ô chọn nên bấm vào ra nguyên danh sách đầy đủ, và
+  // người dùng kết luận bộ lọc hỏng. Phía T đã sửa đúng lỗi này cho `/companies` ở 8.8.
+  //
+  // **Chỉ nhận giá trị có thật trong ô chọn.** `?status=xoa-so` mà nhét thẳng vào ô select thì
+  // giá trị không khớp option nào, trình duyệt im lặng đặt về rỗng, còn `query()` vẫn gửi nó
+  // xuống API và nhận 400 — trang hiện "Không tải được danh sách" cho một thứ người dùng không
+  // gõ. Giá trị lạ thì bỏ qua, coi như không có bộ lọc.
+  function applyUrlFilters() {
+    const params = new URLSearchParams(location.search);
+    const text = (params.get("q") || "").trim();
+    if (text) $("f-q").value = text;
+
+    for (const [key, id] of [["status", "f-status"], ["language", "f-language"]]) {
+      const value = params.get(key);
+      if (!value) continue;
+      const select = $(id);
+      if ([...select.options].some((option) => option.value === value)) {
+        select.value = value;
+      }
+    }
+  }
+
+  // Giữ thanh địa chỉ khớp bộ lọc đang xem: tải lại trang hay gửi link cho người khác thì vẫn
+  // ra đúng danh sách đó. `replaceState` chứ không `pushState` — mỗi lần gõ một chữ vào ô tìm
+  // kiếm mà thêm một mục lịch sử thì nút Back của trình duyệt thành vô dụng.
+  function syncUrl() {
+    const params = query();
+    params.delete("page");
+    params.delete("size");
+    const search = params.toString();
+    history.replaceState(null, "", search ? `${location.pathname}?${search}` : location.pathname);
+  }
+
+  for (const id of ["f-q", "f-status", "f-language"]) {
+    $(id).addEventListener("change", syncUrl);
+  }
+  $("btn-reset").addEventListener("click", () => {
+    // `type="reset"` xoá ô *sau* khi handler chạy, nên đợi một nhịp rồi mới đọc lại giá trị.
+    setTimeout(syncUrl, 0);
+  });
+
+  applyUrlFilters();
   load();
 })();
 </script>

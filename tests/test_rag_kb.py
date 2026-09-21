@@ -118,6 +118,47 @@ def test_serialize_card_khong_lap_lai_ten_cong_ty_y_het():
     assert "Tên công ty trên danh thiếp" not in body
 
 
+def test_serialize_card_ghi_ten_ngon_ngu_chu_khong_chi_ghi_ma():
+    """Chunk phải nói *bằng tiếng Việt* rằng thẻ này là tiếng Nhật (task 10.2, lỗi B-03).
+
+    Trước 10.2 chunk chỉ ghi `Ngôn ngữ: ja`. Đo ở 10.1 trên câu 8 của `docs/qa-testset.md`:
+    truy hồi đúng thẻ `田中 太郎` nhưng trợ lý vẫn trả "Không có thông tin này trong dữ liệu đã
+    nhập", vì không chỗ nào trong ngữ cảnh nói thẻ này là tiếng Nhật và quy tắc 1 của
+    `prompts/assistant.py` cấm model tự suy ra từ kiến thức sẵn có.
+    """
+    _, body = kb.serialize_card(make_card(language_detected="ja"))
+
+    assert "Ngôn ngữ: Tiếng Nhật (ja)" in body
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("vi", "Ngôn ngữ: Tiếng Việt (vi)"),
+        ("EN", "Ngôn ngữ: Tiếng Anh (EN)"),  # hoa thường không được làm mất nhãn
+        ("ko", "Ngôn ngữ: Tiếng Hàn (ko)"),
+        ("zh", "Ngôn ngữ: Tiếng Trung (zh)"),
+    ],
+)
+def test_serialize_card_phu_du_nam_ngon_ngu_trong_pham_vi(code: str, expected: str):
+    _, body = kb.serialize_card(make_card(language_detected=code))
+
+    assert expected in body
+
+
+def test_serialize_card_ma_ngon_ngu_la_thi_giu_nguyen_khong_bia_ten():
+    """Model trả mã ngoài 5 ngôn ngữ đã chốt → ghi lại đúng mã, không đoán tên."""
+    _, body = kb.serialize_card(make_card(language_detected="th"))
+
+    assert "Ngôn ngữ: th" in body
+
+
+def test_serialize_card_khong_co_ngon_ngu_thi_bo_han_dong():
+    _, body = kb.serialize_card(make_card(language_detected=None))
+
+    assert "Ngôn ngữ" not in body
+
+
 def test_serialize_ho_so_dua_mo_ta_xuong_cuoi():
     company = make_company()
     title, body = kb.serialize_company_profile(company, make_profile(company))

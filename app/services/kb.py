@@ -55,6 +55,27 @@ CHUNK_OVERLAP_CHARS = 80
 #: phình JSONB.
 MAX_SOURCE_URLS = 10
 
+#: Tên tiếng Việt của mã ISO 639-1 mà `prompts/ocr.py` sinh ra (Plan.md mục 1.3 chốt đúng 5
+#: ngôn ngữ). Ghi cả tên lẫn mã vào chunk, không chỉ mã.
+#:
+#: Đo ở task 10.1 (2026-09-21), câu 8 của `docs/qa-testset.md`: hỏi *"Có ai làm ở công ty Nhật
+#: không?"* thì truy hồi **đúng** — thẻ `田中 太郎 · 東京テック株式会社` xếp hạng 1 — nhưng trợ lý vẫn
+#: trả "Không có thông tin này trong dữ liệu đã nhập". Nguyên nhân: chunk chỉ ghi `Ngôn ngữ: ja`,
+#: không chỗ nào trong ngữ cảnh nói thẻ này là **tiếng Nhật**. Muốn trả lời được thì model phải
+#: tự biết `東京テック株式会社` là công ty Nhật — mà đó đúng là thứ quy tắc 1 của
+#: `prompts/assistant.py` cấm. Model làm đúng luật; chỗ sai là dữ liệu.
+#:
+#: Vì vậy sửa ở đây chứ **không** nới quy tắc 1: nới nó ra là mở lại đường cho X3 ("mã số thuế
+#: của Vinamilk") — câu chặn mà cả lượt nghiệm thu phụ thuộc vào. Ghi thêm tên ngôn ngữ giúp cả
+#: hai nhánh truy hồi: nhánh vector có chữ "Nhật" để bám, nhánh full-text có token để khớp.
+LANGUAGE_LABELS: dict[str, str] = {
+    "vi": "Tiếng Việt",
+    "en": "Tiếng Anh",
+    "ko": "Tiếng Hàn",
+    "ja": "Tiếng Nhật",
+    "zh": "Tiếng Trung",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Chunk:
@@ -101,7 +122,7 @@ def serialize_card(card: BusinessCard, *, company_name: str | None = None) -> tu
         ("Điện thoại khác", card.phone_alt),
         ("Địa chỉ", card.address),
         ("Website", card.website),
-        ("Ngôn ngữ", card.language_detected),
+        ("Ngôn ngữ", _language(card.language_detected)),
         ("Ngày thu thập", _date(card.uploaded_at)),
         ("Ghi chú", card.notes),
     ]
@@ -364,6 +385,20 @@ def _text(value: Any) -> str:
 
 def _join(values: Sequence[str] | None) -> str:
     return ", ".join(part.strip() for part in values if part and part.strip()) if values else ""
+
+
+def _language(code: str | None) -> str | None:
+    """`"ja"` → `"Tiếng Nhật (ja)"`. Mã lạ thì giữ nguyên mã, không bịa tên.
+
+    Giữ lại cả mã vì nó là thứ `services/normalize.py` dùng để chọn mã vùng số điện thoại — mất
+    mã khỏi chunk thì lúc đối chiếu KB với DB không còn lần ra được vì sao một số lại chuẩn hoá
+    theo vùng đó. Xem `LANGUAGE_LABELS` để biết vì sao dòng này quan trọng với F3.
+    """
+    text = _text(code)
+    if not text:
+        return None
+    label = LANGUAGE_LABELS.get(text.casefold())
+    return f"{label} ({text})" if label else text
 
 
 def _other(value: str | None, already_shown: str | None) -> str | None:

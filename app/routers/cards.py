@@ -520,7 +520,9 @@ async def confirm_card(
     elif not (raw_name := (card.company_name_raw or "").strip()):
         detail = "Danh thiếp không có tên công ty nên chưa gắn được vào bảng companies."
     else:
-        company_id, detail = await _upsert_company(db, raw_name)
+        company_id, detail = await _upsert_company(
+            db, raw_name, email=card.email, website=card.website
+        )
 
     card.company_id = company_id
     card.status = CardStatus.CONFIRMED
@@ -728,8 +730,22 @@ async def _rollback_and_refresh(db: AsyncSession, card: BusinessCard) -> None:
     await db.refresh(card)
 
 
-async def _upsert_company(db: AsyncSession, raw_name: str) -> tuple[uuid.UUID | None, str | None]:
+async def _upsert_company(
+    db: AsyncSession,
+    raw_name: str,
+    *,
+    email: str | None = None,
+    website: str | None = None,
+) -> tuple[uuid.UUID | None, str | None]:
     """Gọi `company_matching.upsert_company()` của T — chữ ký chốt ở họp D2 (`docs/api.md` mục 8).
+
+    **`email` và `website` là bắt buộc phải truyền, không phải tuỳ chọn cho đẹp** (I-18). Quy tắc
+    gộp công ty của task 3.8 đọc tên miền từ hai trường này và nó cắt theo **cả hai chiều**:
+    chung tên miền thì nới ngưỡng so mờ xuống 80, còn **khác tên miền thì không bao giờ gộp**.
+    Gọi thiếu hai tham số này — như bản đầu của 4.3 — thì `extract_domains(None, None)` trả rỗng,
+    và toàn bộ luồng xác nhận trên UI chỉ còn so tên: "Công ty TNHH Phú Cơ" gặp "Công ty TNHH
+    Phú" là gộp (I-21), trong khi hai công ty khác hẳn nhau nhưng trùng tên miền lại không gộp
+    được. Nói cách khác lưới an toàn của T có tồn tại mà chưa bao giờ được bật từ giao diện.
 
     Import **trong hàm** chứ không ở đầu file: `services/company_matching.py` còn là stub cho tới
     khi T làm xong task 3.8, import ở module level sẽ không sao (module tồn tại), nhưng gọi hàm
@@ -747,7 +763,7 @@ async def _upsert_company(db: AsyncSession, raw_name: str) -> tuple[uuid.UUID | 
         )
 
     try:
-        return await upsert(db, raw_name), None
+        return await upsert(db, raw_name, email=email, website=website), None
     except Exception as exc:  # T sở hữu hàm này; lỗi của nó không được làm hỏng việc xác nhận
         await db.rollback()
         logger.warning("upsert_company(%r) lỗi: %s", raw_name, exc)
