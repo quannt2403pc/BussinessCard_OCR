@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.templates import templates
 from app.models.company import EnrichJob, EnrichJobItem
+from app.models.kb import KBSourceType
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
+from app.repositories import kb as kb_repo
 from app.schemas.card import CardOut
 from app.schemas.company import (
     CompanyDetailOut,
@@ -20,12 +22,15 @@ from app.schemas.company import (
     CompanyListOut,
     CompanyProfileOut,
     CompanyProfileUpdateIn,
+    CompanyRef,
     ProfileStatus,
+    RelatedCompany,
 )
 from app.schemas.enrich_job import (
     MAX_BATCH_COMPANIES,
     EnrichBatchIn,
     EnrichBatchOut,
+    EnrichCancelOut,
     EnrichConflictOut,
     EnrichJobItemOut,
     EnrichJobOut,
@@ -74,11 +79,14 @@ async def list_companies(
         bool | None,
         Query(description="true: đã có hồ sơ generated/verified · false: chưa có hoặc đang draft"),
     ] = None,
+    archived: Annotated[
+        bool, Query(description="true: chỉ công ty có hồ sơ đã ẩn · mặc định: bỏ qua hồ sơ đã ẩn")
+    ] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=company_repo.MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
 ) -> CompanyListOut:
     rows, total = await company_repo.list_companies(
-        db, q=q, has_profile=has_profile, page=page, size=size
+        db, q=q, has_profile=has_profile, archived=archived, page=page, size=size
     )
     return CompanyListOut(
         items=[to_list_item(row) for row in rows],
@@ -123,6 +131,23 @@ async def get_enrich_job(
     return to_job_out(job, await job_repo.list_items(db, job_id))
 
 
+@router.post(
+    "/api/companies/enrich-jobs/{job_id}/cancel", response_model=EnrichJobOut, tags=["companies"]
+)
+async def cancel_enrich_job(
+    job_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> EnrichJobOut:
+    job = await job_repo.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+    cancelled = await enrich_jobs.cancel(db, job_id=job_id)
+    await db.commit()
+    enrich_jobs.interrupt(cancelled)
+    logger.info("Enrich job %s: huỷ %d công ty", job_id, len(cancelled))
+    return to_job_out(job, await job_repo.list_items(db, job_id))
+
+
 @router.get("/api/companies/{company_id}", response_model=CompanyDetailOut, tags=["companies"])
 async def get_company(
     company_id: uuid.UUID,
@@ -133,6 +158,8 @@ async def get_company(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
     profile = await company_repo.get_profile(db, company_id)
     contacts = await company_repo.list_contacts(db, company_id)
+    twins = await company_repo.same_tax_code(db, company_id, profile.tax_code if profile else None)
+    neighbours = await company_repo.same_domain(db, company_id)
     return CompanyDetailOut(
         **to_list_item(row).model_dump(),
         aliases=row.company.aliases or [],
@@ -140,6 +167,11 @@ async def get_company(
             CompanyProfileOut.model_validate(profile, from_attributes=True) if profile else None
         ),
         contacts=[CardOut.model_validate(card) for card in contacts],
+        same_tax_code=[CompanyRef(id=c.id, display_name=c.display_name) for c in twins],
+        same_domain=[
+            RelatedCompany(id=c.id, display_name=c.display_name, domains=domains)
+            for c, domains in neighbours
+        ],
     )
 
 
@@ -185,6 +217,77 @@ async def enrich_company(
     return EnrichStartOut(job_id=created.job_id)
 
 
+@router.post(
+    "/api/companies/{company_id}/enrich/cancel",
+    response_model=EnrichCancelOut,
+    tags=["companies"],
+)
+async def cancel_company_enrich(
+    company_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> EnrichCancelOut:
+    if await company_repo.get_company(db, company_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+    cancelled = await enrich_jobs.cancel(db, company_id=company_id)
+    stale = 0 if cancelled else await company_repo.discard_draft_profile(db, company_id)
+    if not cancelled and not stale:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="Công ty này không có lượt tạo hồ sơ nào đang chạy."
+        )
+    await db.commit()
+    enrich_jobs.interrupt(cancelled)
+    logger.info("Company %s: huỷ lượt tạo hồ sơ", company_id)
+    return EnrichCancelOut(cancelled=len(cancelled))
+
+
+@router.post(
+    "/api/companies/{company_id}/profile/archive",
+    response_model=CompanyProfileOut,
+    tags=["companies"],
+)
+async def archive_company_profile(
+    company_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CompanyProfileOut:
+    profile = await company_repo.get_profile(db, company_id)
+    if profile is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Công ty này chưa có hồ sơ.")
+    if profile.status == ProfileStatus.DRAFT or await job_repo.active_job_id(db, company_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Hồ sơ đang được tạo — huỷ hoặc đợi lượt đang chạy xong rồi mới ẩn.",
+        )
+    if profile.status != ProfileStatus.ARCHIVED:
+        profile.status = ProfileStatus.ARCHIVED.value
+        await kb_repo.delete_for_source(
+            db, source_type=KBSourceType.COMPANY_PROFILE, source_id=company_id
+        )
+        await db.commit()
+        logger.info("Company %s: ẩn hồ sơ", company_id)
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
+
+
+@router.post(
+    "/api/companies/{company_id}/profile/restore",
+    response_model=CompanyProfileOut,
+    tags=["companies"],
+)
+async def restore_company_profile(
+    company_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CompanyProfileOut:
+    profile = await company_repo.get_profile(db, company_id)
+    if profile is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Công ty này chưa có hồ sơ.")
+    if profile.status != ProfileStatus.ARCHIVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Hồ sơ này không ở trạng thái ẩn.")
+    profile.status = company_repo.restored_status(profile).value
+    await db.commit()
+    await enrich_jobs.index_profile(profile.id)
+    logger.info("Company %s: hiện lại hồ sơ (%s)", company_id, profile.status)
+    return CompanyProfileOut.model_validate(profile, from_attributes=True)
+
+
 @router.patch(
     "/api/companies/{company_id}/profile",
     response_model=CompanyProfileOut,
@@ -212,7 +315,12 @@ async def update_company_profile(
             status_code=status.HTTP_409_CONFLICT, content=conflict.model_dump(mode="json")
         )
 
-    profile = await company_repo.update_profile(db, company_id, changes)
+    try:
+        profile = await company_repo.update_profile(db, company_id, changes)
+    except company_repo.ProfileArchivedError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="Hồ sơ đang ẩn — hiện lại trước khi sửa."
+        ) from exc
 
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
@@ -246,6 +354,7 @@ def to_job_out(job: EnrichJob, items: Sequence[tuple[EnrichJobItem, str]]) -> En
         done=statuses.count(JobItemStatus.DONE),
         failed=statuses.count(JobItemStatus.ERROR),
         running=statuses.count(JobItemStatus.RUNNING),
+        cancelled=statuses.count(JobItemStatus.CANCELLED),
         finished=job.finished_at is not None,
         created_at=job.created_at,
         finished_at=job.finished_at,

@@ -38,6 +38,7 @@
         <option value="">Tất cả</option>
         <option value="false">Chưa có hồ sơ</option>
         <option value="true">Đã có hồ sơ</option>
+        <option value="archived">Đã ẩn</option>
       </select>
     </label>
 
@@ -57,8 +58,13 @@
           class="hidden rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-white">
     Bỏ chọn
   </button>
+  <span class="ml-auto"></span>
+  <button id="btn-cancel-all" type="button"
+          class="hidden rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
+    Huỷ các lượt đang chạy
+  </button>
   <button id="btn-enrich" type="button" disabled
-          class="ml-auto rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+          class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
     Tạo hồ sơ doanh nghiệp
   </button>
 </section>
@@ -111,6 +117,7 @@
     generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
     verified:  ["Đã kiểm", "bg-sky-50 text-sky-700 ring-sky-200"],
     draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
+    archived:  ["Đã ẩn", "bg-slate-100 text-slate-500 ring-slate-200"],
   };
 
   const JOB_BADGES = {
@@ -118,6 +125,7 @@
     running: ["⏳ Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
     done:    ["✅ Xong", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
     error:   ["❌ Lỗi", "bg-rose-50 text-rose-700 ring-rose-200"],
+    cancelled: ["⊘ Đã huỷ", "bg-slate-50 text-slate-500 ring-slate-200"],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -217,17 +225,30 @@
     return Boolean(item) && (item.status === "pending" || item.status === "running");
   }
 
+  function cancelButton(company) {
+    const button = el(
+      "button",
+      "mt-1 block rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 transition hover:bg-slate-100",
+      "Huỷ",
+    );
+    button.type = "button";
+    button.addEventListener("click", () => cancelCompany(company, button));
+    return button;
+  }
+
   function stateCell(company) {
     const cell = el("td", "px-4 py-3");
     const item = jobState.get(company.id);
     if (!item) {
       cell.append(profileBadge(company.profile_status));
+      if (company.profile_status === "draft") cell.append(cancelButton(company));
       return cell;
     }
 
     const [label, tone] = JOB_BADGES[item.status] || [item.status, "bg-slate-50 text-slate-600 ring-slate-200"];
     cell.append(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
 
+    if (item.status === "pending" || item.status === "running") cell.append(cancelButton(company));
     if (item.status === "done" && item.sourced_fields !== null && item.sourced_fields !== undefined) {
       cell.append(el("div", "mt-1 text-xs text-slate-500", `${item.sourced_fields} trường có nguồn`));
     }
@@ -291,10 +312,15 @@
   function query() {
     const params = new URLSearchParams({ page: String(page), size: String(SIZE) });
     const q = $("f-q").value.trim();
-    const profile = $("f-profile").value;
     if (q) params.set("q", q);
-    if (profile) params.set("has_profile", profile);
+    profileFilter(params);
     return params;
+  }
+
+  function profileFilter(params) {
+    const profile = $("f-profile").value;
+    if (profile === "archived") params.set("archived", "true");
+    else if (profile) params.set("has_profile", profile);
   }
 
   async function load() {
@@ -327,6 +353,7 @@
       empty.textContent = filtered
         ? "Không có công ty nào khớp bộ lọc."
         : "Chưa có công ty nào. Xác nhận một danh thiếp để công ty xuất hiện ở đây.";
+      if ($("f-profile").value === "archived") empty.textContent = "Chưa có hồ sơ nào bị ẩn.";
       empty.classList.remove("hidden");
     } else {
       empty.classList.add("hidden");
@@ -374,6 +401,41 @@
     pollJobs();
   }
 
+  async function cancelCompany(company, button) {
+    button.disabled = true;
+    try {
+      const res = await fetch(`/api/companies/${company.id}/enrich/cancel`, { method: "POST" });
+      if (res.status === 409) {
+        message(`${company.display_name} không còn lượt tạo hồ sơ nào đang chạy.`, "info");
+      } else if (!res.ok) {
+        throw new Error(await readError(res));
+      } else {
+        message(`Đã huỷ lượt tạo hồ sơ của ${company.display_name}.`, "ok");
+      }
+    } catch (err) {
+      message(`Không huỷ được: ${err.message}`, "error");
+      button.disabled = false;
+      return;
+    }
+    const item = jobState.get(company.id);
+    if (item && (item.status === "pending" || item.status === "running")) {
+      jobState.set(company.id, { ...item, status: "cancelled" });
+    }
+    if (activeJobs.size) pollJobs();
+    else load();
+  }
+
+  async function cancelAll() {
+    if (!activeJobs.size) return;
+    if (!window.confirm("Huỷ mọi lượt tạo hồ sơ đang chạy và đang chờ trên trang này?")) return;
+    $("btn-cancel-all").disabled = true;
+    await Promise.all([...activeJobs].map((jobId) =>
+      fetch(`/api/companies/enrich-jobs/${jobId}/cancel`, { method: "POST" }).catch(() => null)));
+    $("btn-cancel-all").disabled = false;
+    message("Đã huỷ các lượt tạo hồ sơ đang chạy.", "ok");
+    pollJobs();
+  }
+
   function markPending(companyId, displayName) {
     if (!jobState.has(companyId)) {
       jobState.set(companyId, {
@@ -390,7 +452,7 @@
     clearTimeout(pollTimer);
     if (activeJobs.size === 0) return;
 
-    const totals = { total: 0, done: 0, failed: 0, running: 0 };
+    const totals = { total: 0, done: 0, failed: 0, running: 0, cancelled: 0 };
     const finished = [];
     let completedJobs = 0;
 
@@ -410,6 +472,7 @@
       totals.done += job.done;
       totals.failed += job.failed;
       totals.running += job.running;
+      totals.cancelled += job.cancelled || 0;
       if (job.finished) {
         finished.push(jobId);
         completedJobs += 1;
@@ -418,6 +481,7 @@
 
     finished.forEach((jobId) => activeJobs.delete(jobId));
     storeJobs();
+    $("btn-cancel-all").classList.toggle("hidden", activeJobs.size === 0);
     renderRows();
 
     if (activeJobs.size > 0) {
@@ -429,10 +493,11 @@
     // Tải lại danh sách để lấy trạng thái hồ sơ và ngày tạo thật; badge job vẫn giữ trên dòng
     // nhờ `jobState`, nên người dùng thấy rõ lượt vừa chạy đụng tới những công ty nào.
     await load();
+    const cancelledNote = totals.cancelled ? ` ${totals.cancelled} công ty đã huỷ.` : "";
     if (totals.failed) {
-      message(`Xong ${totals.done}/${totals.total}. ${totals.failed} công ty lỗi — lý do ghi ngay ở dòng tương ứng.`, "error");
+      message(`Xong ${totals.done}/${totals.total}. ${totals.failed} công ty lỗi — lý do ghi ngay ở dòng tương ứng.${cancelledNote}`, "error");
     } else if (completedJobs) {
-      message(`Đã tạo xong hồ sơ cho ${totals.done} công ty.`, "ok");
+      message(`Đã tạo xong hồ sơ cho ${totals.done} công ty.${cancelledNote}`, "ok");
     }
   }
 
@@ -463,14 +528,15 @@
     const params = new URLSearchParams(location.search);
     $("f-q").value = params.get("q") || "";
     const profile = params.get("has_profile");
-    if (profile === "true" || profile === "false") $("f-profile").value = profile;
+    if (params.get("archived") === "true") $("f-profile").value = "archived";
+    else if (profile === "true" || profile === "false") $("f-profile").value = profile;
   }
 
   function syncUrl() {
     const params = new URLSearchParams();
     const q = $("f-q").value.trim();
     if (q) params.set("q", q);
-    if ($("f-profile").value) params.set("has_profile", $("f-profile").value);
+    profileFilter(params);
     const search = params.toString();
     history.replaceState(null, "", search ? `?${search}` : location.pathname);
   }
@@ -503,6 +569,7 @@
   $("btn-clear").addEventListener("click", clearSelection);
 
   $("btn-enrich").addEventListener("click", startEnrich);
+  $("btn-cancel-all").addEventListener("click", cancelAll);
 
   applyUrlFilters();
   restoreJobs();

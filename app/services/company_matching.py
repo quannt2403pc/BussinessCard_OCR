@@ -113,7 +113,7 @@ def _similarity(key: str, domains: frozenset[str], candidate: Candidate) -> floa
     if _scripts(key) != _scripts(other) or _DIGITS.findall(key) != _DIGITS.findall(other):
         return 0.0
 
-    if _domains_overlap(domains, candidate.domains):
+    if domains_overlap(domains, candidate.domains):
         score = fuzz.token_set_ratio(key, other)
         return score if score >= DOMAIN_MATCH_THRESHOLD else 0.0
     if domains and candidate.domains:
@@ -135,7 +135,7 @@ def _scripts(text: str) -> frozenset[str]:
     return frozenset(scripts)
 
 
-def _domains_overlap(left: frozenset[str], right: frozenset[str]) -> bool:
+def domains_overlap(left: frozenset[str], right: frozenset[str]) -> bool:
     return any(a == b or a.endswith(f".{b}") or b.endswith(f".{a}") for a in left for b in right)
 
 

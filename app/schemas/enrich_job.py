@@ -14,6 +14,7 @@ class JobItemStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
     ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class EnrichBatchIn(BaseModel):
@@ -28,6 +29,10 @@ class EnrichBatchOut(BaseModel):
     job_id: uuid.UUID
     accepted: int
     skipped: int
+
+
+class EnrichCancelOut(BaseModel):
+    cancelled: int
 
 
 class EnrichConflictOut(BaseModel):
@@ -57,6 +62,7 @@ class EnrichJobOut(BaseModel):
     done: int
     failed: int
     running: int
+    cancelled: int = 0
     finished: bool
     created_at: datetime
     finished_at: datetime | None = None
