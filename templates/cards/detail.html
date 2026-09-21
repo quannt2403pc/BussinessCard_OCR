@@ -268,7 +268,12 @@
       const note = input.parentElement.querySelector(`[data-note="${spec.name}"]`);
       const score = confidence[spec.name];
 
-      if (typeof score === "number") {
+      // Ô trống thì điểm tin cậy **không nói gì về chất lượng đọc**: quy tắc 5 của
+      // `app/prompts/ocr.py` quy định `0.0 = trường để null`. Chấm vàng và đếm vào banner như
+      // trường đọc sai thì mọi thẻ không in số điện thoại phụ đều bị "Cần kiểm: 1 trường" —
+      // báo động giả trên đúng 7/7 thẻ demo, điểm vấp của lượt tổng duyệt 1 (11.8 của T).
+      // Trường bắt buộc mà trống vẫn được nhắc riêng ở khối dưới, không mất cảnh báo nào.
+      if (typeof score === "number" && input.value) {
         const low = score < LOW;
         if (low) lowCount += 1;
         chip.textContent = `độ tin cậy ${Math.round(score * 100)}%`;

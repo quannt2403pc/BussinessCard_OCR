@@ -27,7 +27,7 @@ Bị hook chặn nghĩa là **thiếu bước, không phải lỗi kỹ thuật*
 | File | Nội dung |
 |------|----------|
 | `Plan.md` | Kiến trúc, thiết kế DB, phân công, rủi ro, tiêu chí nghiệm thu |
-| `Task.md` | 103 task theo ngày D1–D11 + **bảng sở hữu file/module** + quy ước chống xung đột Git |
+| `Task.md` | 124 task theo ngày D1–D13 + **bảng sở hữu file/module** + quy ước chống xung đột Git |
 | `docs/README.md` | Chỉ mục tài liệu theo chủ sở hữu và task |
 | `.github/workflows/README.md` | CI và cách bật chặn merge |
 

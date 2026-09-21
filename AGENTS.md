@@ -27,10 +27,13 @@ Quy ước chống xung đột Git nằm ở đầu `Task.md`. Điểm hay vi ph
 - **Chỉ Q được sinh Alembic revision.** Hai người cùng sinh sẽ tạo 2 head phải merge tay
   (CI có job bắt lỗi này).
 - Cần thay đổi file của người kia → dừng lại, báo người dùng, đừng tự sửa.
+  ⚠️ **Nới từ D12 (2026-09-21):** chủ dự án cho phép sửa file của nhau, vì F4 (đa người dùng) cắt ngang
+  mọi module. Đổi lại: báo tại daily trước khi chạm, và **chủ file phải review PR**. Luật "chỉ Q sinh
+  Alembic revision" **không** được nới. Chi tiết ở `Task.md`, quy ước số 2.
 
 ## 3. SAU khi code xong — bắt buộc cập nhật `Task.md`
 
-Đổi trạng thái đúng dòng task và cập nhật dòng `**Tổng quan:** x / 103 task`:
+Đổi trạng thái đúng dòng task và cập nhật dòng `**Tổng quan:** x / 124 task`:
 
 | Ký hiệu | Nghĩa |
 |---------|-------|
@@ -53,10 +56,14 @@ Chi tiết: `.github/workflows/README.md`.
 
 ## 5. Ranh giới phạm vi
 
-- Dự án là **bản demo 11 ngày**, chạy localhost. Không thêm production concern
-  (HTTPS, auto-scaling, CD) — `Plan.md` mục 1.4 đã ghi ngoài phạm vi.
+- Dự án là **bản demo 13 ngày**. D1–D11 chạy localhost; **D12–D13 bổ sung đăng nhập nhiều người dùng
+  và triển khai thật lên `https://ocrximi.io.vn` (có CD, có HTTPS)** — xem `Plan.md` mục 1.3, 1.4 và 10.
+  Vẫn ngoài phạm vi: auto-scaling, nhiều máy chủ, blue-green/canary, giám sát chuyên dụng, SLA,
+  và (phía tài khoản) phân quyền theo vai trò, chia sẻ dữ liệu giữa tài khoản, xác thực email, 2FA.
 - **Embedding không đi qua CLIProxy** (CLIProxy không có endpoint embedding — đã kiểm chứng
   mã nguồn). Dùng service `embedder` cục bộ. Xem `Plan.md` mục 2.6.
 - **Không tự sinh hồ sơ doanh nghiệp** sau khi quét danh thiếp. Người dùng chủ động tích chọn
   công ty rồi bấm nút. Xem `Plan.md` mục 2.2, sơ đồ Luồng 1 / Luồng 2.
-- Toàn bộ phạm vi đã biết nằm trong D1–D11. **Không xếp việc vào D12–D15.**
+- Toàn bộ phạm vi đã biết nằm trong **D1–D13**. **Không xếp việc vào D14–D15** (2 ngày dự phòng còn lại).
+  ⚠️ Sửa 2026-09-21: D12–D13 trước đây là ngày dự phòng, nay đã có việc đặt trước — **D12** đăng nhập/đăng ký
+  nhiều người dùng (F4), **D13** kết nối OAuth theo từng người + triển khai CD lên `ocrximi.io.vn`.

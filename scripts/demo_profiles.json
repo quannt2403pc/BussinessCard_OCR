@@ -1,0 +1,827 @@
+{
+  "_note": "Ảnh chụp kết quả enrich THẬT của bộ thẻ demo (samples/demo/cards.json). Mọi trường đều kèm `sources` do chính lượt chạy đó trả về — không sửa tay. Sinh lại bằng: python -m scripts.seed --capture-profiles",
+  "captured_at": "2026-09-21T07:31:40+00:00",
+  "llm_model": "gemini-3-flash",
+  "profiles": [
+    {
+      "company": "CÔNG TY CỔ PHẦN SỮA VIỆT NAM",
+      "legal_name": "CÔNG TY CỔ PHẦN SỮA VIỆT NAM",
+      "tax_code": "0300588569",
+      "founded_year": 1976,
+      "size_label": "Doanh nghiệp lớn",
+      "employee_range": "9.506 nhân sự",
+      "industry": [
+        "Chế biến sữa và các sản phẩm từ sữa"
+      ],
+      "products": [
+        "Sữa nước",
+        "Sữa chua",
+        "Sữa bột và bột dinh dưỡng",
+        "Sữa đặc",
+        "Kem",
+        "Phô mai",
+        "Sữa hạt",
+        "Nước giải khát"
+      ],
+      "address": "10 Tân Trào, Phường Tân Mỹ (hoặc Phường Tân Phú), Thành phố Hồ Chí Minh, Việt Nam",
+      "website": "https://www.vinamilk.com.vn",
+      "phone": "1900 636 979 / 028-54155555",
+      "email": "vinamilk@vinamilk.com.vn",
+      "description": "Công ty Cổ phần Sữa Việt Nam (Vinamilk) là tập đoàn dinh dưỡng hàng đầu tại Việt Nam, sản xuất và kinh doanh đa dạng các ngành hàng sản phẩm từ sữa. Công ty vận hành hệ thống nhiều nhà máy chế biến và trang trại chăn nuôi bò sữa hiện đại trong và ngoài nước. Bên cạnh vị thế dẫn đầu thị trường nội địa, các sản phẩm của Vinamilk còn được xuất khẩu tới nhiều quốc gia và vùng lãnh thổ trên thế giới.",
+      "sources": {
+        "email": [
+          {
+            "url": "https://www.vinamilk.com.vn/investor/contact",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "phone": [
+          {
+            "url": "https://www.vinamilk.com.vn/investor/contact",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "address": [
+          {
+            "url": "https://www.vinamilk.com.vn/investor/contact",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "website": [
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "industry": [
+          {
+            "url": "https://masothue.com/0300588569-cong-ty-co-phan-sua-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "products": [
+          {
+            "url": "https://masothue.com/0300588569-cong-ty-co-phan-sua-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "tax_code": [
+          {
+            "url": "https://www.vinamilk.com.vn/investor/contact",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://masothue.com/0300588569-cong-ty-co-phan-sua-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "legal_name": [
+          {
+            "url": "https://www.vinamilk.com.vn/investor/contact",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://masothue.com/0300588569-cong-ty-co-phan-sua-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "size_label": [
+          {
+            "url": "https://masothue.com/0300588569-cong-ty-co-phan-sua-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "description": [
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          },
+          {
+            "url": "https://www.vinamilk.com.vn/bao-cao-thuong-nien/bao-cao/2022/chuong-1.html",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "founded_year": [
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-CP-SUA-VIET-NAM-Chart--24-2016.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ],
+        "employee_range": [
+          {
+            "url": "https://www.vinamilk.com.vn/bao-cao-thuong-nien/bao-cao/2022/chuong-1.html",
+            "title": "vinamilk.com.vn",
+            "retrieved_at": "2026-09-21T07:27:36.010026Z"
+          }
+        ]
+      },
+      "llm_model": "gemini-3-flash",
+      "generated_at": "2026-09-21T07:27:36.010026",
+      "status": "generated"
+    },
+    {
+      "company": "CÔNG TY CỔ PHẦN TẬP ĐOÀN HÒA PHÁT",
+      "legal_name": "CÔNG TY CỔ PHẦN TẬP ĐOÀN HÒA PHÁT",
+      "tax_code": "0900189284",
+      "founded_year": 2001,
+      "size_label": "Doanh nghiệp lớn",
+      "employee_range": "30000+",
+      "industry": [
+        "Gang thép",
+        "Sản phẩm thép",
+        "Nông nghiệp",
+        "Bất động sản",
+        "Điện máy gia dụng"
+      ],
+      "products": [
+        "Thép cuộn cán nóng (HRC)",
+        "Thép xây dựng",
+        "Ống thép",
+        "Tôn mạ màu/mạ kẽm",
+        "Thép dự ứng lực",
+        "Điện máy gia dụng",
+        "Bất động sản",
+        "Thức ăn chăn nuôi",
+        "Chăn nuôi lợn/gia cầm",
+        "Vỏ container"
+      ],
+      "address": "Khu công nghiệp Phố Nối A, Xã Giai Phạm, Huyện Yên Mỹ, Tỉnh Hưng Yên, Việt Nam",
+      "website": "https://www.hoaphat.com.vn",
+      "phone": "024 628 48 666",
+      "email": "prm@hoaphat.com.vn",
+      "description": "Tập đoàn Hòa Phát là một trong những tập đoàn sản xuất công nghiệp hàng đầu Việt Nam. Khởi đầu từ một công ty chuyên buôn bán các loại máy xây dựng từ tháng 8/1992, Hòa Phát đã lần lượt mở rộng sang các lĩnh vực kinh doanh như gang thép, sản phẩm thép, nông nghiệp, bất động sản và điện máy gia dụng. Trong đó, sản xuất thép là lĩnh vực cốt lõi chiếm tỷ trọng lớn nhất về doanh thu và lợi nhuận của toàn Tập đoàn.",
+      "sources": {
+        "email": [
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "phone": [
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "address": [
+          {
+            "url": "https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "title": "hoaphat.com.vn — https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "website": [
+          {
+            "url": "https://www.hoaphat.com.vn/",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "industry": [
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "products": [
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "tax_code": [
+          {
+            "url": "https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "title": "hoaphat.com.vn — https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          },
+          {
+            "url": "https://masothue.com/0900189284-cong-ty-co-phan-tap-doan-hoa-phat",
+            "title": "masothue.com — https://masothue.com/0900189284-cong-ty-co-phan-tap-doan-hoa-phat",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "legal_name": [
+          {
+            "url": "https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "title": "hoaphat.com.vn — https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          },
+          {
+            "url": "https://masothue.com/0900189284-cong-ty-co-phan-tap-doan-hoa-phat",
+            "title": "masothue.com — https://masothue.com/0900189284-cong-ty-co-phan-tap-doan-hoa-phat",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "size_label": [
+          {
+            "url": "https://www.hoaphat.com.vn/",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          },
+          {
+            "url": "https://www.hoaphat.com.vn/tin-tuc/10-cong-ty-thanh-vien-hoa-phat-duoc-vinh-danh-top-1-000-dn-nop-thue-tndn-lon-nhat.html",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/tin-tuc/10-cong-ty-thanh-vien-hoa-phat-duoc-vinh-danh-top-1-000-dn-nop-thue-tndn-lon-nhat.html",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "description": [
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "founded_year": [
+          {
+            "url": "https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "title": "hoaphat.com.vn — https://file.hoaphat.com.vn/hoaphat-com-vn/2024/06/20220728-hpg-cbtt-thay-doi-giay-chung-nhan-dkdn-lan-thu-35-2.pdf",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          },
+          {
+            "url": "https://www.hoaphat.com.vn/gioi-thieu",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/gioi-thieu",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ],
+        "employee_range": [
+          {
+            "url": "https://www.hoaphat.com.vn/",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          },
+          {
+            "url": "https://www.hoaphat.com.vn/tin-tuc/10-cong-ty-thanh-vien-hoa-phat-duoc-vinh-danh-top-1-000-dn-nop-thue-tndn-lon-nhat.html",
+            "title": "hoaphat.com.vn — https://www.hoaphat.com.vn/tin-tuc/10-cong-ty-thanh-vien-hoa-phat-duoc-vinh-danh-top-1-000-dn-nop-thue-tndn-lon-nhat.html",
+            "retrieved_at": "2026-09-21T07:27:14.847023Z"
+          }
+        ]
+      },
+      "llm_model": "gemini-3-flash",
+      "generated_at": "2026-09-21T07:27:14.847023",
+      "status": "generated"
+    },
+    {
+      "company": "COTECCONS CONSTRUCTION JOINT STOCK COMPANY",
+      "legal_name": "CÔNG TY CỔ PHẦN XÂY DỰNG COTECCONS",
+      "tax_code": "0303443233",
+      "founded_year": 2004,
+      "size_label": "Doanh nghiệp lớn",
+      "employee_range": "2.500 - 3.000 người",
+      "industry": [
+        "Xây dựng nhà để ở",
+        "Xây dựng công trình dân dụng, công nghiệp, hạ tầng đô thị"
+      ],
+      "products": [
+        "Tổng thầu thi công xây dựng",
+        "Thiết kế và thi công (Design & Build)",
+        "Lắp đặt hệ thống cơ-điện-lạnh",
+        "Xây dựng công trình dân dụng, công nghiệp và hạ tầng"
+      ],
+      "address": "236/6 Điện Biên Phủ, Phường Gia Định, Thành phố Hồ Chí Minh, Việt Nam",
+      "website": "https://www.coteccons.vn",
+      "phone": "(028) 3514 2255 / (028) 3514 2266",
+      "email": "contact@coteccons.vn",
+      "description": "Coteccons là một trong những tổng thầu xây dựng hàng đầu tại Việt Nam, được thành lập năm 2004. Công ty tiên phong trong việc áp dụng mô hình Thiết kế và Thi công (Design & Build) cùng các công nghệ hiện đại như BIM, ERP vào quản lý và vận hành dự án. Coteccons đã khẳng định tên tuổi qua nhiều dự án quy mô lớn và biểu tượng, tiêu biểu nhất là tòa nhà Landmark 81.",
+      "sources": {
+        "email": [
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "phone": [
+          {
+            "url": "https://vsd.vn/id/432",
+            "title": "vsd.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "address": [
+          {
+            "url": "https://masothue.com/0303443233-cong-ty-co-phan-xay-dung-coteccons",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vsd.vn/id/432",
+            "title": "vsd.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "website": [
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "industry": [
+          {
+            "url": "https://masothue.com/0303443233-cong-ty-co-phan-xay-dung-coteccons",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/0303443233-cong-ty-co-phan-xay-dung-coteccons-562561599",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "products": [
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://www.coteccons.vn/",
+            "title": "coteccons.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://masothue.com/0303443233-cong-ty-co-phan-xay-dung-coteccons",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "tax_code": [
+          {
+            "url": "https://masothue.com/0303443233-cong-ty-co-phan-xay-dung-coteccons",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vsd.vn/id/432",
+            "title": "vsd.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "legal_name": [
+          {
+            "url": "https://masothue.com/0303443233-cong-ty-co-phan-xay-dung-coteccons",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vsd.vn/id/432",
+            "title": "vsd.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "size_label": [
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "description": [
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://www.coteccons.vn/",
+            "title": "coteccons.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "founded_year": [
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vsd.vn/id/432",
+            "title": "vsd.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ],
+        "employee_range": [
+          {
+            "url": "https://dauthau.asia/en/businesslistings/detail/COTECCONS-CONSTRUCTION-JOINT-STOCK-COMPANY-72243/",
+            "title": "dauthau.asia",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          },
+          {
+            "url": "https://vie10.vn/cong-ty-co-phan-xay-dung-coteccons/",
+            "title": "vie10.vn",
+            "retrieved_at": "2026-09-21T07:30:24.875366Z"
+          }
+        ]
+      },
+      "llm_model": "gemini-3-flash",
+      "generated_at": "2026-09-21T07:30:24.875366",
+      "status": "generated"
+    },
+    {
+      "company": "SAMSUNG ELECTRONICS VIETNAM CO., LTD.",
+      "legal_name": "CÔNG TY TNHH SAMSUNG ELECTRONICS VIỆT NAM",
+      "tax_code": "2300325764",
+      "founded_year": 2008,
+      "size_label": "500-1000 nhân viên",
+      "employee_range": "500-1000 nhân viên",
+      "industry": [
+        "Sản xuất thiết bị truyền thông"
+      ],
+      "products": [
+        "Điện thoại di động Samsung",
+        "Máy tính",
+        "Tivi",
+        "Linh kiện và lắp ráp thiết bị di động"
+      ],
+      "address": "Khu công nghiệp Yên Phong I, Xã Yên Trung, Tỉnh Bắc Ninh, Việt Nam",
+      "website": null,
+      "phone": "0222 3696021",
+      "email": "hanh.dong@samsung.com",
+      "description": "Công ty TNHH Samsung Electronics Việt Nam là doanh nghiệp thuộc lĩnh vực sản xuất phần cứng, điện tử với ngành nghề chính là sản xuất thiết bị truyền thông. Công ty vận hành nhà máy tại Khu công nghiệp Yên Phong, tỉnh Bắc Ninh, chuyên sản xuất linh kiện và lắp ráp điện thoại di động cùng các thiết bị điện tử tiêu dùng. Samsung cam kết tuân thủ luật pháp quy định địa phương và ứng xử theo bộ quy tắc toàn cầu nhằm đóng góp các sản phẩm vượt trội cho xã hội.",
+      "sources": {
+        "email": [
+          {
+            "url": "https://vafie.org.vn/?mod=news&act=detail_member&id=97",
+            "title": "vafie.org.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "phone": [
+          {
+            "url": "https://vafie.org.vn/?mod=news&act=detail_member&id=97",
+            "title": "vafie.org.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-TNHH-SAMSUNG-ELECTRONICS-VIET-NAM-Chart--1465-2013.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "address": [
+          {
+            "url": "https://masothue.com/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "industry": [
+          {
+            "url": "https://masothue.com/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "products": [
+          {
+            "url": "https://makeinvietnam.mic.gov.vn/SearchProfile/CompanyDetail/24093",
+            "title": "mic.gov.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-TNHH-SAMSUNG-ELECTRONICS-VIET-NAM-Chart--1465-2013.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "tax_code": [
+          {
+            "url": "https://masothue.com/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://fiingate.vn/BusinessDirectory/CompanyDetail/8077",
+            "title": "fiingate.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "legal_name": [
+          {
+            "url": "https://masothue.com/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-TNHH-SAMSUNG-ELECTRONICS-VIET-NAM-Chart--1465-2013.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "size_label": [
+          {
+            "url": "https://www.topcv.vn/cong-ty/cong-ty-tnhh-samsung-electronics-viet-nam/67781.html",
+            "title": "topcv.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "description": [
+          {
+            "url": "https://makeinvietnam.mic.gov.vn/SearchProfile/CompanyDetail/24093",
+            "title": "mic.gov.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://masothue.com/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam",
+            "title": "masothue.com",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://vnr500.vn/Thong-tin-doanh-nghiep/CONG-TY-TNHH-SAMSUNG-ELECTRONICS-VIET-NAM-Chart--1465-2013.html",
+            "title": "vnr500.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://thanhtra.com.vn/dau-tu-72A9E3223/samsung-dau-tu-1-8-ty-usd-san-xuat-linh-kien-dien-tu-tai-bac-ninh-6C026D09.html",
+            "title": "thanhtra.com.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "founded_year": [
+          {
+            "url": "https://thongtincongty.vn/ma-so-thue/2300325764-cong-ty-tnhh-samsung-electronics-viet-nam-562815778",
+            "title": "thongtincongty.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://fiingate.vn/BusinessDirectory/CompanyDetail/8077",
+            "title": "fiingate.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          },
+          {
+            "url": "https://www.topcv.vn/cong-ty/cong-ty-tnhh-samsung-electronics-viet-nam/67781.html",
+            "title": "topcv.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ],
+        "employee_range": [
+          {
+            "url": "https://www.topcv.vn/cong-ty/cong-ty-tnhh-samsung-electronics-viet-nam/67781.html",
+            "title": "topcv.vn",
+            "retrieved_at": "2026-09-21T07:29:08.917137Z"
+          }
+        ]
+      },
+      "llm_model": "gemini-3-flash",
+      "generated_at": "2026-09-21T07:29:08.917137",
+      "status": "generated"
+    },
+    {
+      "company": "株式会社日立製作所",
+      "legal_name": "株式会社 日立製作所",
+      "tax_code": "7010001008844",
+      "founded_year": 1920,
+      "size_label": "Tập đoàn quy mô cực lớn",
+      "employee_range": "5,001+",
+      "industry": [
+        "Social Innovation",
+        "Digital Systems & Services",
+        "Energy",
+        "Mobility",
+        "Connective Industries"
+      ],
+      "products": [
+        "Giải pháp Lumada",
+        "Digital Systems & Services",
+        "Công nghệ IT/OT",
+        "Sản phẩm và thiết bị"
+      ],
+      "address": "〒100-8280 東京都千代田区丸の内一丁目6番6号",
+      "website": "https://www.hitachi.co.jp",
+      "phone": "03-3258-1111",
+      "email": null,
+      "description": "株式会社日立製作所 (Hitachi, Ltd.) là tập đoàn công nghệ và điện tử hàng đầu Nhật Bản có trụ sở chính tại 東京都千代田区丸の内一丁目6番6号. Công ty tập trung phát triển các kinh doanh đổi mới xã hội (Social Innovation) bao gồm các lĩnh vực hệ thống số, năng lượng, di chuyển (mobility) và công nghiệp kết nối. Thông qua nền tảng giải pháp Lumada, công ty ứng dụng công nghệ IT, OT và các sản phẩm phần cứng để giải quyết các thách thức của khách hàng và xã hội.",
+      "sources": {
+        "phone": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "address": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "website": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "industry": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "products": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "tax_code": [
+          {
+            "url": "https://info.gbiz.go.jp/hojin/ichiran?hojinBango=7010001008844",
+            "title": "gbiz.go.jp",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://companyinformation.jp/corp/7010001008844/",
+            "title": "companyinformation.jp",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "legal_name": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://www.hitachi.com/en/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "size_label": [
+          {
+            "url": "https://info.gbiz.go.jp/hojin/ichiran?hojinBango=7010001008844",
+            "title": "gbiz.go.jp",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://helloboss.com/corp/7010001008844",
+            "title": "helloboss.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://www.bizreach.jp/companies/20387/",
+            "title": "bizreach.jp",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "description": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "founded_year": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ],
+        "employee_range": [
+          {
+            "url": "https://www.hitachi.com/ja-jp/about/hitachi/",
+            "title": "hitachi.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          },
+          {
+            "url": "https://helloboss.com/corp/7010001008844",
+            "title": "helloboss.com",
+            "retrieved_at": "2026-09-21T07:29:05.713409Z"
+          }
+        ]
+      },
+      "llm_model": "gemini-3-flash",
+      "generated_at": "2026-09-21T07:29:05.713409",
+      "status": "generated"
+    }
+  ]
+}

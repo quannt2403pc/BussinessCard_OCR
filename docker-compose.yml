@@ -91,6 +91,11 @@ services:
       # (7.4) chạy trong container này, sửa script mà phải rebuild image thì vòng lặp đo đạc
       # chậm hẳn đi.
       - ./scripts:/app/scripts
+      # `samples/` mount **chỉ đọc**, cho `python -m scripts.seed --demo` (task 11.2) đọc bộ
+      # thẻ demo của T. Cố ý KHÔNG đưa vào image (`.dockerignore` loại `samples`): ảnh mẫu
+      # không phải thứ nên nằm trong image chạy thật, nhất là khi image đó lên VPS ở D13.
+      # `:ro` vì đây là dữ liệu của T — container không có việc gì phải ghi vào đó.
+      - ./samples:/app/samples:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test:
