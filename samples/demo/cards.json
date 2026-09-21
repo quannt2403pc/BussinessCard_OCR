@@ -1,0 +1,86 @@
+[
+  {
+    "file": "vi-01-clear.png",
+    "language": "vi",
+    "company": "CÔNG TY CỔ PHẦN SỮA VIỆT NAM",
+    "full_name": "TRẦN MINH KHOA",
+    "job_title": "Trưởng phòng Kinh doanh",
+    "phone": "0900 000 001",
+    "email": "khoa.tran@vinamilk.example.com",
+    "website": "www.vinamilk.com.vn",
+    "address": "Số 10 Tân Trào, P. Tân Phú, Quận 7, TP. Hồ Chí Minh",
+    "shows": "Thẻ tiếng Việt chuẩn; tạo hồ sơ DN có nguồn (A5)"
+  },
+  {
+    "file": "vi-02-clear.png",
+    "language": "vi",
+    "company": "CÔNG TY CỔ PHẦN TẬP ĐOÀN HÒA PHÁT",
+    "full_name": "LÊ THU HÀ",
+    "job_title": "Giám đốc Mua hàng",
+    "phone": "0900 000 002",
+    "email": "ha.le@hoaphat.example.com",
+    "website": "www.hoaphat.com.vn",
+    "address": "66 Nguyễn Du, Q. Hai Bà Trưng, Hà Nội",
+    "shows": "Cặp chống trùng với en-03: hai tên in khác nhau về cùng một công ty"
+  },
+  {
+    "file": "en-01-clear.png",
+    "language": "en",
+    "company": "COTECCONS CONSTRUCTION JOINT STOCK COMPANY",
+    "full_name": "NGUYEN DUC ANH",
+    "job_title": "Project Director",
+    "phone": "+84 900 000 003",
+    "email": "anh.nguyen@coteccons.example.com",
+    "website": "www.coteccons.vn",
+    "address": "236/6 Dien Bien Phu St., Binh Thanh Dist., Ho Chi Minh City",
+    "shows": "Thẻ tiếng Anh của công ty Việt Nam"
+  },
+  {
+    "file": "en-02-clear.png",
+    "language": "en",
+    "company": "SAMSUNG ELECTRONICS VIETNAM CO., LTD.",
+    "full_name": "PARK JI-HOON",
+    "job_title": "Senior Sales Manager",
+    "phone": "+84 900 000 004",
+    "email": "jihoon.park@samsung.example.com",
+    "website": "www.samsung.com",
+    "address": "Yen Phong Industrial Park, Bac Ninh, Vietnam",
+    "shows": "Cặp cùng tên miền với ko-01: gợi ý cùng tập đoàn, không gộp"
+  },
+  {
+    "file": "en-03-clear.png",
+    "language": "en",
+    "company": "HOA PHAT GROUP JSC",
+    "full_name": "PHAM QUOC BAO",
+    "job_title": "Export Sales Manager",
+    "phone": "+84 900 000 007",
+    "email": "bao.pham@hoaphat.example.com",
+    "website": "www.hoaphat.com.vn",
+    "address": "66 Nguyen Du St., Hai Ba Trung Dist., Hanoi",
+    "shows": "Cặp chống trùng với vi-02 (tên tiếng Anh + 'Group')"
+  },
+  {
+    "file": "ja-01-clear.png",
+    "language": "ja",
+    "company": "株式会社日立製作所",
+    "full_name": "山田 花子",
+    "job_title": "営業統括本部 課長",
+    "phone": "+81 3-0000-0005",
+    "email": "hanako.yamada@hitachi.example.com",
+    "website": "www.hitachi.co.jp",
+    "address": "東京都千代田区丸の内一丁目6番6号",
+    "shows": "Thẻ tiếng Nhật (A4)"
+  },
+  {
+    "file": "ko-01-clear.png",
+    "language": "ko",
+    "company": "삼성전자 주식회사",
+    "full_name": "김민수",
+    "job_title": "영업부 차장",
+    "phone": "+82 2-0000-0006",
+    "email": "minsu.kim@samsung.example.com",
+    "website": "www.samsung.com",
+    "address": "경기도 수원시 영통구 삼성로 129",
+    "shows": "Thẻ tiếng Hàn (A4); cặp cùng tên miền với en-02"
+  }
+]

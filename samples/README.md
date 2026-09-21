@@ -86,5 +86,31 @@ Quy tắc điền:
 | 7.8 | Q | Chạy OCR toàn bộ `cards/`, so với `expected.json` → `docs/accuracy.md` |
 | 9.3 | Q | Tinh chỉnh `prompts/ocr.py` dựa trên lỗi thực tế của ảnh CJK |
 | 10.8 | Q | Đo lại sau khi tinh chỉnh prompt |
-| 11.2 | Q | Nạp `samples/demo/` vào DB qua `scripts/seed.py` |
+| 11.2 | Q | Nạp dữ liệu demo sạch — thực tế `scripts/seed.py` (9.2) nạp bộ hư cấu của `scripts/eval_retrieval.py` cho `docs/qa-testset.md`, **không** đọc `samples/demo/` |
 | 11.7 | T | Chọn bộ ảnh đẹp cho kịch bản demo |
+
+## 7. Bộ thẻ demo `samples/demo/` (task 11.7)
+
+7 ảnh danh thiếp **tự tạo** bằng `samples/demo/make_cards.py` — loại 1 trong quy tắc ẩn danh ở mục 2:
+
+| Ảnh | Công ty (có thật) | Người (bịa) | Dùng để minh hoạ |
+|-----|-------------------|-------------|------------------|
+| `vi-01-clear.png` | Công ty CP Sữa Việt Nam | Trần Minh Khoa | Quét thẻ tiếng Việt, tạo hồ sơ có nguồn (A3, A5) |
+| `vi-02-clear.png` | Công ty CP Tập đoàn Hòa Phát | Lê Thu Hà | Chống trùng: gộp với `en-03` |
+| `en-01-clear.png` | Coteccons Construction JSC | Nguyen Duc Anh | Thẻ tiếng Anh của công ty Việt Nam |
+| `en-02-clear.png` | Samsung Electronics Vietnam | Park Ji-hoon | Cùng tên miền với `ko-01`: gợi ý cùng tập đoàn, **không** gộp |
+| `en-03-clear.png` | Hoa Phat Group JSC | Pham Quoc Bao | Chống trùng: *"Group"* + tên tiếng Anh về cùng khoá `hoa phat` |
+| `ja-01-clear.png` | 株式会社日立製作所 | 山田 花子 | Thẻ tiếng Nhật (A4) |
+| `ko-01-clear.png` | 삼성전자 주식회사 | 김민수 | Thẻ tiếng Hàn (A4) |
+
+- **Công ty có thật** để phần tạo hồ sơ tra cứu ra nguồn; **người, số điện thoại bịa** (`0900 000 00x`,
+  `+81 3-0000-0005`, `+82 2-0000-0006`), **email là tên miền con của `example.com`**. Tên miền con, không phải
+  `example.com` trần: nếu mọi thẻ chung một tên miền thì khối *"Cùng tên miền"* trên trang công ty sẽ nối tất cả
+  công ty demo với nhau.
+- Dữ liệu kỳ vọng từng thẻ: `samples/demo/cards.json`. Tạo lại ảnh: `python samples/demo/make_cards.py` (cần font
+  Arial / Yu Gothic / Malgun Gothic của Windows).
+- Chạy lại demo từ đầu: `docker compose exec -T db psql -U bizcard -d bizcard < samples/demo/reset_demo.sql` — xoá
+  đúng thẻ và công ty demo, không đụng dữ liệu khác. Thiếu bước này thì lượt demo thứ hai **không quét lại được**,
+  vì upload trùng ảnh bị chặn theo `image_hash`.
+- Ảnh demo **không thay được bộ 30 ảnh của 3.9**: toàn ảnh rõ nét, một bố cục, nên đo trên đó chỉ cho con số đẹp
+  hơn thực tế.

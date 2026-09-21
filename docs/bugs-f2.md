@@ -23,6 +23,7 @@ Tiêu chí D10 đếm Blocker/Critical **trên cả hai file bug**, nên thang n
 | B2-02 | Major | *"Tập đoàn"*, *"Tổng công ty"*, *"Group"* không được bỏ khi chuẩn hoá → cùng một pháp nhân (CTCP FPT) ra 3 khoá, sinh 3 công ty | 2026-09-18, thẻ FPT tiếng Việt + tiếng Nhật | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-03 | Major | Không huỷ được lượt tạo hồ sơ đang chạy/đang chờ; hồ sơ `draft` kẹt sau khi api khởi động lại không có cách gỡ | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-04 | Minor | Không ẩn được hồ sơ không còn cần dùng → làm loãng danh sách, ô tìm kiếm và câu trả lời của trợ lý AI | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
+| B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | ⬜ Chưa sửa |
 
 ## Chi tiết
 
@@ -105,3 +106,18 @@ dùng khoá mới. Muốn gộp dữ liệu cũ thì quét lại thẻ trên DB 
   `generated` — rồi index lại vào KB.
 - Hồ sơ đang ẩn không sửa tay được (409) để không tự bị hiện lại; *Tạo lại hồ sơ* thì vẫn được và hồ sơ hiện lại.
 - Export vẫn xuất hồ sơ ẩn, cột `profile_status = archived`: export là bản sao lưu đầy đủ.
+
+### B2-05 — Thử lại lồng nhau khi CLIProxy không chạy
+
+**Tái hiện** (TS-08): `docker compose stop cliproxy` → tạo hồ sơ một công ty. Item chuyển *lỗi* sau **60 giây** với lý
+do *"Thử 3 lượt vẫn hỏng: … Không gọi được CLIProxy (http://cliproxy:8317) sau 3 lần: [Errno -2] Name or service not
+known"*. Bật lại CLIProxy rồi *Chạy lại* thì xong trong 21 giây.
+
+**Nguyên nhân:** `describe_failure()` (`services/enrich_jobs.py`) xếp mọi `LLMError` vào loại *thử lại được*, mà
+client LLM của Q vốn đã tự thử 3 lần bên dưới → 9 lần gọi cho một lỗi mà lần nào cũng như nhau.
+
+**Hướng sửa:** lỗi kết nối tới CLIProxy (không phân giải được tên máy, từ chối kết nối) nên xếp như *chưa kết nối* —
+không thử lại, dừng cả lô với lời nhắc `docker compose up -d cliproxy`. Cần Q xác nhận client LLM có ném một loại lỗi
+riêng cho trường hợp này không; nếu chưa thì phân biệt theo thông điệp là cách tạm, dễ vỡ.
+
+**Mức Minor:** lỗi vẫn hiện đúng và đọc được, chỉ chậm; buổi demo đã có phương án dự phòng (video) khi mất kết nối.

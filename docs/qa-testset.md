@@ -87,7 +87,7 @@ chỉ còn trông vào prompt 8.1. Bộ câu hỏi không kiểm việc này th�
 |---|---------|-------------|
 | X1 | Giá vàng hôm nay bao nhiêu? | Lạc đề hoàn toàn |
 | X2 | Hướng dẫn nấu phở bò | Câu lạc đề có điểm tương đồng **cao nhất** trong số đo 7.4 (0.819) |
-| X3 | Mã số thuế của Vinamilk là gì? | **Câu nguy hiểm nhất**: đúng lĩnh vực, KB có một công ty sữa khác, và model *biết sẵn* đáp án từ dữ liệu huấn luyện. Trả lời ra một MST là bịa ngoài KB — đúng lỗi R4 trong `Plan.md` |
+| X3 | Mã số thuế của Vinamilk là gì? | **Câu nguy hiểm nhất**: đúng lĩnh vực, KB có một công ty sữa khác, và model *biết sẵn* đáp án từ dữ liệu huấn luyện. Trả lời ra một MST là bịa ngoài KB — đúng lỗi R4 trong `Plan.md`. ⚠️ Chỉ có giá trị khi KB **chưa** có hồ sơ Vinamilk: buổi demo (`docs/demo-runbook.md`) tạo hồ sơ Vinamilk thật, nên phải chấm bộ này **trước** phần tạo hồ sơ hoặc sau `samples/demo/reset_demo.sql` |
 
 ## 6. Hội thoại nhiều lượt (task 8.3) — không tính điểm
 
@@ -128,3 +128,34 @@ Ngày: ____  ·  LLM_MODEL: ____  ·  Embedding: ____  ·  Commit: ____
 
 Tổng: __ / 10  ·  Ngoài phạm vi: __ / 3  ·  Nhiều lượt: đạt / trượt
 ```
+
+## 9. Kết quả đo
+
+### Lượt 1 — 2026-09-21
+
+```
+Ngày: 2026-09-21  ·  LLM_MODEL: gemini-3.6-flash-high  ·  Embedding: intfloat/multilingual-e5-small  ·  Commit: 61e1385 (main)
+Người chạy: T, qua POST /api/chat (script tổng duyệt 11.8), trước phần tạo hồ sơ demo
+```
+
+| #   | Đạt? | Ghi chú |
+|-----|------|---------|
+| 1   | ✅ | Logistics Đại Việt, trích hồ sơ P1 |
+| 2   | ✅ | `0100233468`, trích hồ sơ P2 |
+| 3   | ✅ | Đủ 2 sản phẩm, trích hồ sơ P3 |
+| 4   | ✅ | Email đúng, trích thẻ C2 |
+| 5   | ✅ | Nguyễn Văn An — số nhập dạng nội địa vẫn khớp số lưu E.164 |
+| 6   | ✅ | Nguyễn Văn An, trích thẻ C1 |
+| 7   | ✅ | *Sales Manager / 영업 과장*, Hanwha, trích thẻ C3 |
+| 8   | ✅ | 田中 太郎 + 東京テック株式会社; kể thêm *田中 健太 (FPT Japan)* — dữ liệu **thật** có trong DB dev lúc đo, không phải bịa |
+| 9   | ✅ | Trần Thị Bình + SĐT + email, trích cả hồ sơ P2 lẫn thẻ C2 |
+| 10  | ✅ | Logistics Đại Việt, trích hồ sơ P1 |
+| X1  | ✅ | *"Không có thông tin này trong dữ liệu đã nhập."*, 0 trích dẫn |
+| X2  | ✅ | Như X1 |
+| X3  | ✅ | Như X1 — không lộ MST Vinamilk mà model biết sẵn |
+
+**Tổng: 10 / 10  ·  Ngoài phạm vi: 3 / 3  ·  Nhiều lượt: đạt** (lượt 2 *"Số điện thoại của chị ấy là gì?"* →
+`+84987654321`, trích thẻ C2). Thời gian: 15 câu trong 110 giây, khoảng 7 giây/câu.
+
+→ Đạt tiêu chí **D8** (≥ 7/10) và **A6** (≥ 8/10). Mới đo một lượt với một model; nên đo lại với `gemini-3-flash`
+nếu buổi demo dùng model đó.
