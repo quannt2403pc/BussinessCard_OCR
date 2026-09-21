@@ -13,6 +13,7 @@ from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.schemas.enrich_job import JobItemStatus
 from app.services import kb
+from app.services.cliproxy_client import CliProxyUnavailableError
 from app.services.enrichment import EnrichmentParseError, build_hints, enrich_company
 from app.services.llm import (
     LLMBlockedError,
@@ -29,6 +30,10 @@ BACKOFF_SECONDS: tuple[float, ...] = (5.0, 15.0)
 STALE_AFTER = timedelta(minutes=30)
 STALE_MESSAGE = "Bị gián đoạn giữa chừng (api khởi động lại) — chạy lại để tạo hồ sơ."
 CANCEL_MESSAGE = "Đã huỷ theo yêu cầu."
+UNREACHABLE_MESSAGE = (
+    "Không gọi được CLIProxy — kiểm tra container đang chạy (`docker compose up -d cliproxy`) "
+    "rồi chạy lại"
+)
 
 _TASKS: set[asyncio.Task[None]] = set()
 _RUNNING: dict[uuid.UUID, asyncio.Task[None]] = {}
@@ -63,6 +68,11 @@ class JobCreated:
     skipped: list[uuid.UUID]
 
 
+def is_unreachable(exc: BaseException) -> bool:
+    cause = exc.__cause__
+    return isinstance(cause, CliProxyUnavailableError) and cause.status_code is None
+
+
 def describe_failure(exc: BaseException) -> Failure:
     if isinstance(exc, LLMNotConnectedError):
         return Failure(
@@ -79,6 +89,8 @@ def describe_failure(exc: BaseException) -> Failure:
         return Failure("Công ty đã bị xoá trong lúc chờ tạo hồ sơ.")
     if isinstance(exc, EnrichmentParseError):
         return Failure("Model trả kết quả không đọc được.", retry=True)
+    if isinstance(exc, LLMError) and is_unreachable(exc):
+        return Failure(f"{UNREACHABLE_MESSAGE}: {exc}")
     if isinstance(exc, LLMError):
         return Failure(f"Không gọi được LLM: {exc}", retry=True)
     return Failure(f"Lỗi ngoài dự kiến ({type(exc).__name__}).")

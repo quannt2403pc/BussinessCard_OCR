@@ -19,6 +19,7 @@ from app.routers import companies
 from app.schemas.company import CompanyProfileOut, ProfileStatus
 from app.schemas.enrich_job import JobItemStatus
 from app.services import enrich_jobs, kb
+from app.services.cliproxy_client import CliProxyUnavailableError
 from app.services.embeddings import EmbedderUnavailableError
 from app.services.enrich_jobs import (
     BACKOFF_SECONDS,
@@ -82,6 +83,12 @@ async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
         yield http
 
 
+def proxy_error(status_code: int | None) -> LLMError:
+    error = LLMError("Không gọi được model qua CLIProxy: Name or service not known")
+    error.__cause__ = CliProxyUnavailableError("down", status_code=status_code)
+    return error
+
+
 @pytest.mark.parametrize(
     ("exc", "retry", "abort_job", "fragment"),
     [
@@ -92,6 +99,8 @@ async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
         (CompanyGoneError("id"), False, False, "bị xoá"),
         (EnrichmentParseError("bad json"), True, False, "không đọc được"),
         (LLMError("ReadTimeout"), True, False, "ReadTimeout"),
+        (proxy_error(503), True, False, "Không gọi được LLM"),
+        (proxy_error(None), False, False, "docker compose up -d cliproxy"),
         (ValueError("boom"), False, False, "ngoài dự kiến"),
     ],
 )
@@ -148,6 +157,15 @@ async def test_retry_gives_up_after_max_attempts() -> None:
     assert outcome.failure.message.startswith(f"Thử {MAX_ATTEMPTS} lượt vẫn hỏng")
     assert recorder.attempts == list(range(1, MAX_ATTEMPTS + 1))
     assert recorder.sleeps == list(BACKOFF_SECONDS)
+
+
+async def test_unreachable_proxy_is_not_retried() -> None:
+    recorder = Recorder(proxy_error(None), 7)
+    outcome = await run_with_retry(recorder.operation, sleep=recorder.sleep)
+    assert outcome.attempts == 1
+    assert outcome.failure is not None
+    assert "docker compose up -d cliproxy" in outcome.failure.message
+    assert recorder.sleeps == []
 
 
 async def test_retry_stops_on_final_errors() -> None:
