@@ -12,6 +12,14 @@
   </div>
   <div class="ml-auto flex items-center gap-2">
     <span id="profile-badge"></span>
+    <button id="btn-stop" type="button"
+            class="hidden rounded-md border border-rose-200 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50">
+      Huỷ tạo hồ sơ
+    </button>
+    <button id="btn-archive" type="button"
+            class="hidden rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
+      Ẩn hồ sơ
+    </button>
     <button id="btn-edit" type="button"
             class="hidden rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
       Sửa hồ sơ
@@ -25,6 +33,19 @@
 
 <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
 
+<div id="archived" class="mt-4 hidden flex flex-wrap items-center gap-3 rounded-md border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
+  <span>Hồ sơ này đang <strong>ẩn</strong>: không hiện trong danh sách Doanh nghiệp, ô tìm kiếm và câu trả lời của trợ lý AI.</span>
+  <button id="btn-restore" type="button"
+          class="ml-auto rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
+    Hiện lại
+  </button>
+</div>
+
+<section id="related" class="mt-4 hidden space-y-2">
+  <div id="related-tax" class="hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"></div>
+  <div id="related-domain" class="hidden rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"></div>
+</section>
+
 <div id="empty" class="mt-6 hidden rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
   <p class="text-sm text-slate-600">Công ty này chưa có hồ sơ doanh nghiệp.</p>
   <p class="mt-1 text-xs text-slate-500">
@@ -35,7 +56,7 @@
 <div id="drafting" class="mt-6 hidden rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-6 py-10 text-center">
   <p class="text-sm text-slate-700">Hồ sơ đang được tạo.</p>
   <p class="mt-1 text-xs text-slate-500">
-    Trang tự cập nhật khi tra cứu xong. Chờ quá lâu thì bấm <em>Tạo hồ sơ</em> để chạy lại.
+    Trang tự cập nhật khi tra cứu xong. Bấm nhầm hoặc chờ quá lâu thì bấm <em>Huỷ tạo hồ sơ</em>.
   </p>
 </div>
 
@@ -125,6 +146,7 @@
     generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
     verified:  ["Đã kiểm", "bg-sky-50 text-sky-700 ring-sky-200"],
     draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
+    archived:  ["Đã ẩn", "bg-slate-100 text-slate-500 ring-slate-200"],
   };
 
   const IDENTITY_FIELDS = [
@@ -171,6 +193,7 @@
   let pollTimer;
   let draftTimer;
   let draftPolls = 0;
+  let watching = false;
   let current = null;
 
   function el(tag, className, text) {
@@ -310,11 +333,15 @@
     const button = $("btn-enrich");
 
     const drafting = Boolean(profile) && profile.status === "draft";
+    const archived = Boolean(profile) && profile.status === "archived";
     const wasDrafting = draftPolls > 0;
 
-    current = drafting ? null : profile;
+    current = drafting || archived ? null : profile;
     clearTimeout(draftTimer);
     $("btn-edit").classList.toggle("hidden", !current);
+    $("btn-archive").classList.toggle("hidden", !current || watching);
+    $("btn-stop").classList.toggle("hidden", !drafting && !watching);
+    $("archived").classList.toggle("hidden", !archived);
     $("drafting").classList.toggle("hidden", !drafting);
 
     if (drafting) {
@@ -333,7 +360,7 @@
       if (profile) {
         message("Hồ sơ đã tạo xong.", "ok");
       } else {
-        message("Lượt tạo hồ sơ đã kết thúc nhưng không lưu được hồ sơ nào. Bấm Tạo hồ sơ để thử lại.", "error");
+        message("Lượt tạo hồ sơ đã kết thúc (bị huỷ hoặc lỗi) mà không lưu hồ sơ nào. Bấm Tạo hồ sơ để thử lại.", "error");
       }
     }
 
@@ -387,23 +414,65 @@
     $("aliases").replaceChildren(...company.aliases.map((alias) =>
       el("span", "rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600", alias)));
     renderContacts(company.contacts || []);
+    renderRelated(company);
     renderProfile(company);
   }
 
-  function askRebuild(hasProfile) {
-    if (!hasProfile) return Promise.resolve(true);
+  function companyLinks(companies, withDomains) {
+    const wrap = el("span", "inline-flex flex-wrap gap-x-3 gap-y-1");
+    companies.forEach((ref) => {
+      const link = el("a", "font-medium text-sky-700 hover:underline", ref.display_name);
+      link.href = `/companies/${ref.id}`;
+      const item = el("span");
+      item.append(link);
+      if (withDomains && ref.domains.length) {
+        item.append(el("span", "ml-1 text-xs text-slate-500", `(${ref.domains.join(", ")})`));
+      }
+      wrap.append(item);
+    });
+    return wrap;
+  }
+
+  function renderRelated(company) {
+    const twins = company.same_tax_code || [];
+    const neighbours = company.same_domain || [];
+    const tax = $("related-tax");
+    const domain = $("related-domain");
+
+    if (twins.length) {
+      const code = company.profile && company.profile.tax_code;
+      tax.replaceChildren(
+        el("span", null, `Mã số thuế ${code} trùng với: `),
+        companyLinks(twins, false),
+        el("div", "mt-1 text-xs text-amber-800",
+          "Có thể cùng một pháp nhân đang được lưu thành nhiều công ty vì tên in trên danh thiếp khác nhau."),
+      );
+    }
+    if (neighbours.length) {
+      domain.replaceChildren(
+        el("span", null, "Cùng tên miền email / website với: "),
+        companyLinks(neighbours, true),
+        el("div", "mt-1 text-xs text-slate-500",
+          "Thường là cùng tập đoàn hoặc công ty con — chỉ để tham khảo, không phải cùng một pháp nhân."),
+      );
+    }
+    tax.classList.toggle("hidden", !twins.length);
+    domain.classList.toggle("hidden", !neighbours.length);
+    $("related").classList.toggle("hidden", !twins.length && !neighbours.length);
+  }
+
+  function confirmDialog(title, text, okLabel) {
     return new Promise((resolve) => {
       const overlay = el("div", "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4");
       const box = el("div", "w-full max-w-sm rounded-lg bg-white p-5 shadow-lg");
-      box.append(el("p", "font-medium text-slate-900", "Tạo lại hồ sơ?"));
-      box.append(el("p", "mt-1 text-sm text-slate-600",
-        "Hồ sơ hiện tại sẽ bị ghi đè bằng kết quả tra cứu mới, gồm cả các sửa tay."));
+      box.append(el("p", "font-medium text-slate-900", title));
+      box.append(el("p", "mt-1 text-sm text-slate-600", text));
       const buttons = el("div", "mt-4 flex justify-end gap-2");
       const close = (value) => { overlay.remove(); resolve(value); };
-      const cancel = el("button", "rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50", "Huỷ");
+      const cancel = el("button", "rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50", "Thôi");
       cancel.type = "button";
       cancel.addEventListener("click", () => close(false));
-      const ok = el("button", "rounded-md bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700", "Tạo lại");
+      const ok = el("button", "rounded-md bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700", okLabel);
       ok.type = "button";
       ok.addEventListener("click", () => close(true));
       buttons.append(cancel, ok);
@@ -412,6 +481,69 @@
       overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
       document.body.append(overlay);
     });
+  }
+
+  function askRebuild(hasProfile) {
+    if (!hasProfile) return Promise.resolve(true);
+    return confirmDialog(
+      "Tạo lại hồ sơ?",
+      "Hồ sơ hiện tại sẽ bị ghi đè bằng kết quả tra cứu mới, gồm cả các sửa tay.",
+      "Tạo lại",
+    );
+  }
+
+  async function postAction(url) {
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) throw Object.assign(new Error(await readError(res)), { status: res.status });
+    return res.json();
+  }
+
+  async function stopEnrich() {
+    $("btn-stop").disabled = true;
+    try {
+      await postAction(`/api/companies/${COMPANY_ID}/enrich/cancel`);
+      message("Đã huỷ lượt tạo hồ sơ.", "ok");
+    } catch (err) {
+      message(err.status === 409 ? "Không còn lượt tạo hồ sơ nào đang chạy." : `Không huỷ được: ${err.message}`,
+        err.status === 409 ? "info" : "error");
+    }
+    clearTimeout(pollTimer);
+    clearTimeout(draftTimer);
+    watching = false;
+    draftPolls = 0;
+    $("btn-stop").disabled = false;
+    await load();
+  }
+
+  async function archiveProfile() {
+    const ok = await confirmDialog(
+      "Ẩn hồ sơ?",
+      "Hồ sơ vẫn được giữ nguyên và hiện lại được bất cứ lúc nào, nhưng sẽ không xuất hiện trong danh sách Doanh nghiệp, ô tìm kiếm và câu trả lời của trợ lý AI.",
+      "Ẩn hồ sơ",
+    );
+    if (!ok) return;
+    $("btn-archive").disabled = true;
+    try {
+      await postAction(`/api/companies/${COMPANY_ID}/profile/archive`);
+      message("Đã ẩn hồ sơ.", "ok");
+    } catch (err) {
+      message(`Không ẩn được: ${err.message}`, "error");
+    }
+    $("btn-archive").disabled = false;
+    closeEdit();
+    await load();
+  }
+
+  async function restoreProfile() {
+    $("btn-restore").disabled = true;
+    try {
+      await postAction(`/api/companies/${COMPANY_ID}/profile/restore`);
+      message("Đã hiện lại hồ sơ.", "ok");
+    } catch (err) {
+      message(`Không hiện lại được: ${err.message}`, "error");
+    }
+    $("btn-restore").disabled = false;
+    await load();
   }
 
   async function startEnrich() {
@@ -456,6 +588,9 @@
   async function watchJob(jobId) {
     clearTimeout(pollTimer);
     clearTimeout(draftTimer);
+    watching = true;
+    $("btn-stop").classList.remove("hidden");
+    $("btn-archive").classList.add("hidden");
     let job;
     try {
       const res = await fetch(`/api/companies/enrich-jobs/${jobId}`);
@@ -463,6 +598,8 @@
       job = await res.json();
     } catch (err) {
       message(`Mất dấu lượt tạo hồ sơ: ${err.message}. Tải lại trang để xem trạng thái mới nhất.`, "error");
+      watching = false;
+      $("btn-stop").classList.add("hidden");
       $("btn-enrich").disabled = false;
       return;
     }
@@ -472,9 +609,12 @@
       return;
     }
 
+    watching = false;
     await load();
     const item = job.items.find((entry) => entry.company_id === COMPANY_ID) || job.items[0];
-    if (item && item.status === "error") {
+    if (item && item.status === "cancelled") {
+      message("Đã huỷ lượt tạo hồ sơ.", "ok");
+    } else if (item && item.status === "error") {
       message(`Không tạo được hồ sơ: ${item.error}`, "error");
     } else if (item) {
       message(`Đã tạo hồ sơ với ${item.sourced_fields} trường có nguồn.`, "ok");
@@ -609,6 +749,9 @@
   $("btn-cancel").addEventListener("click", closeEdit);
   $("btn-save").addEventListener("click", saveEdit);
   $("btn-enrich").addEventListener("click", startEnrich);
+  $("btn-stop").addEventListener("click", stopEnrich);
+  $("btn-archive").addEventListener("click", archiveProfile);
+  $("btn-restore").addEventListener("click", restoreProfile);
   load();
 })();
 </script>

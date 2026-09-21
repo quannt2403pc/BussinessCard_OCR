@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
@@ -595,6 +596,12 @@ class SharedSession:
 
 
 @dataclass
+class Gate:
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@dataclass
 class Pipeline:
     outcomes: dict[str, list[object]] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
@@ -603,6 +610,10 @@ class Pipeline:
     async def enrich(self, name: str, hints: Any = None, **kwargs: Any) -> CompanyProfileOut:
         self.calls.append(name)
         result = self.outcomes[name].pop(0)
+        if isinstance(result, Gate):
+            result.started.set()
+            await result.release.wait()
+            return sourced_profile()
         if isinstance(result, BaseException):
             raise result
         assert isinstance(result, CompanyProfileOut)
@@ -788,3 +799,103 @@ async def test_db_unexpected_error_still_closes_item_and_job(
     assert state.status == "error"
     assert state.error == "Lỗi ngoài dự kiến (RuntimeError)."
     assert await job_finished(db_session, job_id)
+
+
+async def start_enrich(
+    db: AsyncSession, pipeline: Pipeline, outcomes: dict[str, Sequence[object]]
+) -> tuple[uuid.UUID, dict[str, Company], "asyncio.Task[None]"]:
+    companies = {name: await add_company(db, name) for name in outcomes}
+    pipeline.outcomes.update({name: list(values) for name, values in outcomes.items()})
+    created = await enrich_jobs.create_job(db, [company.id for company in companies.values()])
+    task = asyncio.create_task(enrich_jobs.run_job(created.job_id))
+    return created.job_id, companies, task
+
+
+async def cancel_now(db: AsyncSession, **target: uuid.UUID) -> list[uuid.UUID]:
+    cancelled = await enrich_jobs.cancel(db, **target)
+    await db.commit()
+    enrich_jobs.interrupt(cancelled)
+    return cancelled
+
+
+async def test_db_cancel_running_company_stops_it_and_drops_the_draft(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    gate = Gate()
+    job_id, companies, task = await start_enrich(db_session, pipeline, {"Alpha": [gate]})
+    await asyncio.wait_for(gate.started.wait(), timeout=5)
+    assert await profile_status(db_session, "Alpha") == ProfileStatus.DRAFT.value
+
+    cancelled = await cancel_now(db_session, company_id=companies["Alpha"].id)
+    await asyncio.wait_for(task, timeout=5)
+
+    state = (await item_states(db_session, job_id))["Alpha"]
+    assert len(cancelled) == 1
+    assert (state.status, state.error) == ("cancelled", enrich_jobs.CANCEL_MESSAGE)
+    assert await profile_status(db_session, "Alpha") is None
+    assert pipeline.indexed == []
+    assert await job_finished(db_session, job_id)
+
+
+async def test_db_cancel_job_also_skips_companies_still_waiting(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    gate = Gate()
+    job_id, _, task = await start_enrich(
+        db_session, pipeline, {"Alpha": [gate], "Beta": [gate], "Gamma": [gate]}
+    )
+    await asyncio.wait_for(gate.started.wait(), timeout=5)
+
+    cancelled = await cancel_now(db_session, job_id=job_id)
+    await asyncio.wait_for(task, timeout=5)
+
+    states = await item_states(db_session, job_id)
+    assert len(cancelled) == 3
+    assert len(pipeline.calls) == 1
+    assert {state.status for state in states.values()} == {"cancelled"}
+    assert await job_finished(db_session, job_id)
+
+
+async def test_db_cancelled_regeneration_keeps_the_existing_profile(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    company = await add_company(db_session, "Alpha")
+    db_session.add(CompanyProfile(company_id=company.id, tax_code="0309999999", status="verified"))
+    await db_session.flush()
+    gate = Gate()
+    pipeline.outcomes["Alpha"] = [gate]
+    created = await enrich_jobs.create_job(db_session, [company.id])
+    task = asyncio.create_task(enrich_jobs.run_job(created.job_id))
+    await asyncio.wait_for(gate.started.wait(), timeout=5)
+
+    await cancel_now(db_session, company_id=company.id)
+    await asyncio.wait_for(task, timeout=5)
+
+    assert (await item_states(db_session, created.job_id))["Alpha"].status == "cancelled"
+    assert await profile_status(db_session, "Alpha") == "verified"
+
+
+async def test_db_cancel_cleans_an_orphaned_run_after_a_restart(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    company = await add_company(db_session, "Alpha")
+    job_id = await job_repo.create_job(db_session)
+    item_id = await job_repo.add_item(db_session, job_id, company.id)
+    assert item_id is not None
+    await job_repo.claim_item(db_session, item_id)
+    await company_repo.ensure_draft_profile(db_session, company.id)
+
+    cancelled = await cancel_now(db_session, company_id=company.id)
+
+    assert cancelled == [item_id]
+    assert (await item_states(db_session, job_id))["Alpha"].status == "cancelled"
+    assert await profile_status(db_session, "Alpha") is None
+    assert await job_repo.active_job_id(db_session, company.id) is None
+
+
+async def test_db_cancel_without_a_running_job_does_nothing(
+    db_session: AsyncSession, pipeline: Pipeline
+) -> None:
+    company = await add_company(db_session, "Alpha")
+
+    assert await cancel_now(db_session, company_id=company.id) == []

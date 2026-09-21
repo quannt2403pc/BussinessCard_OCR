@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 
@@ -28,8 +28,10 @@ MAX_ATTEMPTS = 3
 BACKOFF_SECONDS: tuple[float, ...] = (5.0, 15.0)
 STALE_AFTER = timedelta(minutes=30)
 STALE_MESSAGE = "Bị gián đoạn giữa chừng (api khởi động lại) — chạy lại để tạo hồ sơ."
+CANCEL_MESSAGE = "Đã huỷ theo yêu cầu."
 
 _TASKS: set[asyncio.Task[None]] = set()
+_RUNNING: dict[uuid.UUID, asyncio.Task[None]] = {}
 
 
 class CompanyGoneError(RuntimeError):
@@ -137,11 +139,18 @@ async def run_job(job_id: uuid.UUID) -> None:
     logger.info("Enrich job %s: bắt đầu %d công ty", job_id, len(item_ids))
 
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-    results = await asyncio.gather(
-        *(_process(job_id, item_id, semaphore) for item_id in item_ids),
-        return_exceptions=True,
-    )
-    for item_id, result in zip(item_ids, results, strict=True):
+    tasks = {
+        item_id: asyncio.create_task(_process(job_id, item_id, semaphore)) for item_id in item_ids
+    }
+    _RUNNING.update(tasks)
+    try:
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    finally:
+        for item_id in tasks:
+            _RUNNING.pop(item_id, None)
+    for item_id, result in zip(tasks, results, strict=True):
+        if isinstance(result, asyncio.CancelledError):
+            continue
         if isinstance(result, BaseException):
             logger.error("Enrich job %s: lỗi ngoài dự kiến ở %s", job_id, item_id, exc_info=result)
             await _finish_item(
@@ -194,6 +203,27 @@ async def index_profile(profile_id: uuid.UUID) -> None:
         logger.exception("Không index được hồ sơ %s", profile_id)
 
 
+async def cancel(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
+) -> list[uuid.UUID]:
+    items = await job_repo.active_items(db, job_id=job_id, company_id=company_id)
+    item_ids = [item_id for item_id, _ in items]
+    await job_repo.cancel_items(db, item_ids, CANCEL_MESSAGE)
+    for owner in dict.fromkeys(owner for _, owner in items):
+        await company_repo.discard_draft_profile(db, owner)
+    return item_ids
+
+
+def interrupt(item_ids: Iterable[uuid.UUID]) -> None:
+    for item_id in item_ids:
+        task = _RUNNING.get(item_id)
+        if task is not None and not task.done():
+            task.cancel()
+
+
 async def _process(job_id: uuid.UUID, item_id: uuid.UUID, semaphore: asyncio.Semaphore) -> None:
     async with semaphore:
         async with SessionLocal() as db:
@@ -201,27 +231,42 @@ async def _process(job_id: uuid.UUID, item_id: uuid.UUID, semaphore: asyncio.Sem
             await db.commit()
         if company_id is None:
             return
+        try:
+            await _enrich_item(job_id, item_id, company_id)
+        except asyncio.CancelledError:
+            await _discard_cancelled(item_id, company_id)
+            raise
 
-        async def attempt(number: int) -> int:
-            async with SessionLocal() as db:
-                await job_repo.record_attempt(db, item_id, number)
-                await db.commit()
-            return await enrich_and_save(company_id)
 
-        outcome = await run_with_retry(attempt)
-        if outcome.failure is None:
-            await _finish_item(item_id, JobItemStatus.DONE, sourced_fields=outcome.sourced_fields)
-            return
-
-        logger.warning("Enrich %s hỏng: %s", company_id, outcome.failure.message)
+async def _enrich_item(job_id: uuid.UUID, item_id: uuid.UUID, company_id: uuid.UUID) -> None:
+    async def attempt(number: int) -> int:
         async with SessionLocal() as db:
-            await company_repo.discard_draft_profile(db, company_id)
-            await job_repo.finish_item(
-                db, item_id, status=JobItemStatus.ERROR, error=outcome.failure.message
-            )
-            if outcome.failure.abort_job:
-                await job_repo.abort_pending(db, job_id, outcome.failure.message)
+            await job_repo.record_attempt(db, item_id, number)
             await db.commit()
+        return await enrich_and_save(company_id)
+
+    outcome = await run_with_retry(attempt)
+    if outcome.failure is None:
+        await _finish_item(item_id, JobItemStatus.DONE, sourced_fields=outcome.sourced_fields)
+        return
+
+    logger.warning("Enrich %s hỏng: %s", company_id, outcome.failure.message)
+    async with SessionLocal() as db:
+        await company_repo.discard_draft_profile(db, company_id)
+        await job_repo.finish_item(
+            db, item_id, status=JobItemStatus.ERROR, error=outcome.failure.message
+        )
+        if outcome.failure.abort_job:
+            await job_repo.abort_pending(db, job_id, outcome.failure.message)
+        await db.commit()
+
+
+async def _discard_cancelled(item_id: uuid.UUID, company_id: uuid.UUID) -> None:
+    async with SessionLocal() as db:
+        await company_repo.discard_draft_profile(db, company_id)
+        await job_repo.cancel_items(db, [item_id], CANCEL_MESSAGE)
+        await db.commit()
+    logger.info("Enrich %s: đã huỷ giữa chừng", company_id)
 
 
 async def _finish_item(

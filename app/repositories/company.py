@@ -12,11 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
 from app.schemas.company import SOURCED_FIELDS, CompanyProfileSchema, ProfileStatus
+from app.services.company_matching import domains_overlap, extract_domains
 from app.services.normalize_company import normalize_company_name
 
 MAX_PAGE_SIZE = 100
 PROFILE_COLUMNS = frozenset({*SOURCED_FIELDS, "description", "sources"})
 FINISHED_PROFILE_STATUSES = (ProfileStatus.GENERATED.value, ProfileStatus.VERIFIED.value)
+ARCHIVED = ProfileStatus.ARCHIVED.value
+
+
+class ProfileArchivedError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -46,10 +52,11 @@ async def list_companies(
     *,
     q: str | None = None,
     has_profile: bool | None = None,
+    archived: bool = False,
     page: int = 1,
     size: int = 20,
 ) -> tuple[list[CompanyRow], int]:
-    conditions = _list_conditions(q=q, has_profile=has_profile)
+    conditions = _list_conditions(q=q, has_profile=has_profile, archived=archived)
     size = max(1, min(size, MAX_PAGE_SIZE))
     page = max(1, page)
 
@@ -118,13 +125,14 @@ async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
     )
 
 
-async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
-    await db.execute(
+async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> int:
+    result = await db.execute(
         delete(CompanyProfile).where(
             CompanyProfile.company_id == company_id,
             CompanyProfile.status == ProfileStatus.DRAFT.value,
         )
     )
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 async def update_profile(
@@ -137,6 +145,8 @@ async def update_profile(
     profile = await get_profile(db, company_id)
     if profile is None:
         return None
+    if profile.status == ARCHIVED:
+        raise ProfileArchivedError(str(company_id))
 
     for field, value in changes.items():
         if field not in PROFILE_COLUMNS:
@@ -151,7 +161,9 @@ async def update_profile(
     return profile
 
 
-def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnElement[bool]]:
+def _list_conditions(
+    *, q: str | None, has_profile: bool | None, archived: bool = False
+) -> list[ColumnElement[bool]]:
     conditions: list[ColumnElement[bool]] = []
 
     if q and (term := " ".join(q.split())):
@@ -165,6 +177,11 @@ def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnE
             matches.append(Company.name_normalized.ilike(_contains(key), escape="\\"))
         conditions.append(or_(*matches))
 
+    if archived:
+        conditions.append(CompanyProfile.status == ARCHIVED)
+        return conditions
+    conditions.append(or_(CompanyProfile.id.is_(None), CompanyProfile.status != ARCHIVED))
+
     if has_profile is True:
         conditions.append(CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES))
     elif has_profile is False:
@@ -176,6 +193,52 @@ def _list_conditions(*, q: str | None, has_profile: bool | None) -> list[ColumnE
         )
 
     return conditions
+
+
+def restored_status(profile: CompanyProfile) -> ProfileStatus:
+    values = CompanyProfileSchema.model_validate(profile, from_attributes=True)
+    return ProfileStatus.VERIFIED if values.fields_missing_source() else ProfileStatus.GENERATED
+
+
+async def same_tax_code(
+    db: AsyncSession, company_id: uuid.UUID, tax_code: str | None
+) -> Sequence[Company]:
+    code = (tax_code or "").strip()
+    if not code:
+        return []
+    rows = await db.scalars(
+        select(Company)
+        .join(CompanyProfile, CompanyProfile.company_id == Company.id)
+        .where(func.trim(CompanyProfile.tax_code) == code, Company.id != company_id)
+        .order_by(Company.display_name, Company.id)
+    )
+    return rows.all()
+
+
+async def same_domain(db: AsyncSession, company_id: uuid.UUID) -> list[tuple[Company, list[str]]]:
+    rows = await db.execute(
+        select(BusinessCard.company_id, BusinessCard.email, BusinessCard.website).where(
+            BusinessCard.company_id.is_not(None)
+        )
+    )
+    domains: dict[uuid.UUID, set[str]] = {}
+    for owner, email, website in rows.tuples():
+        if owner is not None:
+            domains.setdefault(owner, set()).update(extract_domains(email, website))
+    own = frozenset(domains.pop(company_id, set()))
+    if not own:
+        return []
+    shared = {
+        other: sorted(d for d in found if domains_overlap(own, frozenset({d})))
+        for other, found in domains.items()
+        if domains_overlap(own, frozenset(found))
+    }
+    if not shared:
+        return []
+    companies = await db.scalars(
+        select(Company).where(Company.id.in_(shared)).order_by(Company.display_name, Company.id)
+    )
+    return [(company, shared[company.id]) for company in companies]
 
 
 def contact_count() -> ScalarSelect[int]:

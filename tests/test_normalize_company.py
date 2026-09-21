@@ -53,6 +53,14 @@ def test_normalize(raw: str, expected: str) -> None:
         ["Coca-Cola Ltd", "Coca Cola Ltd"],
         ["A.B.C Corp", "ABC Corp"],
         [unicodedata.normalize("NFD", "Công ty Cổ phần Á Châu"), "Công ty Cổ phần Á Châu"],
+        [
+            "TẬP ĐOÀN FPT CORPORATION",
+            "Tập đoàn FPT",
+            "Công ty Cổ phần FPT",
+            "FPT Corporation",
+            "FPT Group",
+        ],
+        ["Tổng công ty Cổ phần Bảo Minh", "Công ty Cổ phần Bảo Minh", "Bảo Minh Corporation"],
     ],
 )
 def test_same_company_same_key(variants: list[str]) -> None:
@@ -95,3 +103,12 @@ def test_idempotent(raw: str) -> None:
 def test_empty_name_raises(raw: str) -> None:
     with pytest.raises(ValueError):
         normalize_company_name(raw)
+
+
+def test_subsidiary_in_another_script_keeps_its_own_key() -> None:
+    assert normalize_company_name("FPTジャパン株式会社") != normalize_company_name("Tập đoàn FPT")
+
+
+@pytest.mark.parametrize("raw", ["Tập đoàn", "Tổng công ty", "Group"])
+def test_group_word_alone_is_never_empty(raw: str) -> None:
+    assert normalize_company_name(raw) != ""
