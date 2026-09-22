@@ -443,6 +443,11 @@ class CliProxyClient:
             raise ValueError("delete_auth_file() bắt buộc có `name`.")
         await self.request("DELETE", "/auth-files", params={"name": name})
 
+    async def set_prefix(self, name: str, prefix: str) -> None:
+        if not name.strip():
+            raise ValueError("set_prefix() bắt buộc có `name`.")
+        await self.request("PATCH", "/auth-files/fields", json={"name": name, "prefix": prefix})
+
     async def disconnect(self, provider: str | None = None) -> list[str]:
         """Ngắt kết nối: xoá mọi credential của provider. Trả tên các file đã xoá.
 

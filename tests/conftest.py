@@ -61,6 +61,7 @@ if sys.platform == "win32":
 
 #: Đường dẫn gọi model của CLIProxy (Plan.md mục 2.4). Trùng chuỗi `services/llm.py` dựng.
 GENERATE_PATH = f"/v1beta/models/{settings.llm_model}:generateContent"
+GENERATE_PATTERN = r"^/v1beta/models/[^:]+:generateContent$"
 
 #: Độ dài chuỗi model giả lập trả về khi test không quan tâm nội dung.
 _MAX_SEQ_LENGTH = 512
@@ -200,18 +201,23 @@ async def make_user(
     display_name: str | None = None,
     *,
     user_id: uuid.UUID | None = None,
+    connected: bool = True,
 ) -> User:
     """Một người dùng thật trong DB, mật khẩu là `TEST_PASSWORD`.
 
     `user_id` để chỉ định trước id: các file test đã có sẵn một hằng chủ sở hữu dùng chung cho
     những object ORM được dựng ở tầng module (`OWNER_ID`), mà khoá ngoại `user_id` đòi hàng
     `users` đó **tồn tại thật** — nên phải tạo được đúng id ấy chứ không nhận một id ngẫu nhiên.
+
+    `connected` (task 13.2): mặc định người dùng đã có credential CLIProxy riêng, vì từ 13.2 mọi
+    lời gọi LLM đi bằng tên model có tiền tố của đúng người đó.
     """
     user = User(
         id=user_id or uuid.uuid4(),
         email=email,
         password_hash=test_password_hash(),
         display_name=display_name,
+        cliproxy_auth_file=f"antigravity-{email}.json" if connected else None,
     )
     db.add(user)
     await db.flush()
@@ -325,19 +331,19 @@ class CliProxyStub:
         Truyền nhiều chuỗi để dựng kịch bản thử lại: `stub.reply("xin chào", "{…}")` nghĩa là
         lượt đầu hỏng, lượt sau mới ra JSON.
         """
-        self.router.post(GENERATE_PATH).mock(
+        self.router.post(path__regex=GENERATE_PATTERN).mock(
             side_effect=[httpx.Response(200, json=gemini_payload(text)) for text in texts]
         )
 
     def reply_payload(self, *payloads: dict[str, Any]) -> None:
         """Trả nguyên văn JSON của Gemini — dùng khi cần `finishReason`, `groundingMetadata`…"""
-        self.router.post(GENERATE_PATH).mock(
+        self.router.post(path__regex=GENERATE_PATTERN).mock(
             side_effect=[httpx.Response(200, json=payload) for payload in payloads]
         )
 
     def fail(self, status_code: int, json: Any = None) -> None:
         """CLIProxy trả lỗi HTTP (400 `unknown provider`, 503 `auth_unavailable`…)."""
-        self.router.post(GENERATE_PATH).mock(
+        self.router.post(path__regex=GENERATE_PATTERN).mock(
             return_value=httpx.Response(status_code, json=json or {"error": "lỗi giả lập"})
         )
 

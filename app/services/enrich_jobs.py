@@ -12,7 +12,7 @@ from app.models.company import CompanyProfile
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.schemas.enrich_job import JobItemStatus
-from app.services import kb
+from app.services import kb, user_credentials
 from app.services.cliproxy_client import CliProxyUnavailableError
 from app.services.enrichment import EnrichmentParseError, build_hints, enrich_company
 from app.services.llm import (
@@ -181,11 +181,12 @@ async def enrich_and_save(company_id: uuid.UUID) -> int:
         if company is None:
             raise CompanyGoneError(str(company_id))
         name = company.display_name
+        model = await user_credentials.model_for_user_id(db, company.user_id)
         hints = build_hints(await company_repo.list_contacts(db, company_id))
         await company_repo.ensure_draft_profile(db, company_id)
         await db.commit()
 
-    profile = await enrich_company(name, hints)
+    profile = await enrich_company(name, hints, model=model)
     sourced = profile.sourced_field_count()
     if not sourced:
         raise NoSourcedDataError(name)

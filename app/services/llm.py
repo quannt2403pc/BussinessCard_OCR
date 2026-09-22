@@ -307,7 +307,11 @@ async def _model_in_catalogue(model_name: str, client: CliProxyClient | None) ->
     except CliProxyError as exc:
         logger.info("Không tra được danh mục model để giải thích lỗi 400: %s", exc)
         return None
-    return model_name in ids if ids else None
+    return base_model(model_name) in ids if ids else None
+
+
+def base_model(model_name: str) -> str:
+    return model_name.rsplit("/", 1)[-1]
 
 
 def _build_payload(

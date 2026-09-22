@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng
 
-> Chủ sở hữu: **T** · Task: **11.6** · Dành cho: người dùng cuối (không cần biết lập trình) · Cập nhật: 2026-09-21
+> Chủ sở hữu: **T** · Task: **11.6**, **13.1** · Dành cho: người dùng cuối (không cần biết lập trình) · Cập nhật: 2026-09-22
 > Cài đặt và chạy hệ thống: xem `README.md` (Q). Kịch bản trình diễn: `docs/demo-runbook.md`.
 
 BusinessCard OCR biến danh thiếp thu được ở hội thảo thành **hồ sơ đối tác có nguồn**, theo ba bước:
@@ -18,7 +18,9 @@ Mở trình duyệt tại **http://localhost:8000**. Thanh trên cùng có bốn
 
 ![Trang cài đặt kết nối](images/01-settings.png)
 
-Hệ thống gọi Gemini qua CLIProxy bằng đăng nhập Google, không cần API key.
+Hệ thống gọi Gemini qua CLIProxy bằng đăng nhập Google, không cần API key. **Mỗi tài khoản trong hệ thống tự kết nối
+bằng tài khoản Google của chính mình**: mọi lời quét thẻ, tạo hồ sơ, hỏi trợ lý của bạn chỉ đi bằng tài khoản Google
+bạn đã nối, không bao giờ mượn của người khác, và bạn bấm **Ngắt kết nối** cũng không ảnh hưởng ai.
 
 1. Bấm **Kết nối CLIProxy (OAuth)** → một tab Google mở ra → đăng nhập và đồng ý.
 2. Quay lại trang, trạng thái chuyển *Đã kết nối*, kèm tài khoản và danh sách model.
@@ -28,7 +30,8 @@ Hệ thống gọi Gemini qua CLIProxy bằng đăng nhập Google, không cần
 > có thể vẫn hiện *Đã kết nối* nhưng mọi lời gọi đều lỗi `missing project_id`. Gặp lỗi này thì bấm **Ngắt kết nối**
 > rồi kết nối lại bằng Gmail cá nhân.
 
-Chỉ cần làm một lần; đăng nhập được giữ lại qua các lần khởi động lại.
+Chỉ cần làm một lần; đăng nhập được giữ lại qua các lần khởi động lại. Một tài khoản Google chỉ phục vụ **một**
+tài khoản trong hệ thống — người thứ hai nối cùng Gmail đó sẽ bị từ chối.
 
 ## 2. Quét danh thiếp — *Danh thiếp*
 
@@ -130,6 +133,8 @@ File CSV mở thẳng bằng Excel, không vỡ chữ tiếng Việt, Nhật, H�
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |------------|------------------------|------------|
 | Tạo hồ sơ báo *Chưa kết nối CLIProxy* | Chưa đăng nhập hoặc token hết hạn | *Cài đặt* → **Kết nối CLIProxy (OAuth)** |
+| Máy đã từng kết nối trước khi có đăng nhập nhiều người, nay báo *chưa kết nối AI* | Credential cũ chưa thuộc về tài khoản nào | Mỗi người vào *Cài đặt* bấm **Kết nối CLIProxy (OAuth)** một lần; đăng nhập lại đúng Gmail cũ cũng được |
+| Kết nối báo *tài khoản Google … đang được một người dùng khác kết nối* | Gmail đó đã gắn với tài khoản khác trong hệ thống | Dùng Gmail của riêng bạn |
 | Mọi lời gọi lỗi `missing project_id` dù đang *Đã kết nối* | Đăng nhập bằng tài khoản Workspace | Ngắt kết nối, đăng nhập lại bằng Gmail cá nhân |
 | Lỗi *429* / *cooldown* | Tài khoản hết lượt gọi model đó trong lúc này | Đợi vài phút rồi **Chạy lại**, hoặc đổi `LLM_MODEL` sang `gemini-3-flash` |
 | Hồ sơ có ít trường | Công ty ít thông tin công khai; hệ thống bỏ mọi trường không có nguồn | Bình thường. Bổ sung bằng **Sửa hồ sơ** nếu bạn có thông tin đáng tin |
