@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
+from app.models.user import User
 from app.prompts.enrichment import build_research_prompt, build_structure_prompt
 from app.repositories import company as company_repo
 from app.schemas.company import ProfileStatus
@@ -26,6 +28,26 @@ from app.services.enrichment import (
     validate_profile,
 )
 from app.services.llm import LLMBlockedError, LLMError
+from tests.conftest import make_user
+
+#: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
+#: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
+#: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
+OWNER_ID = uuid.uuid4()
+
+
+@pytest.fixture
+async def owner(db_session: AsyncSession) -> User:
+    """Hàng `users` cho `OWNER_ID` (task 12.8).
+
+    Khoá ngoại `business_cards.user_id` / `companies.user_id` (revision `0005`) đòi chủ sở hữu
+    tồn tại thật, nên test nào **ghi xuống DB** cũng phải dựng hàng này trước. Test chạy trên
+    `FakeSession` thì không cần — vì thế fixture này không autouse.
+    """
+    return await make_user(
+        db_session, "owner-enrichment@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+    )
+
 
 NOW = datetime(2026, 9, 14, tzinfo=UTC)
 REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc123"
@@ -259,13 +281,19 @@ async def test_resolve_redirects() -> None:
 def test_build_hints() -> None:
     cards = [
         BusinessCard(
+            user_id=OWNER_ID,
             website="https://abc.vn",
             email="an@abc.vn",
             address="1 Lê Lợi, Q1",
             phone="+842838220000",
             language_detected="vi",
         ),
-        BusinessCard(email="binh@gmail.com", address="1  Lê Lợi, Q1", language_detected="en"),
+        BusinessCard(
+            user_id=OWNER_ID,
+            email="binh@gmail.com",
+            address="1  Lê Lợi, Q1",
+            language_detected="en",
+        ),
     ]
     assert build_hints(cards) == {
         "website": "https://abc.vn",
@@ -391,13 +419,15 @@ async def saved_profiles(db: AsyncSession, company: Company) -> list[CompanyProf
 
 
 async def add_company(db: AsyncSession) -> Company:
-    company = Company(display_name="Công ty TNHH ABC", name_normalized="abc")
+    company = Company(user_id=OWNER_ID, display_name="Công ty TNHH ABC", name_normalized="abc")
     db.add(company)
     await db.flush()
     return company
 
 
-async def test_db_saved_profile_keeps_only_sourced_fields(db_session: AsyncSession) -> None:
+async def test_db_saved_profile_keeps_only_sourced_fields(
+    db_session: AsyncSession, owner: User
+) -> None:
     company = await add_company(db_session)
     profile = validate(
         {
@@ -424,7 +454,9 @@ async def test_db_saved_profile_keeps_only_sourced_fields(db_session: AsyncSessi
     assert stored.status == ProfileStatus.GENERATED.value
 
 
-async def test_db_first_enrich_turns_draft_into_generated(db_session: AsyncSession) -> None:
+async def test_db_first_enrich_turns_draft_into_generated(
+    db_session: AsyncSession, owner: User
+) -> None:
     company = await add_company(db_session)
     await company_repo.ensure_draft_profile(db_session, company.id)
     [draft] = await saved_profiles(db_session, company)
@@ -438,10 +470,13 @@ async def test_db_first_enrich_turns_draft_into_generated(db_session: AsyncSessi
     assert stored.generated_at == NOW.replace(tzinfo=None)
 
 
-async def test_db_regenerate_overwrites_manual_edit_in_place(db_session: AsyncSession) -> None:
+async def test_db_regenerate_overwrites_manual_edit_in_place(
+    db_session: AsyncSession, owner: User
+) -> None:
     company = await add_company(db_session)
     db_session.add(
         CompanyProfile(
+            user_id=OWNER_ID,
             company_id=company.id,
             tax_code="0309999999",
             size_label="SME",

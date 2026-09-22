@@ -49,6 +49,7 @@ from starlette.status import (
 )
 
 from app.core.logging import REQUEST_ID_HEADER, current_request_id
+from app.core.security import wants_html
 from app.core.templates import templates
 from app.services.cliproxy_client import CliProxyError, CliProxyUnavailableError
 from app.services.embeddings import EmbedderUnavailableError, EmbeddingError
@@ -185,16 +186,12 @@ async def _handle_unexpected(request: Request, exc: Exception) -> Response:
 
 
 def _wants_html(request: Request) -> bool:
-    """Trả trang HTML hay JSON.
+    """Trả trang HTML hay JSON — logic nằm ở `core/security.py::wants_html`.
 
-    Hai điều kiện **cùng lúc**, cố ý chặt: đường dẫn không phải `/api/...` *và* client có nhận
-    HTML. Chỉ xét `Accept` thì `fetch()` của chính UI ta (gửi `Accept: */*`) sẽ nhận về một
-    trang HTML và `response.json()` vỡ ngay tại chỗ; chỉ xét đường dẫn thì `curl /cards/abc`
-    nhận về cả một trang Tailwind.
+    Chuyển sang đó ở task 12.4 vì cổng đăng nhập cần **đúng** quyết định này (303 cho trình
+    duyệt, 401 JSON cho API). Giữ lại tên cũ để phần còn lại của file không phải đổi.
     """
-    if request.url.path.startswith("/api/"):
-        return False
-    return "text/html" in request.headers.get("accept", "")
+    return wants_html(request)
 
 
 def _html_error(

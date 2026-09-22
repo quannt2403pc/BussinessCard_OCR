@@ -11,20 +11,18 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import RequestContextMiddleware, setup_logging
+from app.core.security import RequireLoginMiddleware
+from app.core.templates import templates
 from app.routers import ROUTER_MODULES, iter_routers
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
-
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @asynccontextmanager
@@ -51,6 +49,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Cổng đăng nhập (task 12.4): chặn mọi đường dẫn ngoài `/auth/*`, `/static/*`, `/health`.
+#
+# ⚠️ **Thứ tự hai dòng dưới đây là một phần của thiết kế, đừng đảo.** `add_middleware` chèn vào
+# đầu danh sách, nên **dòng thêm sau cùng nằm ngoài cùng**: ở đây `RequestContextMiddleware` bọc
+# ngoài cổng đăng nhập, nhờ vậy cả request bị chặn bằng 303/401 vẫn có một dòng log và một
+# `X-Request-ID`. Đảo lại thì mọi lượt chặn biến mất khỏi log — đúng thứ cần nhìn khi ai đó báo
+# "tôi bị đá ra trang đăng nhập liên tục".
+app.add_middleware(RequireLoginMiddleware)
 
 # Request id + đo thời gian xử lý (task 9.5). Thêm trước khi gắn router để mọi request — kể cả
 # request bị router từ chối bằng 404 — đều có một dòng log và một `X-Request-ID` trả về.

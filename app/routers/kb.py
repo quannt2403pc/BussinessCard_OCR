@@ -1,6 +1,6 @@
 """F3 — `POST /api/kb/reindex`: index lại toàn bộ danh thiếp + hồ sơ DN vào Knowledge Base.
 
-Chủ sở hữu: Q | Task: 6.4 | xem Task.md
+Chủ sở hữu: Q | Task: 6.4, 12.5 | xem Task.md
 
 **Chạy đồng bộ, trả về số liệu — không phải job nền.** `docs/api.md` (bản chốt ban đầu, D1)
 phác thảo `202 {job_id}`, ở đây cố ý làm khác; theo quy ước số 9 của Task.md thì Swagger
@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.security import CurrentUser
 from app.repositories import kb as kb_repo
 from app.schemas.kb import ReindexOut, ReindexScope
 from app.services import embeddings, kb
@@ -54,6 +55,7 @@ _reindex_lock = asyncio.Lock()
 @router.post("/reindex", response_model=ReindexOut)
 async def reindex(
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
     scope: Annotated[
         ReindexScope | None,
         Query(description="Chỉ index một loại nguồn. Bỏ trống = cả danh thiếp lẫn hồ sơ DN."),
@@ -84,11 +86,11 @@ async def reindex(
                 cards = chunks = skipped = 0
                 profiles = 0
                 if scope in (None, ReindexScope.CARD):
-                    cards, written, missing = await _reindex_cards(db, http)
+                    cards, written, missing = await _reindex_cards(db, http, user.id)
                     chunks += written
                     skipped += missing
                 if scope in (None, ReindexScope.COMPANY_PROFILE):
-                    profiles, written, missing = await _reindex_profiles(db, http)
+                    profiles, written, missing = await _reindex_profiles(db, http, user.id)
                     chunks += written
                     skipped += missing
         except EmbedderUnavailableError as exc:
@@ -104,7 +106,7 @@ async def reindex(
             await db.commit()
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        total_chunks = await kb_repo.count_chunks(db)
+        total_chunks = await kb_repo.count_chunks(db, user_id=user.id)
         logger.info(
             "Reindex KB: %d danh thiếp + %d hồ sơ → %d chunk (%d bỏ qua) trong %dms",
             cards,
@@ -124,7 +126,9 @@ async def reindex(
         )
 
 
-async def _reindex_cards(db: AsyncSession, http: httpx.AsyncClient) -> tuple[int, int, int]:
+async def _reindex_cards(
+    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+) -> tuple[int, int, int]:
     """Duyệt hết danh thiếp đã xác nhận. Trả `(số nguồn, số chunk, số nguồn rỗng)`.
 
     Commit sau **mỗi lô** chứ không một lần ở cuối: lô đã xong thì nằm yên trong DB, hỏng ở lô
@@ -134,7 +138,7 @@ async def _reindex_cards(db: AsyncSession, http: httpx.AsyncClient) -> tuple[int
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.card_batch(db, after=after)
+        rows = await kb_repo.card_batch(db, user_id=user_id, after=after)
         if not rows:
             break
         documents = [
@@ -154,13 +158,15 @@ async def _reindex_cards(db: AsyncSession, http: httpx.AsyncClient) -> tuple[int
     return sources, written, empty
 
 
-async def _reindex_profiles(db: AsyncSession, http: httpx.AsyncClient) -> tuple[int, int, int]:
+async def _reindex_profiles(
+    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+) -> tuple[int, int, int]:
     """Duyệt hết hồ sơ DN đã sinh xong. Trả `(số nguồn, số chunk, số nguồn rỗng)`."""
     after: uuid.UUID | None = None
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.profile_batch(db, after=after)
+        rows = await kb_repo.profile_batch(db, user_id=user_id, after=after)
         if not rows:
             break
         documents = [kb.build_profile_document(company, profile) for profile, company in rows]

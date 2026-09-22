@@ -102,7 +102,9 @@ async def save_profile(
         generated_at=_naive_utc(generated_at),
     )
 
-    statement = insert(CompanyProfile).values(id=uuid.uuid4(), company_id=company_id, **values)
+    statement = insert(CompanyProfile).values(
+        id=uuid.uuid4(), company_id=company_id, user_id=_owner_of(company_id), **values
+    )
     statement = statement.on_conflict_do_update(
         constraint="uq_company_profiles_company_id",
         set_={**{name: statement.excluded[name] for name in values}, "updated_at": func.now()},
@@ -120,9 +122,29 @@ async def save_profile(
 async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
     await db.execute(
         insert(CompanyProfile)
-        .values(id=uuid.uuid4(), company_id=company_id, status=ProfileStatus.DRAFT.value)
+        .values(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            user_id=_owner_of(company_id),
+            status=ProfileStatus.DRAFT.value,
+        )
         .on_conflict_do_nothing(constraint="uq_company_profiles_company_id")
     )
+
+
+def _owner_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
+    """`SELECT user_id FROM companies WHERE id = :company_id` — chủ sở hữu của hồ sơ sắp ghi.
+
+    ⚠️ **Q thêm hàm này ở task 12.5 trong file của T** (luật nới D12, quy ước 2 — T review PR).
+    Chỉ để hai câu `INSERT` ở trên **ghi được**: `company_profiles.user_id` là `NOT NULL` từ
+    revision `0005`, nên thiếu nó thì luồng enrich của F2 chết ngay ở bước tạo hồ sơ nháp.
+    **Phần lọc theo `user_id` khi ĐỌC vẫn là task 12.6 của T** — ở đây không chạm câu `SELECT` nào.
+
+    Lấy bằng truy vấn con thay vì thêm tham số `user_id`: chữ ký hai hàm không đổi nên không chỗ
+    gọi nào của T phải sửa, và **không có đường nào ghi một hồ sơ thuộc người khác với công ty
+    của nó** — điều mà một tham số truyền tay thì luôn có thể làm sai.
+    """
+    return select(Company.user_id).where(Company.id == company_id).scalar_subquery()
 
 
 async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> int:

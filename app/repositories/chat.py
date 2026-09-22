@@ -1,6 +1,6 @@
 """Repository `chat_sessions` / `chat_messages` — lưu hội thoại với trợ lý AI (F3).
 
-Chủ sở hữu: Q | Task: 8.3 | xem Task.md
+Chủ sở hữu: Q | Task: 8.3, 12.5 | xem Task.md
 
 Bảng đã có sẵn từ revision khởi tạo `0001` (task 1.6) nên task này **không cần Alembic revision
 mới** — đúng như quy ước số 5 dự tính khi khai đủ bảng ngay từ D1.
@@ -27,7 +27,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import case, select
+from sqlalchemy import Select, case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat import ChatMessage, ChatRole, ChatSession
@@ -55,17 +55,29 @@ _ROLE_ORDER = case((ChatMessage.role == ChatRole.USER.value, 0), else_=1)
 _CHRONOLOGICAL = (ChatMessage.created_at, _ROLE_ORDER, ChatMessage.id)
 
 
-async def create_session(db: AsyncSession, *, title: str | None = None) -> ChatSession:
+async def create_session(
+    db: AsyncSession, *, user_id: uuid.UUID, title: str | None = None
+) -> ChatSession:
     """Mở một phiên hỏi–đáp mới. Chưa commit — xem ghi chú 1 ở đầu file."""
-    session = ChatSession(title=_title(title))
+    session = ChatSession(user_id=user_id, title=_title(title))
     db.add(session)
     await db.flush()
     return session
 
 
-async def get_session(db: AsyncSession, session_id: uuid.UUID) -> ChatSession | None:
-    """Một phiên theo id, hoặc `None`."""
-    return await db.get(ChatSession, session_id)
+async def get_session(
+    db: AsyncSession, session_id: uuid.UUID, *, user_id: uuid.UUID
+) -> ChatSession | None:
+    """Một phiên **của đúng người này**, hoặc `None` (task 12.5).
+
+    Không `db.get()` nữa: tra khoá chính không nhận thêm điều kiện, mà nhớ so `session.user_id`
+    ở từng chỗ gọi là việc sẽ có người quên. Phiên của người khác trả `None` → router trả **404**,
+    giống hệt khi id không tồn tại: không có cách nào dò xem một `session_id` có thật hay không.
+    """
+    result = await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def add_message(
@@ -93,11 +105,11 @@ async def add_message(
     return message
 
 
-async def list_messages(db: AsyncSession, session_id: uuid.UUID) -> Sequence[ChatMessage]:
+async def list_messages(
+    db: AsyncSession, session_id: uuid.UUID, *, user_id: uuid.UUID
+) -> Sequence[ChatMessage]:
     """Toàn bộ lượt của một phiên, cũ → mới (dùng cho `GET /api/chat/{session_id}`)."""
-    rows = await db.execute(
-        select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(*_CHRONOLOGICAL)
-    )
+    rows = await db.execute(_owned_messages(session_id, user_id).order_by(*_CHRONOLOGICAL))
     return list(rows.scalars().all())
 
 
@@ -105,6 +117,7 @@ async def recent_messages(
     db: AsyncSession,
     session_id: uuid.UUID,
     *,
+    user_id: uuid.UUID,
     limit: int,
 ) -> Sequence[ChatMessage]:
     """`limit` lượt **gần nhất**, trả về theo thứ tự cũ → mới để nhét vào prompt (task 8.3).
@@ -114,12 +127,26 @@ async def recent_messages(
     hội thoại bị cắt nhầm đầu này rồi ghép lại sai đầu kia — xem ghi chú 3.
     """
     rows = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.session_id == session_id)
+        _owned_messages(session_id, user_id)
         .order_by(*(column.desc() for column in _CHRONOLOGICAL))
         .limit(limit)
     )
     return list(reversed(list(rows.scalars().all())))
+
+
+def _owned_messages(session_id: uuid.UUID, user_id: uuid.UUID) -> Select[tuple[ChatMessage]]:
+    """Các lượt của một phiên, **kèm điều kiện phiên đó thuộc về `user_id`** (task 12.5).
+
+    `chat_messages` không có cột `user_id` (xem `models/chat.py`) nên chủ sở hữu phải lấy qua
+    `JOIN` tới phiên. Router vốn đã kiểm quyền bằng `get_session()` trước khi gọi hai hàm đọc ở
+    đây, nhưng điều kiện này vẫn nằm trong SQL: một đường gọi mới quên bước kiểm kia sẽ nhận về
+    danh sách rỗng, chứ không đọc được hội thoại của người khác.
+    """
+    return (
+        select(ChatMessage)
+        .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+        .where(ChatMessage.session_id == session_id, ChatSession.user_id == user_id)
+    )
 
 
 def _title(raw: str | None) -> str | None:

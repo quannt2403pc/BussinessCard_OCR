@@ -1,6 +1,12 @@
 """Bảng business_cards.
 
-Chủ sở hữu: Q | Task: 1.6 | xem Task.md
+Chủ sở hữu: Q | Task: 1.6, 12.5 | xem Task.md
+
+**Từ D12 mỗi danh thiếp thuộc về một người dùng** (`user_id`, task 12.3/12.5). Cột này khai ở
+đây phải khớp **từng tên index** với revision `0005`, không chỉ khớp về ý: `conftest.py` dựng
+schema test bằng `Base.metadata.create_all()` chứ không chạy migration, nên model và migration
+là hai nguồn sự thật song song — lệch tên index thì test chạy trên một lược đồ khác với lược đồ
+thật, và `alembic check` sinh ra một cặp drop/create thừa ở revision sau (I-16).
 """
 
 import uuid
@@ -33,14 +39,27 @@ class BusinessCard(Base):
         # btree được theo cả hai chiều nên không cần index thứ hai.
         # Số đo: danh sách thẻ trang 1 2.46 → 0.02 ms; export mỗi lô 6.62 → 0.35 ms.
         Index("ix_business_cards_uploaded_at_id", "uploaded_at", "id"),
+        # Chống trùng ảnh **theo từng người dùng**, không toàn cục (task 12.3, Plan.md mục 3).
+        # Để unique toàn cục thì B upload đúng tấm thẻ A đã có sẽ bị từ chối, và câu từ chối đó
+        # tự khai ra rằng A có tấm thẻ ấy. Đây cũng là index phục vụ `get_by_hash()`.
+        Index("ix_business_cards_user_id_image_hash", "user_id", "image_hash", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
+    # Chủ sở hữu bản ghi (task 12.3). `CASCADE`: xoá tài khoản là xoá sạch dữ liệu của tài khoản
+    # đó, không để lại danh thiếp mồ côi mà không ai truy cập được nữa.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
     # --- Ảnh gốc ---
     image_path: Mapped[str] = mapped_column(Text, nullable=False)
-    # SHA-256 của file: unique để upload lại đúng ảnh đó không tạo bản ghi trùng (task 3.1).
-    image_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    # SHA-256 của file gốc (task 3.1). Unique theo `(user_id, image_hash)` — xem __table_args__.
+    image_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
     # --- Kết quả OCR ---

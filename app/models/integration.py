@@ -8,19 +8,31 @@ Nguồn sự thật là `GET /v0/management/auth-files` — mảng rỗng nghĩa
 `{"status":"ok"}` kể cả khi chưa đăng nhập bao giờ, badge sẽ xanh vĩnh viễn (I-02 trong Task.md).
 """
 
+import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, func
+from sqlalchemy import Boolean, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 
 
 class IntegrationStatus(Base):
-    """Một dòng cho mỗi provider (hiện chỉ dùng provider OAuth của CLIProxy)."""
+    """Một dòng cho mỗi **(người dùng, provider)** — từ D12 mỗi người có kết nối riêng.
+
+    Khoá chính đổi từ `(provider)` sang `(user_id, provider)` ở revision `0005` (task 12.3):
+    A bấm "Ngắt kết nối" không được hạ cờ của B (tiêu chí A10, D13).
+    """
 
     __tablename__ = "integration_status"
 
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
     provider: Mapped[str] = mapped_column(String(64), primary_key=True)
     connected: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
@@ -32,4 +44,4 @@ class IntegrationStatus(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<IntegrationStatus {self.provider} connected={self.connected}>"
+        return f"<IntegrationStatus {self.provider} user={self.user_id} connected={self.connected}>"

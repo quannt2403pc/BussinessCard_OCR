@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.integration import IntegrationStatus
 from app.services import llm
@@ -143,10 +145,20 @@ async def settings_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/integration/status", response_model=IntegrationStatusOut, tags=["integration"])
-async def get_status(db: Annotated[AsyncSession, Depends(get_db)]) -> IntegrationStatusOut:
-    """Trạng thái kết nối OAuth. **Nguồn sự thật: `GET /v0/management/auth-files`** (I-02)."""
+async def get_status(
+    db: Annotated[AsyncSession, Depends(get_db)], user: CurrentUser
+) -> IntegrationStatusOut:
+    """Trạng thái kết nối OAuth. **Nguồn sự thật: `GET /v0/management/auth-files`** (I-02).
+
+    ⚠️ **Tính đến D12, cache là của từng người nhưng CLIProxy thì vẫn dùng chung.** Revision
+    `0005` đã đổi khoá chính `integration_status` thành `(user_id, provider)` nên hai người có
+    hai dòng cache riêng, còn `auth_files()` bên dưới vẫn liệt kê **mọi** credential của cả
+    máy — A nhìn badge sẽ thấy cả tài khoản Google mà B đã nối. Tách hẳn credential theo người
+    là **task 13.1/13.2** (gắn tiền tố, phương án (a) đã chốt ở ADR 12.1); ở đây chỉ đủ để mọi
+    lệnh ghi không còn hỏng vì thiếu `user_id`.
+    """
     provider = settings.cliproxy_auth_provider
-    cached = await db.get(IntegrationStatus, provider)
+    cached = await db.get(IntegrationStatus, (user.id, provider))
 
     try:
         async with CliProxyClient() as proxy:
@@ -172,7 +184,7 @@ async def get_status(db: Annotated[AsyncSession, Depends(get_db)]) -> Integratio
     usable = [f for f in files if f.usable]
     accounts = [f.label for f in usable]
     label = ", ".join(accounts) if accounts else None
-    row = await _save_cache(db, provider, connected=bool(usable), account_label=label)
+    row = await _save_cache(db, user.id, provider, connected=bool(usable), account_label=label)
 
     detail = None
     if files and not usable:
@@ -244,7 +256,9 @@ async def cancel_oauth(
 
 
 @router.post("/api/integration/disconnect", response_model=DisconnectOut, tags=["integration"])
-async def disconnect(db: Annotated[AsyncSession, Depends(get_db)]) -> DisconnectOut:
+async def disconnect(
+    db: Annotated[AsyncSession, Depends(get_db)], user: CurrentUser
+) -> DisconnectOut:
     """Ngắt kết nối: xoá mọi credential của provider trong CLIProxy rồi hạ cờ trong cache.
 
     Không có API "xoá tất cả" bên CLIProxy — phải liệt kê rồi xoá từng file (xem client).
@@ -258,7 +272,7 @@ async def disconnect(db: Annotated[AsyncSession, Depends(get_db)]) -> Disconnect
     except CliProxyError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
 
-    await _save_cache(db, provider, connected=False, account_label=None)
+    await _save_cache(db, user.id, provider, connected=False, account_label=None)
     return DisconnectOut(removed=removed, connected=False)
 
 
@@ -305,15 +319,20 @@ async def _safe_model_ids(proxy: CliProxyClient) -> list[str]:
 
 async def _save_cache(
     db: AsyncSession,
+    user_id: uuid.UUID,
     provider: str,
     *,
     connected: bool,
     account_label: str | None,
 ) -> IntegrationStatus:
-    """Ghi cache trạng thái để badge hiện ngay khi tải trang, không phải chờ CLIProxy."""
-    row = await db.get(IntegrationStatus, provider)
+    """Ghi cache trạng thái để badge hiện ngay khi tải trang, không phải chờ CLIProxy.
+
+    Khoá chính là `(user_id, provider)` từ revision `0005`, nên `db.get()` phải nhận **tuple** —
+    truyền một mình `provider` như trước 12.5 thì SQLAlchemy báo thiếu thành phần khoá.
+    """
+    row = await db.get(IntegrationStatus, (user_id, provider))
     if row is None:
-        row = IntegrationStatus(provider=provider)
+        row = IntegrationStatus(user_id=user_id, provider=provider)
         db.add(row)
     row.connected = connected
     row.account_label = account_label
