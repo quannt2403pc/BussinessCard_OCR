@@ -84,7 +84,7 @@ async def test_stats_counts_cards_companies_and_profiles(
     )
     await db_session.flush()
 
-    result = await stats.get_stats(db_session)
+    result = await stats.get_stats(db_session, owner)
 
     assert result.total_cards == 4
     assert result.confirmed_cards == 2
@@ -95,7 +95,7 @@ async def test_stats_counts_cards_companies_and_profiles(
 
 
 async def test_stats_on_empty_database(db_session: AsyncSession, owner: User) -> None:
-    result = await stats.get_stats(db_session)
+    result = await stats.get_stats(db_session, owner)
 
     # Chia cho 0 là lỗi duy nhất mà endpoint này có thể tự gây ra.
     assert result.review_rate == 0.0

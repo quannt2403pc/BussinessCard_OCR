@@ -37,12 +37,24 @@ async def get_company(db: AsyncSession, company_id: uuid.UUID) -> Company | None
     return await db.get(Company, company_id)
 
 
+async def get_owned_company(
+    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+) -> Company | None:
+    return await db.scalar(
+        select(Company).where(Company.id == company_id, Company.user_id == user_id)
+    )
+
+
 async def get_profile(db: AsyncSession, company_id: uuid.UUID) -> CompanyProfile | None:
     return await db.scalar(select(CompanyProfile).where(CompanyProfile.company_id == company_id))
 
 
-async def get_company_row(db: AsyncSession, company_id: uuid.UUID) -> CompanyRow | None:
-    result = await db.execute(_company_rows().where(Company.id == company_id))
+async def get_company_row(
+    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+) -> CompanyRow | None:
+    result = await db.execute(
+        _company_rows().where(Company.id == company_id, Company.user_id == user_id)
+    )
     row = result.tuples().one_or_none()
     return _to_company_row(*row) if row else None
 
@@ -50,13 +62,17 @@ async def get_company_row(db: AsyncSession, company_id: uuid.UUID) -> CompanyRow
 async def list_companies(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     q: str | None = None,
     has_profile: bool | None = None,
     archived: bool = False,
     page: int = 1,
     size: int = 20,
 ) -> tuple[list[CompanyRow], int]:
-    conditions = _list_conditions(q=q, has_profile=has_profile, archived=archived)
+    conditions = [
+        Company.user_id == user_id,
+        *_list_conditions(q=q, has_profile=has_profile, archived=archived),
+    ]
     size = max(1, min(size, MAX_PAGE_SIZE))
     page = max(1, page)
 
@@ -223,7 +239,7 @@ def restored_status(profile: CompanyProfile) -> ProfileStatus:
 
 
 async def same_tax_code(
-    db: AsyncSession, company_id: uuid.UUID, tax_code: str | None
+    db: AsyncSession, company_id: uuid.UUID, tax_code: str | None, *, user_id: uuid.UUID
 ) -> Sequence[Company]:
     code = (tax_code or "").strip()
     if not code:
@@ -231,16 +247,22 @@ async def same_tax_code(
     rows = await db.scalars(
         select(Company)
         .join(CompanyProfile, CompanyProfile.company_id == Company.id)
-        .where(func.trim(CompanyProfile.tax_code) == code, Company.id != company_id)
+        .where(
+            Company.user_id == user_id,
+            func.trim(CompanyProfile.tax_code) == code,
+            Company.id != company_id,
+        )
         .order_by(Company.display_name, Company.id)
     )
     return rows.all()
 
 
-async def same_domain(db: AsyncSession, company_id: uuid.UUID) -> list[tuple[Company, list[str]]]:
+async def same_domain(
+    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+) -> list[tuple[Company, list[str]]]:
     rows = await db.execute(
         select(BusinessCard.company_id, BusinessCard.email, BusinessCard.website).where(
-            BusinessCard.company_id.is_not(None)
+            BusinessCard.user_id == user_id, BusinessCard.company_id.is_not(None)
         )
     )
     domains: dict[uuid.UUID, set[str]] = {}
@@ -258,7 +280,9 @@ async def same_domain(db: AsyncSession, company_id: uuid.UUID) -> list[tuple[Com
     if not shared:
         return []
     companies = await db.scalars(
-        select(Company).where(Company.id.in_(shared)).order_by(Company.display_name, Company.id)
+        select(Company)
+        .where(Company.user_id == user_id, Company.id.in_(shared))
+        .order_by(Company.display_name, Company.id)
     )
     return [(company, shared[company.id]) for company in companies]
 

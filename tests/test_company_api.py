@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.security import current_user
 from app.core.templates import BASE_DIR
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
@@ -29,6 +30,7 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+OWNER = User(id=OWNER_ID, email="owner-company_api@example.com", password_hash="!")
 
 
 @pytest.fixture
@@ -101,10 +103,12 @@ def session() -> FakeSession:
 
 @pytest.fixture
 def no_related(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def none_by_tax(db: Any, company_id: uuid.UUID, tax_code: str | None) -> list[Company]:
+    async def none_by_tax(
+        db: Any, company_id: uuid.UUID, tax_code: str | None, **_: Any
+    ) -> list[Company]:
         return []
 
-    async def none_by_domain(db: Any, company_id: uuid.UUID) -> list[Any]:
+    async def none_by_domain(db: Any, company_id: uuid.UUID, **_: Any) -> list[Any]:
         return []
 
     monkeypatch.setattr(company_repo, "same_tax_code", none_by_tax)
@@ -112,7 +116,9 @@ def no_related(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
+async def client(
+    session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     app.include_router(companies.router)
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -121,6 +127,12 @@ async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
         yield session
 
     app.dependency_overrides[get_db] = fake_db
+    app.dependency_overrides[current_user] = lambda: OWNER
+
+    async def owned(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
+        return make_company(id=company_id)
+
+    monkeypatch.setattr(company_repo, "get_owned_company", owned)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -184,6 +196,7 @@ async def test_list_passes_filters_and_paginates(
 
     assert response.status_code == 200
     assert received == {
+        "user_id": OWNER_ID,
         "q": "abc",
         "has_profile": False,
         "archived": False,
@@ -209,6 +222,7 @@ async def test_list_uses_defaults(
 
     assert response.status_code == 200
     assert received == {
+        "user_id": OWNER_ID,
         "q": None,
         "has_profile": None,
         "archived": False,
@@ -226,10 +240,10 @@ async def test_list_rejects_bad_paging(client: httpx.AsyncClient, params: dict[s
 async def test_detail_with_profile_and_contacts(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, no_related: None
 ) -> None:
-    async def fake_row(db: Any, company_id: uuid.UUID) -> CompanyRow:
+    async def fake_row(db: Any, company_id: uuid.UUID, **_: Any) -> CompanyRow:
         return CompanyRow(make_company(aliases=None), 1, "generated", datetime(2026, 9, 15, 8, 0))
 
-    async def fake_profile(db: Any, company_id: uuid.UUID) -> CompanyProfile:
+    async def fake_profile(db: Any, company_id: uuid.UUID, **_: Any) -> CompanyProfile:
         return CompanyProfile(
             user_id=OWNER_ID,
             company_id=company_id,
@@ -249,7 +263,7 @@ async def test_detail_with_profile_and_contacts(
             generated_at=datetime(2026, 9, 15, 8, 0),
         )
 
-    async def fake_contacts(db: Any, company_id: uuid.UUID) -> list[BusinessCard]:
+    async def fake_contacts(db: Any, company_id: uuid.UUID, **_: Any) -> list[BusinessCard]:
         return [make_card()]
 
     monkeypatch.setattr(company_repo, "get_company_row", fake_row)
@@ -272,13 +286,13 @@ async def test_detail_with_profile_and_contacts(
 async def test_detail_without_profile(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, no_related: None
 ) -> None:
-    async def fake_row(db: Any, company_id: uuid.UUID) -> CompanyRow:
+    async def fake_row(db: Any, company_id: uuid.UUID, **_: Any) -> CompanyRow:
         return CompanyRow(make_company(aliases=["ABC Co"]), 0, None, None)
 
-    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, **_: Any) -> None:
         return None
 
-    async def no_contacts(db: Any, company_id: uuid.UUID) -> list[BusinessCard]:
+    async def no_contacts(db: Any, company_id: uuid.UUID, **_: Any) -> list[BusinessCard]:
         return []
 
     monkeypatch.setattr(company_repo, "get_company_row", fake_row)
@@ -294,7 +308,7 @@ async def test_detail_without_profile(
 async def test_detail_unknown_company(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, **_: Any) -> None:
         return None
 
     monkeypatch.setattr(company_repo, "get_company_row", nothing)
@@ -310,10 +324,10 @@ async def test_detail_rejects_non_uuid(client: httpx.AsyncClient) -> None:
 async def test_contacts_unknown_company(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, **_: Any) -> None:
         return None
 
-    monkeypatch.setattr(company_repo, "get_company", nothing)
+    monkeypatch.setattr(company_repo, "get_owned_company", nothing)
     assert (await client.get(f"/api/companies/{uuid.uuid4()}/contacts")).status_code == 404
 
 
@@ -333,7 +347,7 @@ def make_profile(**overrides: Any) -> CompanyProfile:
 
 @pytest.fixture
 def no_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, **_: Any) -> None:
         return None
 
     monkeypatch.setattr(job_repo, "active_job_id", nothing)
@@ -415,7 +429,7 @@ async def test_patch_profile_without_profile(
     no_running_job: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def nothing(db: Any, company_id: uuid.UUID, changes: dict[str, Any]) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, changes: dict[str, Any], **_: Any) -> None:
         return None
 
     monkeypatch.setattr(company_repo, "update_profile", nothing)
@@ -433,7 +447,7 @@ async def test_patch_profile_blocked_while_enriching(
     running_job = uuid.uuid4()
     calls: list[str] = []
 
-    async def active(db: Any, company_id: uuid.UUID) -> uuid.UUID:
+    async def active(db: Any, company_id: uuid.UUID, **_: Any) -> uuid.UUID:
         return running_job
 
     async def fake_update(
@@ -463,6 +477,7 @@ async def db_client(db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient
         yield db_session
 
     app.dependency_overrides[get_db] = real_db
+    app.dependency_overrides[current_user] = lambda: OWNER
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
