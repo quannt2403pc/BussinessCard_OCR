@@ -24,6 +24,7 @@ Tiêu chí D10 đếm Blocker/Critical **trên cả hai file bug**, nên thang n
 | B2-03 | Major | Không huỷ được lượt tạo hồ sơ đang chạy/đang chờ; hồ sơ `draft` kẹt sau khi api khởi động lại không có cách gỡ | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-04 | Minor | Không ẩn được hồ sơ không còn cần dùng → làm loãng danh sách, ô tìm kiếm và câu trả lời của trợ lý AI | 2026-09-18, test thực tế | T | ✅ Đã sửa 2026-09-21 (10.7) |
 | B2-05 | Minor | CLIProxy không chạy → phải **60 giây** mới báo lỗi, vì một lỗi không tạm thời (không phân giải được tên máy `cliproxy`) vẫn bị thử lại lồng nhau: client LLM 3 lần × job 3 lượt | 2026-09-21, tổng duyệt 11.8 (TS-08) | T | ✅ Đã sửa 2026-09-21 (PR #31) |
+| B2-06 | Minor | Hồ sơ doanh nghiệp để *Ngành nghề* / *Sản phẩm* bằng tiếng nước ngoài (Samsung: `제조업`, `모니터`) vì prompt không quy định ngôn ngữ đầu ra — kết quả phụ thuộc trang nguồn Google trả về viết bằng tiếng gì | 2026-09-22, test thực tế thẻ đa ngôn ngữ | T | 🔄 Đã sửa, chờ merge (nhánh `feature-profile-vietnamese`) |
 
 ## Chi tiết
 
@@ -128,3 +129,40 @@ như cũ. Không dừng cả lô: timeout đọc cũng rơi vào nhánh này, m�
 Test: `test_describe_failure` (2 dòng mới), `test_unreachable_proxy_is_not_retried`. Chưa đo lại TS-08 trong Docker.
 
 **Mức Minor:** lỗi vẫn hiện đúng và đọc được, chỉ chậm; buổi demo đã có phương án dự phòng (video) khi mất kết nối.
+
+### B2-06 — Trường mô tả của hồ sơ không được Việt hoá khi nguồn là tiếng nước ngoài
+
+**Tái hiện** (2026-09-22, bộ thẻ đa ngôn ngữ sau PR #37): tạo hồ sơ cho công ty trên thẻ tiếng Hàn (Samsung),
+Ả Rập (Aramco), Nhật (FPT Japan). *Mô tả* luôn ra tiếng Việt, nhưng *Ngành nghề* / *Sản phẩm* của Samsung ra
+`제조업`, `전자 부품, 컴퓨터, … 제조업`, `모니터`.
+
+**Nguyên nhân — không phải model thất thường, mà prompt thiếu quy tắc.** Prompt lượt 2 (`prompts/enrichment.py`,
+`STRUCTURE_PROMPT`) không nói các trường mô tả phải viết bằng tiếng gì, nên model tự quyết theo từng lượt. Đối chiếu
+nguồn thật trong `company_profiles.sources`:
+
+| Hồ sơ | Nguồn của *Ngành nghề* / *Sản phẩm* | Kết quả |
+|-------|------------------------------------|---------|
+| Aramco (thẻ Ả Rập) | `en.wikipedia.org`, `globaldata.com` — tiếng Anh | tiếng Việt |
+| FPT Japan (thẻ Nhật) | `ja.wikipedia.org`, `shachomeikan.jp` — tiếng Nhật | tiếng Việt |
+| Samsung (thẻ Hàn) | `bizno.net`, `dartpoint.ai`, `nicebizinfo.com` — **sổ đăng ký DN Hàn Quốc** | **tiếng Hàn** |
+
+Ngôn ngữ **trên thẻ** không quyết định gì; tiếng Ả Rập "được Việt hoá" chỉ vì Google trả nguồn tiếng Anh. Samsung
+lộ ra vì nguồn in **tên ngành theo mã phân loại chính thức** (KSIC) và model chép nó như chép một mã số. Cùng tình
+huống nguồn không phải tiếng Việt, FPT Japan lại được dịch — tức hành vi **không được quy định**.
+
+**Đã sửa (2026-09-22):** thêm quy tắc 7–8 vào **lượt 2** (lượt dựng JSON, không bật tìm kiếm): `industry`,
+`products`, `size_label`, `description` **luôn** bằng tiếng Việt, tên ngành theo mã phân loại thì dịch nghĩa và bỏ mã,
+nhãn hiệu sản phẩm giữ nguyên; `legal_name`, `address`, `website`, `email`, `phone`, `tax_code` **chép nguyên văn** —
+giữ đúng quy tắc 4 của lượt 1, vì đó là dữ liệu đối chiếu với giấy tờ chính thức. **Không đụng lượt 1** (lượt tra
+cứu): rủi ro *sửa prompt tra cứu là mất nguồn* ở `docs/adr-websearch.md` mục 3 không áp dụng. Bộ lọc nguồn (4.8) chỉ
+kiểm URL thuộc danh sách grounding, không so nội dung chữ, nên dịch không làm rơi nguồn.
+
+**Đo lại bằng model thật** (`gemini-3.6-flash-high`, không ghi DB): Samsung *Ngành nghề* → "Sản xuất điện thoại di
+động", "Sản xuất linh kiện điện tử, máy tính, …" (bỏ mã `C26422`), *Sản phẩm* → "Điện thoại thông minh", "Máy
+tính", "TV", "Tủ lạnh"; FPT Japan và Aramco vẫn tiếng Việt; tên pháp lý / địa chỉ giữ nguyên văn. Số trường có nguồn
+11 / 10 / 10 — không tụt. Hồ sơ **đã tạo trước bản sửa** không tự đổi: bấm *Tạo lại hồ sơ* để lấy bản tiếng Việt.
+
+**Ngoài phạm vi:** địa chỉ bản tiếng Việt (như cột `address_vi` của danh thiếp) cần thêm cột cho `company_profiles`
+→ migration của Q; chưa làm.
+
+**Mức Minor:** dữ liệu đúng và có nguồn, chỉ khó đọc với người không biết tiếng gốc.

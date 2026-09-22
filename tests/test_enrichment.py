@@ -322,6 +322,24 @@ def test_structure_prompt_lists_sources() -> None:
     assert "[2] https://abc.vn — https://abc.vn" in prompt
 
 
+def test_structure_prompt_requires_vietnamese_descriptive_fields() -> None:
+    prompt = build_structure_prompt("업종: 제조업", [("bizno.net", "https://bizno.net/x")])
+    rule = next(line for line in prompt.splitlines() if line.startswith("7. NGÔN NGỮ"))
+    for field in ("industry", "products", "size_label", "description"):
+        assert f'"{field}"' in rule
+    assert "LUÔN viết bằng tiếng Việt" in rule
+    keep = next(line for line in prompt.splitlines() if line.startswith("8. "))
+    for field in ("legal_name", "address", "tax_code"):
+        assert f'"{field}"' in keep
+    assert "KHÔNG dịch" in prompt
+
+
+def test_research_prompt_is_unchanged_by_the_language_rule() -> None:
+    prompt = build_research_prompt("삼성전자주식회사")
+    assert "NGÔN NGỮ" not in prompt
+    assert "tiếng Việt" not in prompt
+
+
 @respx.mock
 async def test_enrich_company_end_to_end() -> None:
     answer = {
