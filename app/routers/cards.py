@@ -69,7 +69,7 @@ from app.schemas.card import (
     CardUpdateIn,
     CardUploadOut,
 )
-from app.services import card_batch, kb, llm, normalize, ocr
+from app.services import card_batch, kb, llm, normalize, ocr, translate
 from app.services import image as image_service
 from app.services.embeddings import EmbeddingError
 
@@ -218,12 +218,12 @@ async def upload_card(
     ocr_result: ocr.OcrResult | None = None
     ocr_error: str | None = None
     try:
-        ocr_result = await ocr.extract_card(processed.data, mime_type=processed.mime_type)
+        ocr_result = await ocr.extract_and_translate(processed.data, mime_type=processed.mime_type)
     except (llm.LLMError, ocr.OcrError) as exc:
         ocr_error = str(exc)
         logger.warning("Quét ảnh %s thất bại: %s", relative_path, exc)
 
-    fields = ocr_result.extraction.card_columns() if ocr_result else {}
+    fields = ocr_result.card_fields() if ocr_result else {}
     card_status, notes = ocr.status_and_notes(ocr_result, ocr_error)
 
     try:
@@ -464,7 +464,9 @@ async def update_card(
         notes = changes.pop("notes")
         card.notes = normalize.squash_spaces(notes) if notes is not None else None
 
-    card = await card_repo.update_fields(db, card, _normalize_edits(changes, language=language))
+    fields = _normalize_edits(changes, language=language)
+    fields.update(_translation_meta_after_edit(card, changes))
+    card = await card_repo.update_fields(db, card, fields)
 
     # Thẻ **đã xác nhận** thì nó đang nằm trong KB, và KB vừa lệch với DB. Index lại ngay ở đây
     # thay vì chờ ai đó bấm `POST /api/kb/reindex`: sửa sai một số điện thoại rồi vẫn nghe trợ
@@ -474,6 +476,44 @@ async def update_card(
         await _sync_kb(db, card)
 
     logger.info("Card %s: sửa tay %s", card.id, ", ".join(edited))
+    return CardDetailOut.model_validate(card)
+
+
+@router.post("/api/cards/{card_id}/translate", response_model=CardDetailOut, tags=["cards"])
+async def translate_card(
+    card_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
+) -> CardDetailOut:
+    """Việt hoá lại danh thiếp — nút *Dịch lại* ở màn hình review (task EX-04).
+
+    Chạy trên **giá trị đang nằm trong DB**, tức là đã gồm cả những chỗ người dùng vừa sửa tay.
+    Đó là toàn bộ lý do có endpoint này: sửa `full_name` từ `田中 太朗` thành `田中 太郎` mà bản
+    phiên âm vẫn là bản dịch của chữ cũ thì tệ hơn là không có bản phiên âm nào.
+
+    Khác với lượt Việt hoá tự động sau khi quét, ở đây lỗi **được báo ra** (503/502): người dùng
+    vừa bấm nút và đang đợi, im lặng nuốt lỗi thì nút trông như hỏng.
+    """
+    card = await _get_or_404(db, card_id, user_id=user.id)
+    source = {name: getattr(card, name, None) for name in translate.prompts.TRANSLATABLE_FIELDS}
+
+    try:
+        translation = await translate.translate_card(
+            source, language=card.language_detected, raise_on_error=True
+        )
+    except llm.LLMNotConnectedError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except (llm.LLMError, translate.TranslationError) as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    card = await card_repo.update_fields(db, card, translation.columns())
+
+    # Thẻ đã xác nhận thì đang nằm trong KB, mà `services/kb.py` có in bản Việt hoá vào chunk
+    # (EX-06) — cùng lý lẽ với nhánh tương tự ở `update_card()`.
+    if card.status == CardStatus.CONFIRMED:
+        await _sync_kb(db, card)
+
+    logger.info("Card %s: Việt hoá lại (%s)", card.id, translation.meta.get("source"))
     return CardDetailOut.model_validate(card)
 
 
@@ -708,6 +748,35 @@ def _normalize_edits(changes: dict[str, Any], *, language: str | None) -> dict[s
             out[name] = normalize.squash_spaces(value)
 
     return out
+
+
+def _translation_meta_after_edit(card: BusinessCard, changes: dict[str, Any]) -> dict[str, Any]:
+    """`translation_meta` mới sau một lượt sửa tay. Rỗng nghĩa là không đụng tới cột đó.
+
+    Hai ca, và chúng loại trừ nhau:
+
+    * người dùng **sửa thẳng một ô Việt hoá** → `source="manual"`, hết lỗi thời. Bản của người
+      cầm tấm thẻ trong tay luôn thắng bản của model;
+    * người dùng **sửa trường gốc** (tên, chức vụ, công ty, địa chỉ) → bản dịch cũ nay nói về
+      chữ khác, đánh dấu `stale=True` để giao diện mời bấm *Dịch lại*.
+
+    Cố ý **không tự gọi model ở đây**: màn hình review bấm Lưu liên tục, mỗi lần Lưu kéo theo
+    một lời gọi LLM là biến thao tác sửa một chữ thành ba giây chờ. Dựng dict mới chứ không sửa
+    tại chỗ — JSONB không được SQLAlchemy theo dõi thay đổi bên trong, sửa tại chỗ là ghi hụt.
+    """
+    edited_vi = [name for name in changes if name.endswith("_vi")]
+    edited_source = [name for name in changes if name in translate.prompts.TRANSLATABLE_FIELDS]
+    if not edited_vi and not edited_source:
+        return {}
+
+    meta = dict(card.translation_meta or {})
+    if edited_vi:
+        meta["source"] = "manual"
+        meta["stale"] = False
+        meta["edited_fields"] = sorted(set(meta.get("edited_fields", [])) | set(edited_vi))
+    else:
+        meta["stale"] = True
+    return {"translation_meta": meta}
 
 
 async def _sync_kb(db: AsyncSession, card: BusinessCard) -> tuple[bool, str | None]:

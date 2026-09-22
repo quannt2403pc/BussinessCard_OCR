@@ -265,7 +265,9 @@ async def _scan(item: BatchItem) -> None:
     except OSError as exc:
         raise BatchItemError(f"Không đọc được ảnh đã lưu: {exc}") from exc
 
-    result = await ocr.extract_card(data, mime_type=image_service.OUTPUT_MIME)
+    # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
+    # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
+    result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME)
 
     if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
         raise BatchItemError("Mục này không biết thuộc về ai.")
@@ -279,9 +281,7 @@ async def _scan(item: BatchItem) -> None:
         # Gán tay vì `update_fields(notes=None)` nghĩa là "giữ nguyên", không phải "xoá trắng" —
         # thiếu dòng này thì ghi chú "đang chờ quét" ở lại mãi sau khi đã quét xong.
         card.notes = notes
-        await card_repo.update_fields(
-            db, card, result.extraction.card_columns(), status=card_status
-        )
+        await card_repo.update_fields(db, card, result.card_fields(), status=card_status)
 
     item.ocr_ms = result.elapsed_ms
     logger.info(

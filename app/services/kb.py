@@ -81,6 +81,33 @@ LANGUAGE_LABELS: dict[str, str] = {
     "ko": "Tiếng Hàn",
     "ja": "Tiếng Nhật",
     "zh": "Tiếng Trung",
+    "zh-tw": "Tiếng Trung (phồn thể)",
+    # EX-05 — phạm vi ngôn ngữ mở ra không giới hạn. Bảng này chỉ là **nhãn hiển thị**: mã lạ
+    # vẫn vào KB nguyên dạng (`_language()` giữ nguyên mã), chỉ là chunk ghi `sw` thay vì
+    # "Tiếng Swahili". Thiếu một dòng ở đây không làm mất dữ liệu nào.
+    "th": "Tiếng Thái",
+    "ru": "Tiếng Nga",
+    "de": "Tiếng Đức",
+    "fr": "Tiếng Pháp",
+    "es": "Tiếng Tây Ban Nha",
+    "pt": "Tiếng Bồ Đào Nha",
+    "it": "Tiếng Ý",
+    "nl": "Tiếng Hà Lan",
+    "ar": "Tiếng Ả Rập",
+    "hi": "Tiếng Hindi",
+    "id": "Tiếng Indonesia",
+    "ms": "Tiếng Mã Lai",
+    "tl": "Tiếng Philippines",
+    "km": "Tiếng Khmer",
+    "lo": "Tiếng Lào",
+    "my": "Tiếng Miến Điện",
+    "tr": "Tiếng Thổ Nhĩ Kỳ",
+    "pl": "Tiếng Ba Lan",
+    "cs": "Tiếng Séc",
+    "sv": "Tiếng Thuỵ Điển",
+    "he": "Tiếng Do Thái",
+    "el": "Tiếng Hy Lạp",
+    "uk": "Tiếng Ukraina",
 }
 
 
@@ -118,21 +145,33 @@ def serialize_card(card: BusinessCard, *, company_name: str | None = None) -> tu
     `company_name` là tên công ty **đã chuẩn hoá** (bảng `companies`, do T gộp ở task 3.8) —
     khác `company_name_raw` in trên thẻ. Giữ cả hai khi chúng khác nhau: người hỏi có thể gõ
     theo kiểu nào cũng được ("Cty ABC" hay "Công ty TNHH ABC").
+
+    **Bản Việt hoá (EX-06) đi vào chunk, ngay dưới bản gốc.** Đây là chỗ nó đáng giá nhất trong
+    cả hệ thống: không có nó thì câu hỏi *"Tanaka Taro làm ở đâu?"* không bao giờ khớp nổi một
+    chunk chỉ chứa `田中 太郎`, kể cả với model nhúng đa ngôn ngữ — hai chuỗi không có ký tự nào
+    chung. Tên Việt hoá **cũng vào dòng tiêu đề**, vì tiêu đề được lặp vào đầu mọi chunk (xem
+    `_to_chunks`), nên một thẻ dài mấy chunk thì chunk nào cũng tra được bằng tên Việt.
     """
     name = (card.full_name or "").strip() or "(không rõ tên)"
     company = (company_name or card.company_name_raw or "").strip()
-    title = f"Danh thiếp — {name}" + (f" · {company}" if company else "")
+    title = f"Danh thiếp — {_with_vi(name, card.full_name_vi)}" + (
+        f" · {_with_vi(company, card.company_name_vi)}" if company else ""
+    )
 
     lines = [
         ("Họ tên", card.full_name),
+        ("Họ tên (Việt hoá)", _other(card.full_name_vi, card.full_name)),
         ("Chức vụ", card.job_title),
+        ("Chức vụ (Việt hoá)", _other(card.job_title_vi, card.job_title)),
         ("Công ty", company or None),
         # Chỉ ghi thêm khi tên in trên thẻ khác tên đã gộp — lặp y hệt chỉ tổ loãng vector.
         ("Tên công ty trên danh thiếp", _other(card.company_name_raw, company)),
+        ("Tên công ty (Việt hoá)", _other(card.company_name_vi, company)),
         ("Email", card.email),
         ("Điện thoại", card.phone),
         ("Điện thoại khác", card.phone_alt),
         ("Địa chỉ", card.address),
+        ("Địa chỉ (Việt hoá)", _other(card.address_vi, card.address)),
         ("Website", card.website),
         ("Ngôn ngữ", _language(card.language_detected)),
         ("Ngày thu thập", _date(card.uploaded_at)),
@@ -423,6 +462,16 @@ def _language(code: str | None) -> str | None:
         return None
     label = LANGUAGE_LABELS.get(text.casefold())
     return f"{label} ({text})" if label else text
+
+
+def _with_vi(original: str, vi: str | None) -> str:
+    """`"田中 太郎"` + `"Tanaka Taro"` → `"田中 太郎 (Tanaka Taro)"`; trùng nhau thì chỉ một bản.
+
+    Dùng cho **dòng tiêu đề**, nơi mỗi ký tự đều phải trả giá: tiêu đề được lặp vào đầu mọi chunk
+    nên viết dài là ăn vào ngân sách 512 token của `e5-small` ở mọi chunk cùng lúc (task 6.2).
+    """
+    other = _other(vi, original)
+    return f"{original} ({other})" if other else original
 
 
 def _other(value: str | None, already_shown: str | None) -> str | None:

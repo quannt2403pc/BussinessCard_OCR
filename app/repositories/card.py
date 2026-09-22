@@ -29,11 +29,19 @@ from app.models.card import BusinessCard, CardStatus
 
 logger = logging.getLogger(__name__)
 
-#: Cột được quét khi tìm kiếm tự do (`?q=`) ở task 4.1 — đúng ba cột `docs/api.md` đã chốt.
+#: Cột được quét khi tìm kiếm tự do (`?q=`) ở task 4.1 — ba cột `docs/api.md` đã chốt, cộng hai
+#: cột Việt hoá tương ứng từ EX-06.
 #: Không quét `address`/`notes`: gõ "Hà Nội" sẽ ra toàn bộ danh thiếp, ô tìm kiếm thành vô dụng.
+#:
+#: Hai cột `*_vi` là điều kiện để ô tìm kiếm còn dùng được với thẻ nước ngoài: gõ "Tanaka" mà
+#: chỉ quét `full_name` thì không bao giờ khớp `田中 太郎` — người dùng phải gõ được chữ Nhật
+#: mới tìm ra tấm thẻ của chính mình. Không quét `job_title_vi`/`address_vi` vì `job_title` và
+#: `address` cũng không được quét, giữ nguyên một quy tắc cho cả hai bản.
 SEARCH_COLUMNS = (
     BusinessCard.full_name,
+    BusinessCard.full_name_vi,
     BusinessCard.company_name_raw,
+    BusinessCard.company_name_vi,
     BusinessCard.email,
 )
 
@@ -56,6 +64,13 @@ OCR_COLUMNS: frozenset[str] = frozenset(
         "website",
         "language_detected",
         "confidence",
+        # Việt hoá sau khi quét (EX-02). Vẫn là dữ liệu do model sinh ra nên nằm trong đúng danh
+        # sách trắng này, không phải một lối ghi riêng đi vòng qua nó.
+        "full_name_vi",
+        "job_title_vi",
+        "company_name_vi",
+        "address_vi",
+        "translation_meta",
     }
 )
 

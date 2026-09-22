@@ -13,6 +13,17 @@ Prompt được thiết kế quanh **rủi ro R3 — OCR sai với danh thiếp 
 3. **`language_detected`**: quyết định mã vùng khi chuẩn hoá số điện thoại (task 3.6) — `0912…`
    là số Việt hay số Nhật phụ thuộc hoàn toàn vào trường này.
 
+Cập nhật EX-05 (2026-09-22) — **bỏ giới hạn 5 ngôn ngữ**:
+
+* Schema cũ liệt kê `en | vi | ko | ja | zh` như một tập đóng, và quy tắc 3 chỉ gọi tên ba hệ
+  chữ. Thẻ tiếng Thái hay tiếng Nga vào thì model phải chọn bừa một trong năm mã — trường
+  `language_detected` sai kéo theo mã vùng số điện thoại sai (3.6) và nhãn ngôn ngữ sai trong
+  KB (6.2). Nay là **ví dụ mở**: mã nào đọc được thì trả mã đó, không có mã 2 chữ thì dùng 639-3.
+* Quy tắc 3 nói rõ "mọi hệ chữ viết" và nói thẳng rằng **có bước Việt hoá riêng ở sau**
+  (`services/translate.py`, EX-02) — để model không tự ý phiên âm giúp, đúng thứ 9.3 đo được là
+  nó đang làm đúng.
+* **Quy tắc 1, 2, 4, 5, 6 không đổi một chữ.** Đó là phần đã đo ở 9.3 và 10.8.
+
 Khoá JSON trùng tên cột trong bảng `business_cards` (Plan.md mục 3) để `services/ocr.py` không
 phải dựng thêm một lớp ánh xạ tên. Đổi khoá ở đây thì phải đổi cả `app/schemas/card.py`.
 
@@ -60,7 +71,8 @@ JSON_SCHEMA_DESCRIPTION = """{
   "phone_alt":         string | null,  // so thu hai neu the in nhieu so, khong co thi null
   "address":           string | null,  // dia chi day du tren mot dong
   "website":           string | null,
-  "language_detected": string,         // ma ISO 639-1 cua ngon ngu chinh: en | vi | ko | ja | zh
+  "language_detected": string,         // ma ISO 639-1 cua ngon ngu chinh, VD: en vi ko ja zh th ru de
+                                       // (khong gioi han trong vi du; khong co ma 2 chu thi dung 639-3)
   "is_business_card":  boolean,        // false neu anh khong phai danh thiep
   "confidence": {                      // diem tin cay 0.0-1.0 cho tung truong o tren
     "full_name": number, "job_title": number, "company_name_raw": number,
@@ -81,8 +93,10 @@ QUY TẮC TỐI QUAN TRỌNG — đọc kỹ trước khi trả lời:
 2. Không tự suy ra trường này từ trường khác. Ví dụ sai: thấy website "abc.com" rồi đoán email
    là "info@abc.com"; thấy tên công ty rồi đoán địa chỉ trụ sở. Chỉ chép cái đã in.
 
-3. GIỮ NGUYÊN chữ viết gốc. Danh thiếp Hàn/Nhật/Trung thì chép đúng chữ Hàn/Nhật/Trung, không
-   dịch, không phiên âm sang chữ Latin. Danh thiếp Việt giữ nguyên dấu.
+3. GIỮ NGUYÊN chữ viết gốc, ở MỌI ngôn ngữ và MỌI hệ chữ viết (Latin, Hán, Kana, Hangul, Kirin,
+   Ả Rập, Thái, Devanagari…). Chép đúng chữ in trên thẻ, không dịch, không phiên âm sang chữ
+   Latin. Danh thiếp Việt giữ nguyên dấu. Hệ thống có bước Việt hoá riêng ở sau, việc của bạn
+   chỉ là đọc đúng chữ.
    Thẻ in song ngữ (một mặt chữ bản địa, một mặt tiếng Anh): ưu tiên bản chữ bản địa cho
    `full_name` và `company_name_raw`.
 

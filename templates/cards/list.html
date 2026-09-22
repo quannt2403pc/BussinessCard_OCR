@@ -208,14 +208,26 @@
     const who = el("td", "px-4 py-3");
     // Tên là chỗ mắt rơi vào đầu tiên → cho nó dẫn thẳng sang màn hình review (task 5.1),
     // thay vì bắt người dùng đi tìm một nút "Sửa" nhỏ ở cuối dòng.
-    const open = el("a", "font-medium text-sky-700 hover:underline", card.full_name || "(chưa có tên)");
+    //
+    // Bản Việt hoá đứng ở dòng chính, bản gốc thành chú thích nhỏ ngay dưới (EX-06). Ở màn hình
+    // này lợi ích rõ nhất: một danh sách trộn `田中 太郎`, `김민준` và `Nguyễn Văn A` thì không
+    // đọc lướt được dòng nào, mà đọc lướt chính là việc người ta làm với một bảng danh sách.
+    const open = el("a", "font-medium text-sky-700 hover:underline",
+      card.full_name_vi || card.full_name || "(chưa có tên)");
     open.href = `/cards/${card.id}`;
     who.append(open);
-    who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
+    if (card.full_name_vi && card.full_name) {
+      who.append(el("div", "text-xs text-slate-400", card.full_name));
+    }
+    who.append(el("div", "text-xs text-slate-500", card.job_title_vi || card.job_title || "—"));
     tr.append(who);
 
     const company = el("td", "px-4 py-3");
-    company.append(el("div", "text-slate-800", card.company_name_raw || "—"));
+    company.append(el("div", "text-slate-800",
+      card.company_name_vi || card.company_name_raw || "—"));
+    if (card.company_name_vi && card.company_name_raw) {
+      company.append(el("div", "text-xs text-slate-400", card.company_name_raw));
+    }
     if (card.company_id) {
       company.append(el("div", "text-xs text-emerald-600", "đã gắn hồ sơ công ty"));
     }

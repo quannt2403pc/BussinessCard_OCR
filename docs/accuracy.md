@@ -192,3 +192,65 @@ vẫn trả đúng số của Trần Thị Bình → lịch sử đã vào promp
    tính điểm. Đưa vào thì một điểm luôn mất vì một lý do đã biết, che mất lỗi mới.
 3. **Luật 2 chấm bằng mắt người.** Mười câu trên đã đọc tay từng câu ngày 2026-09-21, nhưng đây
    là bước không tự động hoá được và sẽ phải làm lại nếu đổi model.
+
+---
+
+# Phần C — Việt hoá sau khi quét (task EX-07)
+
+> Đo ngày **2026-09-22** · `scripts/check_translation.py` · `LLM_MODEL = gemini-3-flash` qua
+> CLIProxy (OAuth `quanpyke@gmail.com`) · `alembic current = 0006 (head)` · `pytest` 556 passed
+
+## 10. Đo cái gì, và không đo cái gì
+
+Phần A đo **model đọc đúng chữ trên ảnh chưa**. Phần C đo bước ngay sau đó: **chữ đọc được có
+thành thứ người Việt dùng được không** — dịch chức vụ và loại hình pháp nhân, phiên âm tên riêng
+(`services/translate.py`, EX-02).
+
+**Không** đo lại phần A: prompt OCR chỉ đổi đúng một chỗ ở EX-05 (mã ngôn ngữ hết bị ép vào 5
+giá trị), còn quy tắc 1, 2, 4, 5, 6 không đổi một chữ. Cột `language_detected` ở 6/6 ca dưới đây
+trả đúng mã, gồm cả ba mã mà bản cũ không thể trả.
+
+**Không** chấm bằng máy chuyện *cách phiên âm nào đúng*: `李伟` nên là *Lý Vĩ* (Hán Việt, quy ước
+tiếng Việt) hay *Li Wei* (bính âm) là việc phải đọc bằng mắt. Script in cả bảng ra để đọc; phần
+chấm tự động chỉ nhận những thứ có đáp án: mã ngôn ngữ, chữ gốc còn nguyên, bản dịch hết chữ bản
+địa, chức vụ khớp bảng, loại hình pháp nhân khớp tiền tố, nguồn bản dịch là `llm`.
+
+## 11. Kết quả — **36/36 phép kiểm đạt**
+
+| Thẻ | Gốc | Việt hoá | Cách phiên âm |
+|-----|-----|----------|---------------|
+| `ja` | 田中 太郎 · 営業部長 · 東京テック株式会社 | **Tanaka Taro** · Trưởng phòng Kinh doanh · Công ty Cổ phần Tokyo Tech | Romaji |
+| `zh` | 李伟 · 销售经理 · 深圳市远景电子有限公司 | **Lý Vĩ** · Trưởng phòng Kinh doanh · Công ty TNHH Điện tử Viễn Cảnh Thâm Quyến | Hán Việt |
+| `ko` | 김민준 · 부장 · 한화정밀기계 주식회사 | **Kim Min-jun** · Trưởng phòng · Công ty Cổ phần Máy móc Chính xác Hanwha | chuyển tự Latin |
+| `th` | สมชาย ใจดี · ผู้จัดการฝ่ายขาย · บริษัท สยามเทค จำกัด | **Somchai Jaidee** · Trưởng phòng Kinh doanh · Công ty TNHH Siam Tech | chuyển tự Latin |
+| `ru` | Иван Петров · Генеральный директор · ООО Яндекс Технологии | **Ivan Petrov** · Tổng giám đốc · Công ty TNHH Công nghệ Yandex | chuyển tự Latin |
+| `de` | Hans Müller · Vertriebsleiter · Müller Maschinenbau GmbH | **(không dịch)** · Trưởng phòng Kinh doanh · Công ty TNHH Chế tạo Máy Müller | — |
+
+Địa chỉ cũng ra đúng lối đã định — từ chỉ loại dịch, tên riêng phiên âm, thứ tự giữ nguyên:
+`東京都千代田区丸の内1-2-3` → *Thành phố Tokyo, Quận Chiyoda, Marunouchi 1-2-3*;
+`广东省深圳市南山区科技园路 18 号` → *Tỉnh Quảng Đông, Thành phố Thâm Quyến, Quận Nam Sơn, Đường
+Khoa Kỹ Viên số 18*.
+
+Ba điều đáng ghi lại:
+
+1. **Ba ngôn ngữ ngoài phạm vi cũ (Thái, Nga, Đức) chạy y như ba ngôn ngữ trong phạm vi.** Không
+   có nhánh mã nào riêng cho chúng — đó là điểm của EX-05: bỏ tập đóng 5 mã đi thì phần còn lại
+   của hệ thống vốn đã không quan tâm ngôn ngữ nào.
+2. **Thẻ Đức không sinh bản dịch tên người, và đó là kết quả ĐÚNG.** `_finalize()` bỏ bản dịch
+   trùng y hệt bản gốc, nên `full_name_vi = NULL` nghĩa là *bản gốc dùng được luôn*. Không có
+   quy tắc này thì giao diện in "Hans Müller" hai lần chồng lên nhau trên mọi thẻ Latin.
+3. **Chức vụ tiếng Thái (`ผู้จัดการฝ่ายขาย`) không có trong `JOB_TITLES`** mà vẫn ra *Trưởng phòng
+   Kinh doanh*. Đây là ranh giới giữa hai tầng: bảng tra cứu giữ tính nhất quán cho phần hay gặp,
+   model phủ phần đuôi dài — và phần đuôi dài là toàn bộ lý do không thể làm bằng bảng tra cứu.
+
+## 12. Hạn chế đã biết của phần C
+
+1. **Ảnh dựng bằng phông chữ, không phải ảnh chụp** — cùng hạn chế với phần A, và cùng lý do:
+   tiêu chí A3 vẫn là task **7.8**, vẫn ⏸️.
+2. **Sáu thẻ, mỗi ngôn ngữ một thẻ.** Đủ để nói *cơ chế chạy đúng*, không đủ để nói tỉ lệ phiên
+   âm đúng trên tên người thật (tên hiếm, tên có nhiều cách đọc).
+3. **Phiên âm không tất định theo kiểu bảng tra.** `temperature = 0.0` giữ cho cùng một thẻ ra
+   cùng một kết quả, nhưng **đổi model là phải đo lại cả bảng trên** — khác hẳn phần loại hình
+   pháp nhân, vốn do `LEGAL_FORMS` quyết định và có test riêng trong `tests/test_translate.py`.
+4. **Địa chỉ dài chưa đo ở ca xấu**: thẻ có địa chỉ hai dòng kèm toà nhà/tầng chưa nằm trong bộ
+   này. `address_vi` là cột `TEXT` nên không có rủi ro tràn, nhưng cách sắp xếp lại thì chưa đo.
