@@ -22,8 +22,6 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.config import settings
-from app.core.db import get_db
-from app.main import app
 from app.models.card import BusinessCard, CardStatus
 from app.models.chat import ChatMessage, ChatRole
 from app.models.company import Company, CompanyProfile
@@ -35,6 +33,7 @@ from app.routers import kb as kb_router
 from app.services import assistant, retriever
 from app.services.assistant import Turn
 from app.services.retriever import Hit
+from tests.conftest import api_client
 
 NOW = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
 
@@ -224,10 +223,11 @@ def test_lich_su_cat_ngan_luot_qua_dai():
 # --------------------------------------------------------------------------- cần DB
 
 
-async def seed_kb(db_session) -> tuple[BusinessCard, Company]:
+async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
     """Một danh thiếp đã xác nhận + một hồ sơ DN, cả hai đã nằm trong KB."""
     company = Company(
         id=uuid.uuid4(),
+        user_id=user.id,
         display_name="Công ty TNHH Logistics Đại Việt",
         name_normalized=f"dai-viet-{uuid.uuid4().hex[:8]}",
         aliases=["Đại Việt Logistics"],
@@ -238,6 +238,7 @@ async def seed_kb(db_session) -> tuple[BusinessCard, Company]:
     db_session.add(
         CompanyProfile(
             id=uuid.uuid4(),
+            user_id=user.id,
             company_id=company.id,
             legal_name="Công ty TNHH Logistics Đại Việt",
             tax_code="0301234567",
@@ -251,6 +252,7 @@ async def seed_kb(db_session) -> tuple[BusinessCard, Company]:
     )
     card = BusinessCard(
         id=uuid.uuid4(),
+        user_id=user.id,
         image_path="ab/abc.jpg",
         image_hash=uuid.uuid4().hex,
         uploaded_at=NOW,
@@ -265,56 +267,48 @@ async def seed_kb(db_session) -> tuple[BusinessCard, Company]:
     )
     db_session.add(card)
     await db_session.flush()
-    await kb_router.reindex(db_session)
+    await kb_router.reindex(db_session, user)
     return card, company
 
 
-async def chunk_content(db_session, source_type: str) -> str:
+async def chunk_content(db_session, user, source_type: str) -> str:
     """Nội dung chunk đầu tiên của một loại nguồn — dùng làm câu hỏi cho tương đồng 1.0."""
     rows = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, top_k=1, source_type=source_type
+        db_session,
+        [0.0] * settings.embedding_dim,
+        user_id=user.id,
+        top_k=1,
+        source_type=source_type,
     )
     return rows[0][0].content
 
 
-async def post_chat(db_session, payload: dict) -> httpx.Response:
-    """Gọi `POST /api/chat` qua ASGI, dùng đúng session của test (giống `test_company_api.py`)."""
+async def post_chat(db_session, payload: dict, user) -> httpx.Response:
+    """Gọi `POST /api/chat` qua ASGI **với tư cách `user`**.
 
-    async def _db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = _db
-    transport = httpx.ASGITransport(app=app)
-    try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
-            return await http.post("/api/chat", json=payload)
-    finally:
-        app.dependency_overrides.pop(get_db, None)
+    Từ task 12.4 mọi đường dẫn ngoài `/auth/*` đều đòi phiên đăng nhập, nên phần dựng
+    client (ghi đè `get_db`, ký cookie, trỏ session của middleware về đúng transaction của
+    test) chuyển hẳn sang `conftest.api_client` — một chỗ cho cả bộ test.
+    """
+    async with api_client(db_session, user) as http:
+        return await http.post("/api/chat", json=payload)
 
 
-async def get_chat(db_session, session_id: uuid.UUID) -> httpx.Response:
-    async def _db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = _db
-    transport = httpx.ASGITransport(app=app)
-    try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
-            return await http.get(f"/api/chat/{session_id}")
-    finally:
-        app.dependency_overrides.pop(get_db, None)
+async def get_chat(db_session, session_id: uuid.UUID, user) -> httpx.Response:
+    async with api_client(db_session, user) as http:
+        return await http.get(f"/api/chat/{session_id}")
 
 
 # --------------------------------------------------------------------------- 8.2 đầu–cuối
 
 
-async def test_chat_tra_loi_kem_trich_dan_bam_duoc(db_session, embedder, cliproxy):
+async def test_chat_tra_loi_kem_trich_dan_bam_duoc(db_session, user_a, embedder, cliproxy):
     """Đường đi đầy đủ: truy hồi → prompt → model → trích dẫn trỏ đúng `/cards/{id}`."""
-    card, _ = await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    card, _ = await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Nguyễn Văn An, giám đốc kinh doanh [1].")
 
-    response = await post_chat(db_session, {"question": question})
+    response = await post_chat(db_session, {"question": question}, user_a)
 
     assert response.status_code == 200
     body = response.json()
@@ -328,26 +322,28 @@ async def test_chat_tra_loi_kem_trich_dan_bam_duoc(db_session, embedder, cliprox
     assert body["citations"][0]["title"].startswith("Danh thiếp — Nguyễn Văn An")
 
 
-async def test_chat_ghi_lai_ca_cau_hoi_lan_cau_tra_loi(db_session, embedder, cliproxy):
+async def test_chat_ghi_lai_ca_cau_hoi_lan_cau_tra_loi(db_session, user_a, embedder, cliproxy):
     """Một lượt hỏi ghi đúng hai dòng, và trích dẫn được lưu để mở lại hội thoại còn thấy."""
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Trả lời [1].")
 
-    body = (await post_chat(db_session, {"question": question})).json()
-    rows = await chat_repo.list_messages(db_session, uuid.UUID(body["session_id"]))
+    body = (await post_chat(db_session, {"question": question}, user_a)).json()
+    rows = await chat_repo.list_messages(
+        db_session, uuid.UUID(body["session_id"]), user_id=user_a.id
+    )
 
     assert [row.role for row in rows] == [ChatRole.USER.value, ChatRole.ASSISTANT.value]
     assert rows[0].citations is None, "lượt người dùng không áp dụng trích dẫn → NULL"
     assert len(rows[1].citations or []) == 1
 
 
-async def test_chat_khong_tim_duoc_gi_thi_khong_goi_model(db_session, embedder, cliproxy):
+async def test_chat_khong_tim_duoc_gi_thi_khong_goi_model(db_session, user_a, embedder, cliproxy):
     """Gọi model với ngữ cảnh rỗng là trả tiền để nghe nó nói bằng kiến thức nội tại (R4)."""
-    await seed_kb(db_session)
+    await seed_kb(db_session, user_a)
     cliproxy.reply("KHÔNG ĐƯỢC GỌI")
 
-    body = (await post_chat(db_session, {"question": "giá vàng hôm nay bao nhiêu?"})).json()
+    body = (await post_chat(db_session, {"question": "giá vàng hôm nay bao nhiêu?"}, user_a)).json()
 
     assert body["answer"] == prompt.NO_ANSWER_TEXT
     assert body["citations"] == []
@@ -355,21 +351,23 @@ async def test_chat_khong_tim_duoc_gi_thi_khong_goi_model(db_session, embedder, 
     assert len(cliproxy.calls) == 0
 
 
-async def test_chat_kb_rong_noi_ro_la_chua_co_du_lieu(db_session, embedder, cliproxy):
+async def test_chat_kb_rong_noi_ro_la_chua_co_du_lieu(db_session, user_a, embedder, cliproxy):
     """ "Chưa nhập gì" và "đã nhập nhưng không liên quan" đòi người dùng làm hai việc khác nhau."""
-    body = (await post_chat(db_session, {"question": "công ty nào làm logistics?"})).json()
+    body = (await post_chat(db_session, {"question": "công ty nào làm logistics?"}, user_a)).json()
 
     assert body["answer"] == prompt.EMPTY_KB_TEXT
     assert len(cliproxy.calls) == 0
 
 
-async def test_chat_gui_dung_system_prompt_va_ngu_canh_cho_model(db_session, embedder, cliproxy):
+async def test_chat_gui_dung_system_prompt_va_ngu_canh_cho_model(
+    db_session, user_a, embedder, cliproxy
+):
     """Kiểm ở tầng HTTP: ngữ cảnh thật sự đi vào payload, không phải chỉ dựng rồi bỏ quên."""
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Xong [1].")
 
-    await post_chat(db_session, {"question": question})
+    await post_chat(db_session, {"question": question}, user_a)
 
     payload = cliproxy.calls[-1].request.read().decode()
     assert "an.nguyen@daiviet-logistics.vn" in payload
@@ -377,29 +375,31 @@ async def test_chat_gui_dung_system_prompt_va_ngu_canh_cho_model(db_session, emb
     assert "systemInstruction" in payload
 
 
-async def test_chat_model_chua_ket_noi_tra_503_va_khong_ghi_gi(db_session, embedder, cliproxy):
+async def test_chat_model_chua_ket_noi_tra_503_va_khong_ghi_gi(
+    db_session, user_a, embedder, cliproxy
+):
     """Model hỏng thì không để lại phiên rỗng hay câu hỏi cụt trong lịch sử."""
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.fail(401, {"error": {"message": "authentication_error"}})
 
-    response = await post_chat(db_session, {"question": question})
+    response = await post_chat(db_session, {"question": question}, user_a)
 
     assert response.status_code == 503
     assert "/settings" in response.json()["detail"]
     assert await db_session.scalar(select(func.count()).select_from(ChatMessage)) == 0
 
 
-async def test_chat_cau_hoi_rong_bi_chan_o_schema(db_session, embedder, cliproxy):
-    response = await post_chat(db_session, {"question": "   "})
+async def test_chat_cau_hoi_rong_bi_chan_o_schema(db_session, user_a, embedder, cliproxy):
+    response = await post_chat(db_session, {"question": "   "}, user_a)
 
     assert response.status_code == 422
     assert len(cliproxy.calls) == 0
 
 
-async def test_chat_phien_khong_ton_tai_tra_404(db_session, embedder, cliproxy):
+async def test_chat_phien_khong_ton_tai_tra_404(db_session, user_a, embedder, cliproxy):
     response = await post_chat(
-        db_session, {"question": "hỏi gì đó", "session_id": str(uuid.uuid4())}
+        db_session, {"question": "hỏi gì đó", "session_id": str(uuid.uuid4())}, user_a
     )
 
     assert response.status_code == 404
@@ -408,16 +408,17 @@ async def test_chat_phien_khong_ton_tai_tra_404(db_session, embedder, cliproxy):
 # --------------------------------------------------------------------------- 8.3 nhiều lượt
 
 
-async def test_luot_sau_dua_lich_su_vao_prompt(db_session, embedder, cliproxy):
+async def test_luot_sau_dua_lich_su_vao_prompt(db_session, user_a, embedder, cliproxy):
     """Lượt 2 phải thấy lượt 1 trong prompt, nếu không đại từ trỏ ngược không hiểu được."""
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Nguyễn Văn An [1].", "Số là +84912345678 [1].")
 
-    first = (await post_chat(db_session, {"question": question})).json()
+    first = (await post_chat(db_session, {"question": question}, user_a)).json()
     second = await post_chat(
         db_session,
         {"question": "Số điện thoại của anh ấy là gì?", "session_id": first["session_id"]},
+        user_a,
     )
 
     assert second.status_code == 200
@@ -427,34 +428,37 @@ async def test_luot_sau_dua_lich_su_vao_prompt(db_session, embedder, cliproxy):
     assert "Nguyễn Văn An" in payload
 
 
-async def test_luot_sau_van_truy_hoi_duoc_nho_ghep_cau_hoi_truoc(db_session, embedder, cliproxy):
+async def test_luot_sau_van_truy_hoi_duoc_nho_ghep_cau_hoi_truoc(
+    db_session, user_a, embedder, cliproxy
+):
     """Câu hỏi lượt 2 không chứa định danh nào; ghép lượt trước vào mới tìm lại được chunk cũ.
 
     Đây là test bảo vệ `retrieval_query()`: bỏ bước ghép đi thì lượt 2 trả về
     `context_chunks = 0` và trợ lý nói không biết, dù dữ liệu nằm ngay đó.
     """
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Nguyễn Văn An [1].", "Số là +84912345678 [1].")
 
-    first = (await post_chat(db_session, {"question": question})).json()
+    first = (await post_chat(db_session, {"question": question}, user_a)).json()
     second = (
         await post_chat(
             db_session,
             {"question": "còn số điện thoại thì sao?", "session_id": first["session_id"]},
+            user_a,
         )
     ).json()
 
     assert second["context_chunks"] >= 1
 
 
-async def test_doc_lai_phien_tra_du_luot_va_trich_dan(db_session, embedder, cliproxy):
-    await seed_kb(db_session)
-    question = await chunk_content(db_session, KBSourceType.CARD.value)
+async def test_doc_lai_phien_tra_du_luot_va_trich_dan(db_session, user_a, embedder, cliproxy):
+    await seed_kb(db_session, user_a)
+    question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
     cliproxy.reply("Trả lời [1].")
-    posted = (await post_chat(db_session, {"question": question})).json()
+    posted = (await post_chat(db_session, {"question": question}, user_a)).json()
 
-    body = (await get_chat(db_session, uuid.UUID(posted["session_id"]))).json()
+    body = (await get_chat(db_session, uuid.UUID(posted["session_id"]), user_a)).json()
 
     assert len(body["messages"]) == 2
     assert body["messages"][0]["citations"] is None
@@ -462,11 +466,11 @@ async def test_doc_lai_phien_tra_du_luot_va_trich_dan(db_session, embedder, clip
     assert body["title"]
 
 
-async def test_doc_lai_phien_khong_ton_tai_tra_404(db_session, embedder, cliproxy):
-    assert (await get_chat(db_session, uuid.uuid4())).status_code == 404
+async def test_doc_lai_phien_khong_ton_tai_tra_404(db_session, user_a, embedder, cliproxy):
+    assert (await get_chat(db_session, uuid.uuid4(), user_a)).status_code == 404
 
 
-async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session):
+async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a):
     """Bắt đúng lỗi phát hiện khi chạy test 8.3 lần đầu — xem `repositories/chat.py::_ROLE_ORDER`.
 
     `now()` của Postgres là thời điểm **bắt đầu transaction**, nên hai dòng ghi trong cùng một
@@ -476,7 +480,7 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session):
     Cố ý ghi câu trả lời **trước** câu hỏi để chứng minh thứ tự đọc ra không phụ thuộc thứ tự
     ghi vào — nếu nó phụ thuộc thì test này xanh vì lý do sai.
     """
-    session = await chat_repo.create_session(db_session, title="thử")
+    session = await chat_repo.create_session(db_session, user_id=user_a.id, title="thử")
     await chat_repo.add_message(
         db_session, session_id=session.id, role=ChatRole.ASSISTANT, content="đáp", citations=[]
     )
@@ -484,8 +488,8 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session):
         db_session, session_id=session.id, role=ChatRole.USER, content="hỏi"
     )
 
-    doc_het = await chat_repo.list_messages(db_session, session.id)
-    gan_nhat = await chat_repo.recent_messages(db_session, session.id, limit=2)
+    doc_het = await chat_repo.list_messages(db_session, session.id, user_id=user_a.id)
+    gan_nhat = await chat_repo.recent_messages(db_session, session.id, user_id=user_a.id, limit=2)
 
     assert doc_het[0].created_at == doc_het[1].created_at, "tiền đề của test: cùng transaction"
     assert [row.content for row in doc_het] == ["hỏi", "đáp"]
@@ -495,7 +499,7 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session):
 # --------------------------------------------------------------------------- 8.5 lọc phạm vi
 
 
-async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(db_session, embedder):
+async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(db_session, user_a, embedder):
     """Hỏi bằng đúng nội dung chunk hồ sơ; lọc `card` thì chunk hồ sơ đó không được lọt vào.
 
     Ghi chú rút ra khi viết test này: câu hỏi đó **vẫn ra kết quả** sau khi lọc, vì chunk danh
@@ -503,20 +507,22 @@ async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(db_session, embedd
     lọc là *thu hẹp phạm vi*, không phải tắt tìm kiếm. Điều phải đúng là **không chunk nào ngoài
     phạm vi lọt ra**, nên khẳng định theo tập `source_type` chứ không theo số lượng.
     """
-    await seed_kb(db_session)
-    profile_chunk = await chunk_content(db_session, KBSourceType.COMPANY_PROFILE.value)
+    await seed_kb(db_session, user_a)
+    profile_chunk = await chunk_content(db_session, user_a, KBSourceType.COMPANY_PROFILE.value)
 
-    khong_loc = await retriever.search(db_session, profile_chunk)
-    chi_card = await retriever.search(db_session, profile_chunk, source_type=KBSourceType.CARD)
+    khong_loc = await retriever.search(db_session, profile_chunk, user_id=user_a.id)
+    chi_card = await retriever.search(
+        db_session, profile_chunk, user_id=user_a.id, source_type=KBSourceType.CARD
+    )
 
     assert KBSourceType.COMPANY_PROFILE.value in {hit.source_type for hit in khong_loc}
     assert {hit.source_type for hit in chi_card} == {KBSourceType.CARD.value}
 
 
-async def test_bo_loc_di_tu_api_xuong_tang_truy_hoi(db_session, embedder, cliproxy):
+async def test_bo_loc_di_tu_api_xuong_tang_truy_hoi(db_session, user_a, embedder, cliproxy):
     """Kiểm bộ lọc thật sự đi qua `ChatFilters` → `assistant.answer()` → SQL, không rơi dọc đường."""
-    _, company = await seed_kb(db_session)
-    profile_chunk = await chunk_content(db_session, KBSourceType.COMPANY_PROFILE.value)
+    _, company = await seed_kb(db_session, user_a)
+    profile_chunk = await chunk_content(db_session, user_a, KBSourceType.COMPANY_PROFILE.value)
     cliproxy.reply("Hồ sơ đây [1].")
 
     body = (
@@ -526,6 +532,7 @@ async def test_bo_loc_di_tu_api_xuong_tang_truy_hoi(db_session, embedder, clipro
                 "question": profile_chunk,
                 "filters": {"source_type": "company_profile", "company_id": str(company.id)},
             },
+            user_a,
         )
     ).json()
 
@@ -534,12 +541,16 @@ async def test_bo_loc_di_tu_api_xuong_tang_truy_hoi(db_session, embedder, clipro
     assert body["citations"][0]["source_urls"] == ["https://masothue.example/0301234567"]
 
 
-async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(db_session, embedder, cliproxy):
+async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(db_session, user_a, embedder, cliproxy):
     """`metadata.company_id` là khoá chung của hai loại nguồn — lọc theo cột thì sót một nửa."""
-    _, company = await seed_kb(db_session)
+    _, company = await seed_kb(db_session, user_a)
 
     hits = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, top_k=10, company_id=company.id
+        db_session,
+        [0.0] * settings.embedding_dim,
+        user_id=user_a.id,
+        top_k=10,
+        company_id=company.id,
     )
 
     assert {chunk.source_type for chunk, _ in hits} == {
@@ -548,35 +559,46 @@ async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(db_session, embedder
     }
 
 
-async def test_loc_theo_cong_ty_khac_thi_khong_ra_gi(db_session, embedder, cliproxy):
-    await seed_kb(db_session)
+async def test_loc_theo_cong_ty_khac_thi_khong_ra_gi(db_session, user_a, embedder, cliproxy):
+    await seed_kb(db_session, user_a)
 
     hits = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, top_k=10, company_id=uuid.uuid4()
+        db_session,
+        [0.0] * settings.embedding_dim,
+        user_id=user_a.id,
+        top_k=10,
+        company_id=uuid.uuid4(),
     )
 
     assert hits == []
 
 
-async def test_loc_ap_dung_cho_ca_nhanh_full_text(db_session, embedder, cliproxy):
+async def test_loc_ap_dung_cho_ca_nhanh_full_text(db_session, user_a, embedder, cliproxy):
     """Hai nhánh lọc lệch nhau thì kết quả trộn ra một tập nửa trong nửa ngoài phạm vi."""
-    await seed_kb(db_session)
+    await seed_kb(db_session, user_a)
 
     trong_pham_vi = await kb_repo.search_fulltext(
-        db_session, ["0301234567"], top_k=5, source_type=KBSourceType.COMPANY_PROFILE.value
+        db_session,
+        ["0301234567"],
+        user_id=user_a.id,
+        top_k=5,
+        source_type=KBSourceType.COMPANY_PROFILE.value,
     )
     ngoai_pham_vi = await kb_repo.search_fulltext(
-        db_session, ["0301234567"], top_k=5, source_type=KBSourceType.CARD.value
+        db_session, ["0301234567"], user_id=user_a.id, top_k=5, source_type=KBSourceType.CARD.value
     )
 
     assert len(trong_pham_vi) == 1
     assert ngoai_pham_vi == []
 
 
-async def test_ho_so_chua_gan_cong_ty_khong_lot_vao_pham_vi_cong_ty_nao(db_session, embedder):
+async def test_ho_so_chua_gan_cong_ty_khong_lot_vao_pham_vi_cong_ty_nao(
+    db_session, user_a, embedder
+):
     """Danh thiếp chưa gắn công ty có `metadata.company_id = null` → không thuộc phạm vi nào."""
     card = BusinessCard(
         id=uuid.uuid4(),
+        user_id=user_a.id,
         image_path="cd/cde.jpg",
         image_hash=uuid.uuid4().hex,
         uploaded_at=NOW,
@@ -588,11 +610,17 @@ async def test_ho_so_chua_gan_cong_ty_khong_lot_vao_pham_vi_cong_ty_nao(db_sessi
     )
     db_session.add(card)
     await db_session.flush()
-    await kb_router.reindex(db_session)
+    await kb_router.reindex(db_session, user_a)
 
-    tat_ca = await kb_repo.search_similar(db_session, [0.0] * settings.embedding_dim, top_k=10)
+    tat_ca = await kb_repo.search_similar(
+        db_session, [0.0] * settings.embedding_dim, user_id=user_a.id, top_k=10
+    )
     theo_cong_ty = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, top_k=10, company_id=uuid.uuid4()
+        db_session,
+        [0.0] * settings.embedding_dim,
+        user_id=user_a.id,
+        top_k=10,
+        company_id=uuid.uuid4(),
     )
 
     assert len(tat_ca) == 1

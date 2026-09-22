@@ -15,6 +15,7 @@ from app.core.templates import BASE_DIR
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
 from app.models.kb import KBChunk, KBSourceType
+from app.models.user import User
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.repositories.company import CompanyRow
@@ -22,6 +23,26 @@ from app.routers import companies
 from app.routers.companies import page_count, to_list_item
 from app.services import enrich_jobs
 from app.services.normalize_company import normalize_company_name
+from tests.conftest import make_user
+
+#: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
+#: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
+#: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
+OWNER_ID = uuid.uuid4()
+
+
+@pytest.fixture
+async def owner(db_session: AsyncSession) -> User:
+    """Hàng `users` cho `OWNER_ID` (task 12.8).
+
+    Khoá ngoại `business_cards.user_id` / `companies.user_id` (revision `0005`) đòi chủ sở hữu
+    tồn tại thật, nên test nào **ghi xuống DB** cũng phải dựng hàng này trước. Test chạy trên
+    `FakeSession` thì không cần — vì thế fixture này không autouse.
+    """
+    return await make_user(
+        db_session, "owner-company_api@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+    )
+
 
 COMPANY_ID = uuid.uuid4()
 
@@ -40,6 +61,7 @@ def indexed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
 def make_company(**overrides: Any) -> Company:
     values: dict[str, Any] = {
         "id": COMPANY_ID,
+        "user_id": OWNER_ID,
         "display_name": "Công ty TNHH ABC",
         "name_normalized": "abc",
         "aliases": None,
@@ -50,6 +72,7 @@ def make_company(**overrides: Any) -> Company:
 
 def make_card() -> BusinessCard:
     return BusinessCard(
+        user_id=OWNER_ID,
         id=uuid.uuid4(),
         status="confirmed",
         full_name="Nguyễn Văn A",
@@ -208,6 +231,7 @@ async def test_detail_with_profile_and_contacts(
 
     async def fake_profile(db: Any, company_id: uuid.UUID) -> CompanyProfile:
         return CompanyProfile(
+            user_id=OWNER_ID,
             company_id=company_id,
             tax_code="0301234567",
             industry=None,
@@ -295,6 +319,7 @@ async def test_contacts_unknown_company(
 
 def make_profile(**overrides: Any) -> CompanyProfile:
     values: dict[str, Any] = {
+        "user_id": OWNER_ID,
         "company_id": COMPANY_ID,
         "tax_code": "0301234567",
         "status": "verified",
@@ -447,6 +472,7 @@ async def add_company(
     db: AsyncSession, display_name: str, aliases: list[str] | None = None
 ) -> Company:
     company = Company(
+        user_id=OWNER_ID,
         display_name=display_name,
         name_normalized=normalize_company_name(display_name),
         aliases=aliases,
@@ -458,6 +484,7 @@ async def add_company(
 
 async def add_card(db: AsyncSession, company: Company, full_name: str) -> BusinessCard:
     card = BusinessCard(
+        user_id=OWNER_ID,
         image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
         image_hash=uuid.uuid4().hex * 2,
         status="confirmed",
@@ -470,7 +497,9 @@ async def add_card(db: AsyncSession, company: Company, full_name: str) -> Busine
 
 
 async def add_profile(db: AsyncSession, company: Company, **values: Any) -> CompanyProfile:
-    profile = CompanyProfile(company_id=company.id, **{"status": "generated", **values})
+    profile = CompanyProfile(
+        user_id=OWNER_ID, company_id=company.id, **{"status": "generated", **values}
+    )
     db.add(profile)
     await db.flush()
     return profile
@@ -483,7 +512,7 @@ async def listed_names(client: httpx.AsyncClient, **params: Any) -> list[str]:
 
 
 async def test_db_list_searches_name_alias_and_normalized_key(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     await add_company(db_session, "Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
     await add_company(db_session, "Hanwha Precision Vietnam", ["한화정밀기계"])
@@ -495,7 +524,7 @@ async def test_db_list_searches_name_alias_and_normalized_key(
 
 
 async def test_db_list_treats_like_wildcards_literally(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     await add_company(db_session, "Công ty 100% Việt")
     await add_company(db_session, "Hanwha Precision Vietnam")
@@ -505,7 +534,7 @@ async def test_db_list_treats_like_wildcards_literally(
 
 
 async def test_db_list_filters_by_profile_state(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     generated = await add_company(db_session, "Alpha Generated")
     draft = await add_company(db_session, "Beta Draft")
@@ -523,7 +552,7 @@ async def test_db_list_filters_by_profile_state(
 
 
 async def test_db_list_paginates_and_counts_contacts(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     alpha = await add_company(db_session, "Alpha")
     await add_company(db_session, "Beta")
@@ -541,7 +570,7 @@ async def test_db_list_paginates_and_counts_contacts(
 
 
 async def test_db_detail_returns_profile_and_own_contacts_only(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     company = await add_company(db_session, "Công ty CP Sữa Mộc Châu")
     other = await add_company(db_session, "Hanwha Precision Vietnam")
@@ -564,7 +593,7 @@ async def test_db_detail_returns_profile_and_own_contacts_only(
 
 
 async def test_db_patch_profile_persists_and_drops_only_edited_sources(
-    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
 ) -> None:
     company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
     profile = await add_profile(
@@ -596,7 +625,7 @@ async def test_db_patch_profile_persists_and_drops_only_edited_sources(
 
 
 async def test_db_patch_profile_blocked_by_active_enrich_item(
-    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
 ) -> None:
     company = await add_company(db_session, "Hanwha Precision Vietnam")
     await add_profile(db_session, company, tax_code="0312345678")
@@ -617,7 +646,7 @@ async def test_db_patch_profile_blocked_by_active_enrich_item(
 
 
 async def test_db_detail_while_first_enrich_is_running(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
     await company_repo.ensure_draft_profile(db_session, company.id)
@@ -636,6 +665,7 @@ SOURCED = {"tax_code": [{"url": "https://masothue.com/0101248141"}]}
 async def add_kb_chunk(db: AsyncSession, company: Company) -> None:
     db.add(
         KBChunk(
+            user_id=OWNER_ID,
             source_type=KBSourceType.COMPANY_PROFILE.value,
             source_id=company.id,
             content="Hồ sơ FPT",
@@ -663,7 +693,7 @@ async def stored_status(db: AsyncSession, company: Company) -> str | None:
 
 
 async def test_db_archive_hides_profile_from_list_and_kb(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     fpt = await add_company(db_session, "Tập đoàn FPT")
     await add_company(db_session, "Hanwha Precision Vietnam")
@@ -683,7 +713,7 @@ async def test_db_archive_hides_profile_from_list_and_kb(
 
 
 async def test_db_restore_brings_profile_back_with_inferred_status(
-    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
 ) -> None:
     generated = await add_company(db_session, "Alpha")
     edited = await add_company(db_session, "Beta")
@@ -704,7 +734,7 @@ async def test_db_restore_brings_profile_back_with_inferred_status(
 
 
 async def test_db_archive_and_restore_reject_wrong_states(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     bare = await add_company(db_session, "Alpha")
     drafting = await add_company(db_session, "Beta")
@@ -720,7 +750,7 @@ async def test_db_archive_and_restore_reject_wrong_states(
 
 
 async def test_db_patch_is_refused_while_profile_is_archived(
-    db_session: AsyncSession, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient, indexed: list[uuid.UUID]
 ) -> None:
     company = await add_company(db_session, "Alpha")
     await add_profile(db_session, company, tax_code="0101248141", status="archived")
@@ -734,7 +764,9 @@ async def test_db_patch_is_refused_while_profile_is_archived(
     assert indexed == []
 
 
-async def test_db_cancel_endpoints(db_session: AsyncSession, db_client: httpx.AsyncClient) -> None:
+async def test_db_cancel_endpoints(
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
+) -> None:
     company = await add_company(db_session, "Alpha")
     idle = await add_company(db_session, "Beta")
     job_id = await job_repo.create_job(db_session)
@@ -756,7 +788,7 @@ async def test_db_cancel_endpoints(db_session: AsyncSession, db_client: httpx.As
 
 
 async def test_db_detail_lists_same_tax_code_and_same_domain(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     group = await add_company(db_session, "Tập đoàn FPT")
     twin = await add_company(db_session, "Công ty Cổ phần FPT Việt Nam")
@@ -772,6 +804,7 @@ async def test_db_detail_lists_same_tax_code_and_same_domain(
     ):
         db_session.add(
             BusinessCard(
+                user_id=OWNER_ID,
                 image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
                 image_hash=uuid.uuid4().hex * 2,
                 status="confirmed",
@@ -793,7 +826,7 @@ async def test_db_detail_lists_same_tax_code_and_same_domain(
 
 
 async def test_db_cancel_clears_a_draft_left_after_its_item_expired(
-    db_session: AsyncSession, db_client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, db_client: httpx.AsyncClient
 ) -> None:
     company = await add_company(db_session, "Alpha")
     await company_repo.ensure_draft_profile(db_session, company.id)

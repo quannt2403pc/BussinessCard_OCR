@@ -1,6 +1,6 @@
 """Fixture dùng chung: DB Postgres thật (trong transaction rollback) + mock CLIProxy/embedder.
 
-Chủ sở hữu: Q | Task: 6.1 | xem Task.md
+Chủ sở hữu: Q | Task: 6.1, 12.8 (người dùng + client đã đăng nhập) | xem Task.md
 
 Ba nguyên tắc, mỗi cái đổi lấy một loại lỗi đã gặp thật trong dự án:
 
@@ -30,8 +30,11 @@ import json
 import os
 import random
 import sys
-from collections.abc import AsyncIterator, Iterator
+import uuid
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -45,7 +48,9 @@ from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401  — nạp đủ bảng vào Base.metadata trước khi create_all
 from app.core.config import settings
-from app.core.db import Base
+from app.core.db import Base, get_db
+from app.models.user import User
+from app.services import auth
 
 # Windows: Python 3.12 mặc định dùng `ProactorEventLoop`, mà psycopg v3 ở chế độ async **không
 # chạy được trên loop đó** (`InterfaceError: Psycopg cannot use the 'ProactorEventLoop'`). Ứng
@@ -59,6 +64,9 @@ GENERATE_PATH = f"/v1beta/models/{settings.llm_model}:generateContent"
 
 #: Độ dài chuỗi model giả lập trả về khi test không quan tâm nội dung.
 _MAX_SEQ_LENGTH = 512
+
+#: Mật khẩu của mọi người dùng do fixture tạo ra (task 12.8). Đủ luật của `schemas/user.py`.
+TEST_PASSWORD = "matkhau123"
 
 
 # --------------------------------------------------------------------------- DB thật
@@ -170,6 +178,131 @@ async def db_session(db_schema: str) -> AsyncIterator[AsyncSession]:
                     await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+# --------------------------------------------------------------------------- người dùng (12.8)
+
+
+@lru_cache(maxsize=1)
+def test_password_hash() -> str:
+    """Băm Argon2 của `TEST_PASSWORD`, tính **một lần cho cả phiên test**.
+
+    Argon2 cố ý chậm (~50ms/lượt). Băm lại ở mỗi test cần `user_a` + `user_b` là cộng thêm cả
+    chục giây vào một bộ 400 test mà không kiểm thêm được gì: bản thân việc băm đã có
+    `tests/test_auth.py` của T lo. Ở đây mật khẩu chỉ cần **thật** đủ để đăng nhập được.
+    """
+    return auth.hash_password(TEST_PASSWORD)
+
+
+async def make_user(
+    db: AsyncSession,
+    email: str,
+    display_name: str | None = None,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> User:
+    """Một người dùng thật trong DB, mật khẩu là `TEST_PASSWORD`.
+
+    `user_id` để chỉ định trước id: các file test đã có sẵn một hằng chủ sở hữu dùng chung cho
+    những object ORM được dựng ở tầng module (`OWNER_ID`), mà khoá ngoại `user_id` đòi hàng
+    `users` đó **tồn tại thật** — nên phải tạo được đúng id ấy chứ không nhận một id ngẫu nhiên.
+    """
+    user = User(
+        id=user_id or uuid.uuid4(),
+        email=email,
+        password_hash=test_password_hash(),
+        display_name=display_name,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@pytest.fixture
+async def user_a(db_session: AsyncSession) -> User:
+    """Người dùng A — chủ sở hữu mặc định của dữ liệu trong test một-người-dùng."""
+    return await make_user(db_session, "a@example.com", "Người dùng A")
+
+
+@pytest.fixture
+async def user_b(db_session: AsyncSession) -> User:
+    """Người dùng B — dùng cho các ca tách dữ liệu của task 12.7 (tiêu chí A9)."""
+    return await make_user(db_session, "b@example.com", "Người dùng B")
+
+
+class _SessionHandle:
+    """`async with` trả về đúng session của test và **không đóng** nó.
+
+    `core/security.RequireLoginMiddleware` tự mở session bằng `SessionLocal()` vì nó chạy trước
+    khi FastAPI giải dependency — nên `dependency_overrides[get_db]` không với tới được nó. Để
+    nguyên thì middleware đọc DB qua một connection khác, không thấy hàng `users` đang nằm trong
+    transaction chưa commit của test, và **mọi** request trong test đều bị đá về `/auth/login`.
+    Lớp này là chỗ để `app_client` trỏ `SessionLocal` của middleware vào đúng session ấy.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return False
+
+
+@asynccontextmanager
+async def api_client(
+    db_session: AsyncSession, user: User | None = None
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Client gọi **app thật** với tư cách `user` (`None` = khách chưa đăng nhập).
+
+    Dùng `app.main.app` chứ không dựng một `FastAPI()` rỗng: phần đáng kiểm nhất của 12.4 nằm ở
+    dây nối — middleware chặn, thứ tự middleware, context processor của template — mà app rỗng
+    thì không có gì trong số đó.
+
+    Cookie ký bằng đúng `services/auth.sign_session()` của T, không dựng tay: phiên phải hết hiệu
+    lực khi người dùng đổi mật khẩu, và chỉ hàm đó biết dấu vân tay ấy tính thế nào.
+
+    `follow_redirects=False`: bị chặn thì test phải **thấy** đúng cái `303`, chứ không lặng lẽ đi
+    theo nó rồi khẳng định về nội dung trang đăng nhập.
+    """
+    from app.core import security
+    from app.main import app
+
+    async def override_get_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    original_factory = security.SessionLocal
+    security.SessionLocal = lambda: _SessionHandle(db_session)  # type: ignore[assignment]
+    app.dependency_overrides[get_db] = override_get_db
+    cookies = {auth.SESSION_COOKIE: auth.sign_session(user)} if user is not None else {}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            cookies=cookies,
+            follow_redirects=False,
+        ) as client:
+            yield client
+    finally:
+        security.SessionLocal = original_factory  # type: ignore[assignment]
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+async def app_client(
+    db_session: AsyncSession,
+) -> AsyncIterator[Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]]:
+    """Fixture gói `api_client` lại: `async with app_client(user_a) as http: …`.
+
+    Có cả hai dạng là cố ý: fixture cho test viết mới (12.7 của T), còn hàm `api_client` cho các
+    helper module-level đã tồn tại từ D8 (`tests/test_rag_chat.py`) khỏi phải đổi cấu trúc.
+    """
+
+    def factory(user: User | None = None) -> AbstractAsyncContextManager[httpx.AsyncClient]:
+        return api_client(db_session, user)
+
+    yield factory
 
 
 # --------------------------------------------------------------------------- mock CLIProxy

@@ -110,6 +110,7 @@ async def answer(
     db: AsyncSession,
     question: str,
     *,
+    user_id: uuid.UUID,
     history: Sequence[Turn] = (),
     top_k: int = retriever.TOP_K,
     source_type: KBSourceType | str | None = None,
@@ -121,6 +122,11 @@ async def answer(
     Ném `llm.LLMError` / `embeddings.EmbeddingError` ra ngoài cho router dịch sang mã HTTP —
     người dùng cần biết "chưa kết nối OAuth" khác "embedder chết", mà chỉ router mới biết trả
     503 hay 500.
+
+    `user_id` (task 12.5) giới hạn **toàn bộ** ngữ cảnh trong dữ liệu của chính người hỏi. Nó đi
+    xuống cả hai chỗ đọc DB dưới đây, kể cả câu đếm "KB rỗng?" — đếm toàn cục thì người dùng mới
+    đăng ký, chưa có dữ liệu nào, sẽ nhận câu "không tìm thấy thông tin liên quan" (hàm ý *có* dữ
+    liệu nhưng không khớp) thay vì lời mời quét danh thiếp đầu tiên.
     """
     started = time.perf_counter()
     text = (question or "").strip()
@@ -130,6 +136,7 @@ async def answer(
     hits = await retriever.search(
         db,
         retrieval_query(text, history),
+        user_id=user_id,
         top_k=top_k,
         source_type=source_type,
         company_id=company_id,
@@ -140,7 +147,7 @@ async def answer(
         # Phân biệt "KB rỗng" với "KB có dữ liệu nhưng không liên quan": hai tình huống này đòi
         # người dùng làm hai việc khác hẳn nhau. Chỉ đếm khi đã chắc là không có kết quả nên
         # không thêm một câu SQL vào đường đi thường.
-        empty_kb = await kb_repo.count_chunks(db) == 0
+        empty_kb = await kb_repo.count_chunks(db, user_id=user_id) == 0
         return Answer(
             text=prompt.EMPTY_KB_TEXT if empty_kb else prompt.NO_ANSWER_TEXT,
             citations=[],

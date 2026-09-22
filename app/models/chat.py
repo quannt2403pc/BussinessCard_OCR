@@ -27,6 +27,15 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Chủ sở hữu phiên (task 12.3). `chat_messages` **không** có cột này: lượt chat luôn được
+    # đọc qua phiên của nó, nên một khoá chủ sở hữu ở phiên là đủ và không có chỗ nào để hai
+    # nguồn sự thật lệch nhau. Phần lọc đi qua `repositories/chat.py`.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 

@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.core.config import settings
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
+from app.models.user import User
 from app.services import embeddings, kb, retriever
 from app.services.normalize_company import normalize_company_name
 
@@ -104,17 +105,24 @@ QUERIES: tuple[Query, ...] = (
 class Corpus:
     """Dữ liệu mẫu đã ghi vào DB, kèm ánh xạ `source_id → nhãn` để chấm điểm."""
 
+    #: Chủ sở hữu bộ dữ liệu (task 12.5). Mọi lượt truy hồi phải đi kèm nó, nếu không câu tìm
+    #: lọc theo `user_id` sẽ không thấy chính dữ liệu vừa seed và mọi số đo recall thành 0.
+    user_id: uuid.UUID
     labels: dict[uuid.UUID, str] = field(default_factory=dict)
     documents: list[kb.Document] = field(default_factory=list)
 
 
-async def seed(db: AsyncSession) -> Corpus:
-    """Dựng 4 danh thiếp + 3 hồ sơ doanh nghiệp, đủ 3 ngôn ngữ (Việt, Hàn, Nhật)."""
-    corpus = Corpus()
+async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
+    """Dựng 4 danh thiếp + 3 hồ sơ doanh nghiệp, đủ 3 ngôn ngữ (Việt, Hàn, Nhật).
 
-    dai_viet = _company("Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
-    moc_chau = _company("Công ty CP Sữa Mộc Châu", ["Mocchau Milk"])
-    hanwha = _company("Hanwha Precision Vietnam", ["한화정밀기계"])
+    Toàn bộ bộ dữ liệu thuộc về **một** người dùng (`user_id`, task 12.5): nó là bộ chấm điểm
+    A6 nên phải nằm trọn trong phạm vi mà trợ lý AI của đúng người đó nhìn thấy.
+    """
+    corpus = Corpus(user_id=user_id)
+
+    dai_viet = _company(user_id, "Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
+    moc_chau = _company(user_id, "Công ty CP Sữa Mộc Châu", ["Mocchau Milk"])
+    hanwha = _company(user_id, "Hanwha Precision Vietnam", ["한화정밀기계"])
     db.add_all([dai_viet, moc_chau, hanwha])
     await db.flush()
 
@@ -167,6 +175,7 @@ async def seed(db: AsyncSession) -> Corpus:
             "thẻ An",
             _card(
                 dai_viet,
+                user_id=user_id,
                 full_name="Nguyễn Văn An",
                 job_title="Giám đốc kinh doanh",
                 email="an.nguyen@daiviet-logistics.vn",
@@ -178,6 +187,7 @@ async def seed(db: AsyncSession) -> Corpus:
             "thẻ Bình",
             _card(
                 moc_chau,
+                user_id=user_id,
                 full_name="Trần Thị Bình",
                 job_title="Trưởng phòng Marketing",
                 email="binh.tran@mocchaumilk.vn",
@@ -189,6 +199,7 @@ async def seed(db: AsyncSession) -> Corpus:
             "thẻ Kim",
             _card(
                 hanwha,
+                user_id=user_id,
                 full_name="Kim Min-jun",
                 job_title="Sales Manager / 영업 과장",
                 email="minjun.kim@hanwha.co.kr",
@@ -200,6 +211,7 @@ async def seed(db: AsyncSession) -> Corpus:
             "thẻ Tanaka",
             _card(
                 None,
+                user_id=user_id,
                 full_name="田中 太郎",
                 job_title="営業部長",
                 company_raw="東京テック株式会社",
@@ -240,7 +252,12 @@ async def evaluate(db: AsyncSession, corpus: Corpus) -> None:
             # `min_similarity=-1.0`: **cố ý tắt ngưỡng ở đây**. Đây là lượt chạy dùng để *chọn*
             # ngưỡng, áp ngưỡng hiện tại vào thì số đo chỉ xác nhận lại chính nó.
             hits = await retriever.search(
-                db, query.text, top_k=largest, min_similarity=-1.0, hybrid=hybrid
+                db,
+                query.text,
+                user_id=corpus.user_id,
+                top_k=largest,
+                min_similarity=-1.0,
+                hybrid=hybrid,
             )
             rows.append((query, hits))
         results[leg] = rows
@@ -248,7 +265,7 @@ async def evaluate(db: AsyncSession, corpus: Corpus) -> None:
     _print_per_query(results["hybrid"], corpus)
     _print_recall(results, corpus)
     _print_threshold(results["hybrid"], corpus)
-    await _print_text_leg(db)
+    await _print_text_leg(db, corpus.user_id)
     _print_chunks(corpus)
 
 
@@ -321,12 +338,12 @@ def _print_threshold(rows: Sequence[tuple[Query, list[retriever.Hit]]], corpus: 
         print(f"ngưỡng đang dùng: {retriever.MIN_SIMILARITY:.2f}")
 
 
-async def _print_text_leg(db: AsyncSession) -> None:
+async def _print_text_leg(db: AsyncSession, user_id: uuid.UUID) -> None:
     """Nhánh full-text rút ra từ khoá gì, và có khớp được không."""
     print("\n=== Nhánh full-text: từ khoá rút được ===")
     for query in QUERIES:
         terms = retriever.query_terms(query.text)
-        hits = await retriever.text_search(db, query.text, top_k=5)
+        hits = await retriever.text_search(db, query.text, user_id=user_id, top_k=5)
         print(f"{_cut(query.text, 45):<46} {str(terms):<52} → {len(hits)} chunk")
 
 
@@ -359,7 +376,7 @@ def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _company(display_name: str, aliases: list[str]) -> Company:
+def _company(user_id: uuid.UUID, display_name: str, aliases: list[str]) -> Company:
     # `name_normalized` dùng **đúng hàm chuẩn hoá của T**, không phải một chuỗi hex ngẫu nhiên
     # như bản đầu: `scripts/seed.py` (9.2) commit bộ dữ liệu này vào DB thật, mà khoá ngẫu nhiên
     # thì lần sau người dùng xác nhận một danh thiếp của đúng công ty đó, `upsert_company()`
@@ -367,6 +384,7 @@ def _company(display_name: str, aliases: list[str]) -> Company:
     # nên số đo truy hồi của 7.4 không đổi.
     return Company(
         id=uuid.uuid4(),
+        user_id=user_id,
         display_name=display_name,
         name_normalized=normalize_company_name(display_name),
         aliases=aliases,
@@ -376,6 +394,7 @@ def _company(display_name: str, aliases: list[str]) -> Company:
 def _profile(company: Company, **overrides) -> CompanyProfile:
     values = {
         "id": uuid.uuid4(),
+        "user_id": company.user_id,
         "company_id": company.id,
         "legal_name": company.display_name,
         "founded_year": 2005,
@@ -394,6 +413,7 @@ def _profile(company: Company, **overrides) -> CompanyProfile:
 def _card(
     company: Company | None,
     *,
+    user_id: uuid.UUID,
     full_name: str,
     job_title: str,
     email: str,
@@ -403,6 +423,7 @@ def _card(
 ) -> BusinessCard:
     return BusinessCard(
         id=uuid.uuid4(),
+        user_id=user_id,
         image_path=f"ev/{uuid.uuid4().hex}.jpg",
         image_hash=uuid.uuid4().hex,
         uploaded_at=NOW,
@@ -432,7 +453,17 @@ async def run() -> int:
                 expire_on_commit=False,
             )
             try:
-                corpus = await seed(db)
+                # Người dùng dùng thử: bộ dữ liệu này phải thuộc về **một ai đó** từ D12, và cả
+                # nó lẫn tài khoản này đều bị rollback ở cuối nên không để lại gì trong DB thật.
+                owner = User(
+                    email=f"eval-{uuid.uuid4().hex[:8]}@bizcard.local",
+                    password_hash="!khong-dang-nhap-duoc",
+                    display_name="Tài khoản đo truy hồi (7.4)",
+                )
+                db.add(owner)
+                await db.flush()
+
+                corpus = await seed(db, user_id=owner.id)
                 await evaluate(db, corpus)
             finally:
                 await db.close()

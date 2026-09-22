@@ -12,7 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
+from app.models.user import User
 from app.routers import export
+from tests.conftest import make_user
+
+#: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
+#: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. Test ở đây không
+#: kiểm việc tách dữ liệu (đó là 12.6/12.7) nên một chủ sở hữu duy nhất là đủ.
+OWNER_ID = uuid.uuid4()
+
+
+@pytest.fixture
+async def owner(db_session: AsyncSession) -> User:
+    """Hàng `users` cho `OWNER_ID` (task 12.8).
+
+    Khoá ngoại `business_cards.user_id` / `companies.user_id` (revision `0005`) đòi chủ sở hữu
+    tồn tại thật, nên test nào **ghi xuống DB** cũng phải dựng hàng này trước. Test chạy trên
+    `FakeSession` thì không cần — vì thế fixture này không autouse.
+    """
+    return await make_user(
+        db_session, "owner-export@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+    )
 
 
 class SessionFactory:
@@ -43,6 +63,7 @@ async def client(
 
 def card(**kwargs: object) -> BusinessCard:
     values: dict[str, object] = {
+        "user_id": OWNER_ID,
         "image_path": f"export/{uuid.uuid4().hex[:8]}.jpg",
         "image_hash": uuid.uuid4().hex * 2,
         "status": CardStatus.CONFIRMED,
@@ -57,9 +78,9 @@ def read_csv(response: httpx.Response) -> list[list[str]]:
 
 
 async def test_cards_csv_keeps_bom_header_and_vietnamese(
-    db_session: AsyncSession, client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(display_name="Công ty FPT", name_normalized="fpt")
+    company = Company(user_id=OWNER_ID, display_name="Công ty FPT", name_normalized="fpt")
     db_session.add(company)
     await db_session.flush()
     db_session.add(card(full_name="Nguyễn Văn A", job_title="Giám đốc", company_id=company.id))
@@ -77,7 +98,7 @@ async def test_cards_csv_keeps_bom_header_and_vietnamese(
 
 
 async def test_cards_csv_exports_card_without_company(
-    db_session: AsyncSession, client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
     db_session.add(card(full_name="Trần Thị B", company_name_raw="Cty chưa gắn"))
     await db_session.flush()
@@ -89,7 +110,9 @@ async def test_cards_csv_exports_card_without_company(
     assert rows[1][rows[0].index("company_name_raw")] == "Cty chưa gắn"
 
 
-async def test_cards_filter_by_status(db_session: AsyncSession, client: httpx.AsyncClient) -> None:
+async def test_cards_filter_by_status(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
     db_session.add_all(
         [
             card(full_name="Đã xác nhận", status=CardStatus.CONFIRMED),
@@ -113,9 +136,11 @@ async def test_cards_invalid_status_is_rejected(client: httpx.AsyncClient) -> No
 
 
 async def test_companies_export_includes_company_without_profile(
-    db_session: AsyncSession, client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(display_name="Chưa có hồ sơ", name_normalized="chua co ho so")
+    company = Company(
+        user_id=OWNER_ID, display_name="Chưa có hồ sơ", name_normalized="chua co ho so"
+    )
     db_session.add(company)
     await db_session.flush()
 
@@ -130,9 +155,9 @@ async def test_companies_export_includes_company_without_profile(
 
 
 async def test_companies_export_profile_lists_and_sources(
-    db_session: AsyncSession, client: httpx.AsyncClient
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(display_name="FPT Software", name_normalized="fpt software")
+    company = Company(user_id=OWNER_ID, display_name="FPT Software", name_normalized="fpt software")
     db_session.add(company)
     await db_session.flush()
     db_session.add_all(
@@ -140,6 +165,7 @@ async def test_companies_export_profile_lists_and_sources(
             card(company_id=company.id),
             card(company_id=company.id),
             CompanyProfile(
+                user_id=OWNER_ID,
                 company_id=company.id,
                 status="generated",
                 legal_name="Công ty TNHH Phần mềm FPT",
@@ -168,7 +194,10 @@ async def test_companies_export_profile_lists_and_sources(
 
 
 async def test_export_reads_every_row_across_batches(
-    db_session: AsyncSession, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    db_session: AsyncSession,
+    owner: User,
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(export, "EXPORT_BATCH_SIZE", 2)
     db_session.add_all([card(full_name=f"Người {index}") for index in range(5)])

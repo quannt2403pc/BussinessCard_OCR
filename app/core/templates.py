@@ -12,7 +12,12 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
+from app.core.security import template_context
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+#: `context_processors` chạy cho **mọi** lượt render, nên `current_user` luôn có trong template
+#: (task 12.4). Không dùng nó thì mỗi route HTML — của cả Q lẫn T — phải tự truyền biến người
+#: dùng xuống, và route nào quên thì `base.html` mất nút Đăng xuất mà không báo gì.
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR), context_processors=[template_context])

@@ -18,12 +18,23 @@ class Company(Base):
         # review PR.** Không có thay đổi nào khác của Q trong file này.
         # Số đo của T: danh sách công ty trang 1 2.13 → 0.11 ms; export mỗi lô 5.18 → 0.76 ms.
         Index("ix_companies_display_name_id", "display_name", "id"),
+        # ⚠️ Lần thứ hai **Q** chạm file của **T**, lần này ở task 12.5 (luật nới D12, quy ước 2:
+        # T review PR). Chỉ hai thứ, và cả hai là *bắt buộc để hệ thống ghi được*: cột `user_id`
+        # và unique theo người dùng — revision `0005` đã áp vào DB cả hai, nên model thiếu chúng
+        # là `INSERT` nào vào `companies` cũng chết (`NOT NULL`), kéo theo cả nút Xác nhận của F1.
+        # **Phần lọc theo `user_id` ở F2 (repository / router / matching) vẫn là task 12.6 của T**
+        # — ở đây cố ý không chạm dòng nghiệp vụ nào.
+        Index("ix_companies_user_id_name_normalized", "user_id", "name_normalized", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name_normalized: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
+    name_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
@@ -43,6 +54,15 @@ class CompanyProfile(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Suy ra được qua `company_id`, nhưng `0005` vẫn gắn thẳng vào đây (xem `OWNED_TABLES` trong
+    # revision): lọc mà phải JOIN thêm một bảng mới biết của ai là chỗ dễ quên, quên một chỗ là
+    # rò dữ liệu. `services/kb.py` đọc đúng cột này để biết chunk hồ sơ thuộc về ai.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
     )

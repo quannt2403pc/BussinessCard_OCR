@@ -15,6 +15,15 @@ Ba việc, đúng ranh giới của một repository (router/service lo nghiệp
 Index `ivfflat` (cosine) do revision `0003` tạo và `models/kb.py` khai — xem ghi chú ở đó về
 lý do tạo muộn.
 
+**Task 12.5 — `user_id` là tham số bắt buộc của mọi hàm đọc/ghi ở đây.** Đây là file quyết định
+tiêu chí **A9**: rò một chunk không hiện ra ở danh sách nào cả, nó đi thẳng vào ngữ cảnh của trợ
+lý AI rồi ra thành một câu trả lời tự tin về dữ liệu của người khác. Hai nhánh tìm kiếm đều nhận
+điều kiện `user_id` qua **cùng một** hàm `scope_filters()` — chép điều kiện lọc ra hai chỗ là
+cách chắc chắn nhất để một hôm nào đó chúng lệch nhau.
+
+Riêng `rebuild_vector_index()` là lệnh `REINDEX` trên cả index, không có khái niệm người dùng —
+xem ghi chú tại hàm.
+
 **Không hàm nào trong file này commit.** Một lượt reindex ghi hàng chục nguồn; commit từng
 nguồn thì nửa chừng hỏng là KB ở trạng thái nửa cũ nửa mới, còn để chỗ gọi quyết định thì nó
 gom được đúng một batch vào một transaction (xem `services/kb.py::index_documents`).
@@ -89,6 +98,7 @@ class ChunkRow:
 async def replace_chunks(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     source_type: KBSourceType | str,
     source_id: uuid.UUID,
     chunks: Sequence[ChunkRow],
@@ -99,10 +109,11 @@ async def replace_chunks(
     model trả về, nên không có khoá nào để ghép cặp dòng cũ với dòng mới. Bỏ bước xoá thì mỗi
     lần "Tạo lại hồ sơ" (task 6.7) lại nhân đôi dữ liệu trong KB và trợ lý trích dẫn bản cũ.
     """
-    await delete_for_source(db, source_type=source_type, source_id=source_id)
+    await delete_for_source(db, user_id=user_id, source_type=source_type, source_id=source_id)
     db.add_all(
         [
             KBChunk(
+                user_id=user_id,
                 source_type=str(source_type),
                 source_id=source_id,
                 content=chunk.content,
@@ -119,16 +130,23 @@ async def replace_chunks(
 async def delete_for_source(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     source_type: KBSourceType | str,
     source_id: uuid.UUID,
 ) -> int:
-    """Gỡ một nguồn khỏi KB (xoá danh thiếp ở 4.2, hoặc trước khi ghi lại). Trả số dòng đã xoá."""
+    """Gỡ một nguồn khỏi KB (xoá danh thiếp ở 4.2, hoặc trước khi ghi lại). Trả số dòng đã xoá.
+
+    `user_id` trong `WHERE` không phải để chống rò (id nguồn là UUID của chính người đó) mà để
+    **chặn xoá chéo**: một lỗi lập trình truyền sang id của người khác thì câu này không xoá gì
+    cả, thay vì âm thầm móc KB của họ.
+    """
     # `Session.execute()` khai kiểu trả về là `Result`; chỉ câu DML mới có `rowcount`, nên
     # phải nói rõ với mypy thay vì gắn `# type: ignore` mù.
     result = cast(
         "CursorResult[Any]",
         await db.execute(
             delete(KBChunk).where(
+                KBChunk.user_id == user_id,
                 KBChunk.source_type == str(source_type),
                 KBChunk.source_id == source_id,
             )
@@ -137,9 +155,14 @@ async def delete_for_source(
     return int(result.rowcount or 0)
 
 
-async def count_chunks(db: AsyncSession, *, source_type: KBSourceType | str | None = None) -> int:
-    """Đếm chunk trong KB — dùng cho `/api/kb/reindex` và dashboard (7.7)."""
-    query = select(func.count()).select_from(KBChunk)
+async def count_chunks(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    source_type: KBSourceType | str | None = None,
+) -> int:
+    """Đếm chunk **của một người** trong KB — dùng cho `/api/kb/reindex` và dashboard (7.7)."""
+    query = select(func.count()).select_from(KBChunk).where(KBChunk.user_id == user_id)
     if source_type is not None:
         query = query.where(KBChunk.source_type == str(source_type))
     return int(await db.scalar(query) or 0)
@@ -155,6 +178,11 @@ async def rebuild_vector_index(db: AsyncSession) -> None:
 
     `REINDEX INDEX` (không `CONCURRENTLY`) khoá bảng trong lúc chạy. Chấp nhận được vì đây là
     thao tác quản trị trên KB cỡ vài trăm dòng, mất vài chục mili giây.
+
+    **Cố ý không có `user_id`** (task 12.5): index là một cấu trúc của cả bảng, không chia theo
+    người dùng được. Nó không đọc và không trả về dữ liệu của ai, nên không phải đường rò; đổi
+    lại, một người bấm "Index lại" sẽ khoá bảng `kb_chunks` trong vài chục mili giây của mọi
+    người — cái giá đúng với quy mô hai tài khoản của bản demo.
     """
     await db.execute(text(f"REINDEX INDEX {VECTOR_INDEX_NAME}"))
 
@@ -162,6 +190,7 @@ async def rebuild_vector_index(db: AsyncSession) -> None:
 async def card_batch(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     after: uuid.UUID | None = None,
     limit: int = BATCH_SIZE,
 ) -> Sequence[tuple[BusinessCard, str | None]]:
@@ -177,7 +206,10 @@ async def card_batch(
     query = (
         select(BusinessCard, Company.display_name)
         .outerjoin(Company, BusinessCard.company_id == Company.id)
-        .where(BusinessCard.status.in_([str(status) for status in INDEXABLE_CARD_STATUSES]))
+        .where(
+            BusinessCard.user_id == user_id,
+            BusinessCard.status.in_([str(status) for status in INDEXABLE_CARD_STATUSES]),
+        )
         .order_by(BusinessCard.id)
         .limit(limit)
     )
@@ -191,6 +223,7 @@ async def card_batch(
 async def profile_batch(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     after: uuid.UUID | None = None,
     limit: int = BATCH_SIZE,
 ) -> Sequence[tuple[CompanyProfile, Company]]:
@@ -202,7 +235,10 @@ async def profile_batch(
     query = (
         select(CompanyProfile, Company)
         .join(Company, CompanyProfile.company_id == Company.id)
-        .where(CompanyProfile.status.in_(INDEXABLE_PROFILE_STATUSES))
+        .where(
+            CompanyProfile.user_id == user_id,
+            CompanyProfile.status.in_(INDEXABLE_PROFILE_STATUSES),
+        )
         .order_by(CompanyProfile.id)
         .limit(limit)
     )
@@ -215,10 +251,14 @@ async def profile_batch(
 
 def scope_filters(
     *,
+    user_id: uuid.UUID,
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
 ) -> list[ColumnElement[bool]]:
-    """Điều kiện thu hẹp phạm vi tìm kiếm, dùng chung cho **cả hai** nhánh (task 8.5).
+    """Điều kiện thu hẹp phạm vi tìm kiếm, dùng chung cho **cả hai** nhánh (task 8.5 + 12.5).
+
+    `user_id` là điều kiện đầu tiên và **không tắt được bằng tham số nào** — khác hẳn hai bộ lọc
+    dưới, vốn do người dùng chọn trên giao diện. Đây là ranh giới của tiêu chí A9.
 
     Một hàm chứ không chép hai lần: hai nhánh lọc lệch nhau thì kết quả trộn ra một tập hỗn hợp
     nửa trong phạm vi nửa ngoài — trợ lý trích dẫn đúng một công ty mà người dùng không hề chọn,
@@ -233,7 +273,7 @@ def scope_filters(
     nên nó không bao giờ khớp — đúng ý: chưa biết thuộc công ty nào thì không thuộc phạm vi
     công ty nào cả.
     """
-    filters: list[ColumnElement[bool]] = []
+    filters: list[ColumnElement[bool]] = [KBChunk.user_id == user_id]
     if source_type is not None:
         filters.append(KBChunk.source_type == str(source_type))
     if company_id is not None:
@@ -245,6 +285,7 @@ async def search_similar(
     db: AsyncSession,
     embedding: Sequence[float],
     *,
+    user_id: uuid.UUID,
     top_k: int = 5,
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
@@ -261,6 +302,11 @@ async def search_similar(
     lấy `LIMIT` — cái bẫy quen thuộc của ANN là lọc sau khi index đã cắt còn k dòng thì kết quả
     rỗng dù dữ liệu có thật. Ở đây không dính vì `VECTOR_PROBES = lists` quét hết mọi cụm; nếu
     sau này hạ `probes` xuống thì phải đo lại đúng trường hợp lọc hẹp (một công ty ít chunk).
+
+    ⚠️ **`user_id` phải nằm trong `WHERE` của chính câu này** (task 12.5), không được sàng lại
+    danh sách trả về: sàng sau thì top-5 của A bị chunk của B chiếm chỗ rồi bị bỏ đi, A hỏi về dữ
+    liệu của chính mình lại nhận "không có thông tin" — vừa rò (ranking phụ thuộc dữ liệu người
+    khác) vừa sai.
     """
     # `SET LOCAL` chứ không `SET`: chỉ có hiệu lực tới hết transaction hiện tại, nên không rò
     # sang request khác đang dùng chung connection trong pool. Không truyền được tham số bind cho
@@ -269,7 +315,7 @@ async def search_similar(
 
     distance = KBChunk.embedding.cosine_distance(list(embedding)).label("distance")
     query = select(KBChunk, distance).order_by(distance).limit(top_k)
-    for condition in scope_filters(source_type=source_type, company_id=company_id):
+    for condition in scope_filters(user_id=user_id, source_type=source_type, company_id=company_id):
         query = query.where(condition)
 
     rows = await db.execute(query)
@@ -293,6 +339,7 @@ async def search_fulltext(
     db: AsyncSession,
     terms: Sequence[str],
     *,
+    user_id: uuid.UUID,
     top_k: int = 5,
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
@@ -335,7 +382,7 @@ async def search_fulltext(
     query = (
         select(KBChunk, rank).where(tsvector.op("@@")(tsquery)).order_by(rank.desc()).limit(top_k)
     )
-    for condition in scope_filters(source_type=source_type, company_id=company_id):
+    for condition in scope_filters(user_id=user_id, source_type=source_type, company_id=company_id):
         query = query.where(condition)
 
     rows = await db.execute(query)

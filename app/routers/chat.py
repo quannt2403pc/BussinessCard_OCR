@@ -1,6 +1,7 @@
 """F3 — `POST /api/chat`, trả answer + citations.
 
-Chủ sở hữu: Q | Task: 8.2, 8.3 (lịch sử), 8.4 (trang `/assistant`), 8.5 (bộ lọc) | xem Task.md
+Chủ sở hữu: Q | Task: 8.2, 8.3 (lịch sử), 8.4 (trang `/assistant`), 8.5 (bộ lọc), 12.5 (tách
+theo người dùng) | xem Task.md
 
 Router là lớp HTTP mỏng: nghiệp vụ nằm ở `services/assistant.py`, câu SQL ở
 `repositories/chat.py`. Cùng lối `cards.py` → `services/ocr.py`, và nhờ thế phần đáng test nhất
@@ -28,6 +29,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.chat import ChatRole
 from app.repositories import chat as chat_repo
@@ -86,6 +88,7 @@ async def assistant_page(request: Request) -> HTMLResponse:
 async def chat(
     payload: ChatIn,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> ChatOut:
     """Hỏi trợ lý: truy hồi KB → dựng ngữ cảnh → gọi Gemini Flash → trả lời kèm trích dẫn.
 
@@ -97,19 +100,22 @@ async def chat(
     session = None
 
     if payload.session_id is not None:
-        session = await chat_repo.get_session(db, payload.session_id)
+        session = await chat_repo.get_session(db, payload.session_id, user_id=user.id)
         if session is None:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 detail=f"Không có phiên hội thoại {payload.session_id}.",
             )
-        rows = await chat_repo.recent_messages(db, session.id, limit=assistant.HISTORY_TURNS)
+        rows = await chat_repo.recent_messages(
+            db, session.id, user_id=user.id, limit=assistant.HISTORY_TURNS
+        )
         history = [Turn(role=row.role, content=row.content) for row in rows]
 
     try:
         result = await assistant.answer(
             db,
             payload.question,
+            user_id=user.id,
             history=history,
             source_type=payload.filters.source_type,
             company_id=payload.filters.company_id,
@@ -125,7 +131,7 @@ async def chat(
 
     # Có câu trả lời rồi mới đụng tới DB — xem ghi chú thứ tự ghi ở đầu file.
     if session is None:
-        session = await chat_repo.create_session(db, title=payload.question)
+        session = await chat_repo.create_session(db, user_id=user.id, title=payload.question)
 
     # `dataclasses.asdict` chứ không `vars()`: `assistant.Citation` khai `slots=True` nên nó
     # không có `__dict__`, và `vars()` ném `TypeError` ngay lượt hỏi đầu tiên.
@@ -163,15 +169,16 @@ async def chat(
 async def get_chat_session(
     session_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> ChatSessionOut:
     """Đọc lại toàn bộ một phiên hội thoại (task 8.3) — dùng khi mở lại trang bằng `?session=`."""
-    session = await chat_repo.get_session(db, session_id)
+    session = await chat_repo.get_session(db, session_id, user_id=user.id)
     if session is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail=f"Không có phiên hội thoại {session_id}."
         )
 
-    messages = await chat_repo.list_messages(db, session_id)
+    messages = await chat_repo.list_messages(db, session_id, user_id=user.id)
     return ChatSessionOut(
         session_id=session.id,
         title=session.title,

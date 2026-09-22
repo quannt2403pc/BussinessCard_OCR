@@ -1,6 +1,6 @@
 """F1 — upload, danh sách, chi tiết, sửa, xoá, confirm danh thiếp.
 
-Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3 | xem Task.md
+Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 12.5 | xem Task.md
 
 Router khai **đường dẫn đầy đủ** thay vì đặt `prefix="/api/cards"`, theo đúng tiền lệ
 `routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn bốn trang HTML
@@ -52,6 +52,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.card import BusinessCard, CardStatus
 from app.models.kb import KBSourceType
@@ -184,6 +185,7 @@ async def card_detail_page(request: Request, card_id: uuid.UUID) -> HTMLResponse
 async def upload_card(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
     file: Annotated[UploadFile, File(description="Ảnh danh thiếp: JPEG/PNG/WEBP/BMP/TIFF/GIF")],
 ) -> CardUploadOut:
     """Nhận 1 ảnh → tiền xử lý → gọi Gemini Vision → lưu `business_cards`.
@@ -195,7 +197,7 @@ async def upload_card(
     raw = await _read_limited(file)
     image_hash = hashlib.sha256(raw).hexdigest()
 
-    existing = await card_repo.get_by_hash(db, image_hash)
+    existing = await card_repo.get_by_hash(db, image_hash, user_id=user.id)
     if existing is not None:
         response.status_code = status.HTTP_200_OK
         logger.info("Ảnh đã quét trước đó, trả lại card %s", existing.id)
@@ -227,6 +229,7 @@ async def upload_card(
     try:
         card = await card_repo.create_card(
             db,
+            user_id=user.id,
             image_path=relative_path,
             image_hash=image_hash,
             fields=fields,
@@ -236,7 +239,7 @@ async def upload_card(
         )
     except card_repo.DuplicateImageError:
         # Hai lượt upload cùng một ảnh chạy song song; lượt kia đã ghi xong (task 5.2).
-        raced = await card_repo.get_by_hash(db, image_hash)
+        raced = await card_repo.get_by_hash(db, image_hash, user_id=user.id)
         if raced is None:  # không xảy ra trên PostgreSQL, nhưng đừng trả None cho client
             raise
         response.status_code = status.HTTP_200_OK
@@ -274,6 +277,7 @@ async def upload_card(
 )
 async def batch_upload_cards(
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
     files: Annotated[list[UploadFile], File(description="Nhiều ảnh danh thiếp")],
 ) -> BatchUploadOut:
     """Nhận nhiều ảnh → lưu hết ngay → trả `job_id`, việc quét chạy nền (task 5.2).
@@ -296,9 +300,9 @@ async def batch_upload_cards(
         )
 
     started = time.perf_counter()
-    items = [await _stage(db, upload) for upload in files]
+    items = [await _stage(db, upload, user_id=user.id) for upload in files]
 
-    job = card_batch.create_job(items)
+    job = card_batch.create_job(items, user_id=user.id)
     card_batch.start(job)
 
     queued = sum(1 for item in items if item.status is card_batch.ItemStatus.PENDING)
@@ -323,9 +327,15 @@ async def batch_upload_cards(
 
 
 @router.get("/api/cards/batch-jobs/{job_id}", response_model=BatchJobOut, tags=["cards"])
-async def get_batch_job(job_id: uuid.UUID) -> BatchJobOut:
-    """Tiến trình một lượt batch — `templates/cards/batch.html` poll endpoint này (task 5.3)."""
+async def get_batch_job(job_id: uuid.UUID, user: CurrentUser) -> BatchJobOut:
+    """Tiến trình một lượt batch — `templates/cards/batch.html` poll endpoint này (task 5.3).
+
+    Job của người khác trả **404 y như job không tồn tại** (task 12.5): phân biệt hai ca
+    đó là tự xác nhận "có một lượt quét mang id này, chỉ không phải của bạn".
+    """
     job = card_batch.get_job(job_id)
+    if job is not None and job.user_id != user.id:
+        job = None
     if job is None:
         # Nói thẳng job sống trong bộ nhớ: 404 trơ ở đây đọc như "ID sai", trong khi nguyên nhân
         # thật thường là container vừa restart (`--reload` nạp lại khi sửa code) — hai việc phải
@@ -344,6 +354,7 @@ async def get_batch_job(job_id: uuid.UUID) -> BatchJobOut:
 @router.get("/api/cards", response_model=CardListOut, tags=["cards"])
 async def list_cards(
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
     q: Annotated[str | None, Query(description="Tìm trong họ tên / tên công ty / email")] = None,
     card_status: Annotated[
         str | None, Query(alias="status", description="pending | needs_review | confirmed")
@@ -368,6 +379,7 @@ async def list_cards(
 
     rows, total = await card_repo.list_cards(
         db,
+        user_id=user.id,
         q=q,
         status=card_status,
         company_id=company_id,
@@ -390,9 +402,10 @@ async def list_cards(
 async def get_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> CardDetailOut:
     """Chi tiết một danh thiếp, kèm `ocr_raw_json` để đối chiếu khi nghi OCR sai (task 4.2)."""
-    card = await _get_or_404(db, card_id)
+    card = await _get_or_404(db, card_id, user_id=user.id)
     return CardDetailOut.model_validate(card)
 
 
@@ -400,6 +413,7 @@ async def get_card(
 async def get_card_image(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> FileResponse:
     """Ảnh đã tiền xử lý của một danh thiếp — UI dùng làm thumbnail (4.4) và ảnh gốc (5.1).
 
@@ -408,7 +422,7 @@ async def get_card_image(
     nhưng hash nằm sẵn trong mọi response `CardDetail`). Đi qua endpoint này thì về sau thêm
     kiểm tra quyền chỉ phải sửa một chỗ.
     """
-    card = await _get_or_404(db, card_id)
+    card = await _get_or_404(db, card_id, user_id=user.id)
     path = _resolve_image(card.image_path)
     if path is None:
         raise HTTPException(
@@ -423,6 +437,7 @@ async def update_card(
     card_id: uuid.UUID,
     payload: CardUpdateIn,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> CardDetailOut:
     """Sửa tay các trường sau khi review (task 4.2).
 
@@ -433,7 +448,7 @@ async def update_card(
     **Cố ý không đụng `status`.** Sửa nội dung không phải là xác nhận — chuyển sang `confirmed`
     là việc của `POST /{id}/confirm` (task 4.3), nơi mới có bước gắn công ty.
     """
-    card = await _get_or_404(db, card_id)
+    card = await _get_or_404(db, card_id, user_id=user.id)
 
     changes = payload.changes()
     if not changes:
@@ -466,6 +481,7 @@ async def update_card(
 async def delete_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> Response:
     """Xoá một danh thiếp và file ảnh của nó (task 4.2).
 
@@ -473,13 +489,15 @@ async def delete_card(
     file đã mất — hỏng theo kiểu im lặng, chỉ lộ ra khi có người mở đúng bản ghi đó. Xoá file
     hỏng thì chỉ ghi log: file thừa nằm lại trong volume không làm hỏng gì.
     """
-    card = await _get_or_404(db, card_id)
+    card = await _get_or_404(db, card_id, user_id=user.id)
     image_path = card.image_path
 
     # Gỡ khỏi KB **trong cùng transaction** với việc xoá hàng (`delete_for_source` không commit,
     # `delete_card` commit cả hai). Bỏ bước này thì chunk mồ côi ở lại và trợ lý vẫn trích dẫn
     # một danh thiếp đã xoá — dữ liệu người dùng tưởng đã xoá mà vẫn trả lời ra được.
-    await kb_repo.delete_for_source(db, source_type=KBSourceType.CARD, source_id=card.id)
+    await kb_repo.delete_for_source(
+        db, user_id=user.id, source_type=KBSourceType.CARD, source_id=card.id
+    )
 
     await card_repo.delete_card(db, card)
 
@@ -498,6 +516,7 @@ async def delete_card(
 async def confirm_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
 ) -> CardConfirmOut:
     """Người dùng duyệt xong → `confirmed` + gắn `company_id` (task 4.3).
 
@@ -510,7 +529,7 @@ async def confirm_card(
     và `detail` nói rõ vì sao chưa gắn. Chặn lại sẽ khiến toàn bộ luồng F1 đứng chờ một task của
     người khác.
     """
-    card = await _get_or_404(db, card_id)
+    card = await _get_or_404(db, card_id, user_id=user.id)
 
     company_id = card.company_id
     detail: str | None = None
@@ -521,7 +540,7 @@ async def confirm_card(
         detail = "Danh thiếp không có tên công ty nên chưa gắn được vào bảng companies."
     else:
         company_id, detail = await _upsert_company(
-            db, raw_name, email=card.email, website=card.website
+            db, raw_name, user_id=user.id, email=card.email, website=card.website
         )
 
     card.company_id = company_id
@@ -547,7 +566,9 @@ async def confirm_card(
 # --------------------------------------------------------------------------- nội bộ
 
 
-async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
+async def _stage(
+    db: AsyncSession, upload: UploadFile, *, user_id: uuid.UUID
+) -> card_batch.BatchItem:
     """Một file trong lượt batch: đọc → băm → chống trùng → nén → ghi volume → bản ghi `pending`.
 
     Trả về `BatchItem` **ở mọi nhánh**, kể cả nhánh hỏng: hàng đợi cần một dòng cho mỗi file
@@ -570,9 +591,10 @@ async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
         )
 
     image_hash = hashlib.sha256(raw).hexdigest()
-    if (existing := await card_repo.get_by_hash(db, image_hash)) is not None:
+    if (existing := await card_repo.get_by_hash(db, image_hash, user_id=user_id)) is not None:
         return card_batch.BatchItem(
             filename=filename,
+            user_id=user_id,
             card_id=existing.id,
             status=card_batch.ItemStatus.DONE,
             duplicate=True,
@@ -590,6 +612,7 @@ async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
     try:
         card = await card_repo.create_card(
             db,
+            user_id=user_id,
             image_path=relative_path,
             image_hash=image_hash,
             status=CardStatus.PENDING,
@@ -597,11 +620,12 @@ async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
         )
     except card_repo.DuplicateImageError:
         # Cùng một ảnh nằm hai lần trong chính lượt này: lượt trước đã commit xong.
-        raced = await card_repo.get_by_hash(db, image_hash)
+        raced = await card_repo.get_by_hash(db, image_hash, user_id=user_id)
         if raced is None:  # không xảy ra trên PostgreSQL
             raise
         return card_batch.BatchItem(
             filename=filename,
+            user_id=user_id,
             card_id=raced.id,
             status=card_batch.ItemStatus.DONE,
             duplicate=True,
@@ -609,6 +633,7 @@ async def _stage(db: AsyncSession, upload: UploadFile) -> card_batch.BatchItem:
 
     return card_batch.BatchItem(
         filename=filename,
+        user_id=user_id,
         card_id=card.id,
         image_path=settings.upload_dir / relative_path,
         status=card_batch.ItemStatus.PENDING,
@@ -645,8 +670,14 @@ def _job_out(job: card_batch.BatchJob) -> BatchJobOut:
     )
 
 
-async def _get_or_404(db: AsyncSession, card_id: uuid.UUID) -> BusinessCard:
-    card = await card_repo.get(db, card_id)
+async def _get_or_404(db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID) -> BusinessCard:
+    """Danh thiếp của **người đang đăng nhập**, hoặc 404.
+
+    Thẻ của người khác và thẻ không tồn tại trả **cùng một** 404 với **cùng một câu**
+    (task 12.5, Plan.md mục 4): khác nhau ở đâu — mã, câu chữ, hay thời gian phản hồi —
+    là còn một kênh để dò xem id nào có thật.
+    """
+    card = await card_repo.get(db, card_id, user_id=user_id)
     if card is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Không có danh thiếp này.")
     return card
@@ -734,6 +765,7 @@ async def _upsert_company(
     db: AsyncSession,
     raw_name: str,
     *,
+    user_id: uuid.UUID,
     email: str | None = None,
     website: str | None = None,
 ) -> tuple[uuid.UUID | None, str | None]:
@@ -763,7 +795,17 @@ async def _upsert_company(
         )
 
     try:
-        return await upsert(db, raw_name, email=email, website=website), None
+        return await upsert(db, raw_name, user_id=user_id, email=email, website=website), None
+    except TypeError as exc:
+        # `upsert_company()` chưa nhận `user_id` (task 12.6 của T chưa xong). Nói thẳng ra
+        # thay vì để nó lẫn vào câu "gắn công ty thất bại: …" chung chung: đây là việc
+        # đang chờ người khác, không phải lỗi dữ liệu của người dùng.
+        await db.rollback()
+        logger.info("upsert_company() chưa nhận user_id (task 12.6 của T): %s", exc)
+        return None, (
+            "Đã xác nhận. Chưa gắn được công ty: `company_matching.upsert_company()` chưa "
+            "nhận `user_id` — task 12.6 (chủ sở hữu T). Gắn lại được sau khi task đó xong."
+        )
     except Exception as exc:  # T sở hữu hàm này; lỗi của nó không được làm hỏng việc xác nhận
         await db.rollback()
         logger.warning("upsert_company(%r) lỗi: %s", raw_name, exc)

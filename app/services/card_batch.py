@@ -84,6 +84,10 @@ class BatchItem:
     """
 
     filename: str
+    #: Chủ sở hữu bản ghi (task 12.5). Job chạy **sau** khi request đã trả 202, tức không còn
+    #: cookie phiên nào để hỏi lại "ai đang upload" — người sở hữu phải đi kèm từng mục ngay từ
+    #: lúc xếp hàng, nếu không `card_repo.get()` (nay đòi `user_id`) không tra lại được bản ghi.
+    user_id: uuid.UUID | None = None
     card_id: uuid.UUID | None = None
     image_path: Path | None = None
     status: ItemStatus = ItemStatus.PENDING
@@ -99,6 +103,10 @@ class BatchJob:
     """Một lượt upload hàng loạt."""
 
     id: uuid.UUID
+    #: Người bấm nút upload. `GET /api/cards/batch-jobs/{id}` đối chiếu trường này: `job_id` là
+    #: UUID khó đoán, nhưng "khó đoán" không phải kiểm soát truy cập — tiến trình quét của người
+    #: khác vẫn là dữ liệu của người khác.
+    user_id: uuid.UUID
     items: list[BatchItem]
     created_at: datetime
     finished_at: datetime | None = None
@@ -136,9 +144,9 @@ _JOBS: OrderedDict[uuid.UUID, BatchJob] = OrderedDict()
 _TASKS: set[asyncio.Task[None]] = set()
 
 
-def create_job(items: list[BatchItem]) -> BatchJob:
+def create_job(items: list[BatchItem], *, user_id: uuid.UUID) -> BatchJob:
     """Ghi một job mới vào sổ và trả về. Chưa chạy gì — gọi `start()` để khởi động."""
-    job = BatchJob(id=uuid.uuid4(), items=items, created_at=datetime.now(UTC))
+    job = BatchJob(id=uuid.uuid4(), user_id=user_id, items=items, created_at=datetime.now(UTC))
     _JOBS[job.id] = job
     while len(_JOBS) > MAX_JOBS:
         evicted, _ = _JOBS.popitem(last=False)
@@ -259,8 +267,11 @@ async def _scan(item: BatchItem) -> None:
 
     result = await ocr.extract_card(data, mime_type=image_service.OUTPUT_MIME)
 
+    if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
+        raise BatchItemError("Mục này không biết thuộc về ai.")
+
     async with SessionLocal() as db:
-        card = await card_repo.get(db, item.card_id)
+        card = await card_repo.get(db, item.card_id, user_id=item.user_id)
         if card is None:
             raise BatchItemError("Bản ghi đã bị xoá trong lúc chờ quét.")
 
@@ -293,16 +304,18 @@ def _fail(item: BatchItem, reason: str) -> None:
     if item.card_id is not None:
         # Hàm này đồng bộ (gọi từ cả `run_job` lẫn `_process`) nên không await được ở đây —
         # giao phần ghi DB cho một task rời.
-        task = asyncio.create_task(_note_failure(item.card_id, reason))
+        task = asyncio.create_task(_note_failure(item.card_id, reason, user_id=item.user_id))
         _TASKS.add(task)
         task.add_done_callback(_TASKS.discard)
 
 
-async def _note_failure(card_id: uuid.UUID, reason: str) -> None:
+async def _note_failure(card_id: uuid.UUID, reason: str, *, user_id: uuid.UUID | None) -> None:
     """Ghi lý do quét hỏng vào `business_cards.notes`, giữ nguyên trạng thái `pending`."""
+    if user_id is None:
+        return
     try:
         async with SessionLocal() as db:
-            card = await card_repo.get(db, card_id)
+            card = await card_repo.get(db, card_id, user_id=user_id)
             if card is None:
                 return
             card.notes = f"Quét hàng loạt thất bại: {reason}"

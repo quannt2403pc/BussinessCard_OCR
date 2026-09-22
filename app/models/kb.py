@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Index, String, Text, func
+from sqlalchemy import ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -66,6 +66,17 @@ class KBChunk(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Chủ sở hữu chunk (task 12.3). Đây là cột **quan trọng nhất** của việc tách dữ liệu ở F3:
+    # rò một chunk là trợ lý AI đọc được dữ liệu của người khác rồi trả lời ra thành câu — đường
+    # rò khó thấy nhất mà tiêu chí A9 nhắm tới. Mọi câu tìm kiếm phải có nó trong `WHERE`
+    # (`repositories/kb.py::scope_filters`), không lọc lại sau khi đã lấy về.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     # Không đặt FK: trỏ tới business_cards hoặc company_profiles tuỳ `source_type`.

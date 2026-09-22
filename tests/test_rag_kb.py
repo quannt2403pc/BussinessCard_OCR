@@ -34,10 +34,16 @@ from tests.conftest import fake_vector
 
 NOW = datetime(2026, 9, 16, 8, 30, tzinfo=UTC)
 
+#: Chủ sở hữu mặc định của các factory dưới đây. Phần lớn test trong file này **chỉ
+#: serialize** (không ghi DB) nên một UUID rời là đủ; test nào ghi thật thì truyền
+#: `user_id=user_a.id` để khoá ngoại `users` khớp — xem `seed()`.
+ANY_USER = uuid.uuid4()
+
 
 def make_card(**overrides) -> BusinessCard:
     values = {
         "id": uuid.uuid4(),
+        "user_id": ANY_USER,
         "image_path": "ab/abc.jpg",
         "image_hash": uuid.uuid4().hex,
         "uploaded_at": NOW,
@@ -58,6 +64,7 @@ def make_card(**overrides) -> BusinessCard:
 def make_company(**overrides) -> Company:
     values = {
         "id": uuid.uuid4(),
+        "user_id": ANY_USER,
         "display_name": "Công ty TNHH ABC",
         "name_normalized": f"abc-{uuid.uuid4().hex[:8]}",
         "aliases": ["ABC Co., Ltd"],
@@ -69,6 +76,7 @@ def make_company(**overrides) -> Company:
 def make_profile(company: Company, **overrides) -> CompanyProfile:
     values = {
         "id": uuid.uuid4(),
+        "user_id": company.user_id,
         "company_id": company.id,
         "legal_name": "Công ty TNHH Thương mại ABC",
         "tax_code": "0301234567",
@@ -347,31 +355,39 @@ async def _no_sleep(_seconds: float) -> None:
 # --------------------------------------------------------------------------- 6.3 + 6.4 cần DB
 
 
-async def seed(db_session) -> tuple[BusinessCard, Company, CompanyProfile]:
-    company = make_company()
+async def seed(db_session, user) -> tuple[BusinessCard, Company, CompanyProfile]:
+    company = make_company(user_id=user.id)
     db_session.add(company)
     await db_session.flush()
 
-    card = make_card(company_id=company.id)
+    card = make_card(user_id=user.id, company_id=company.id)
     profile = make_profile(company)
     db_session.add_all([card, profile])
     await db_session.flush()
     return card, company, profile
 
 
-async def test_reindex_ghi_ca_danh_thiep_lan_ho_so(db_session, embedder):
-    card, company, _ = await seed(db_session)
+async def test_reindex_ghi_ca_danh_thiep_lan_ho_so(db_session, user_a, embedder):
+    card, company, _ = await seed(db_session, user_a)
 
-    result = await kb_router.reindex(db_session)
+    result = await kb_router.reindex(db_session, user_a)
 
     assert (result.cards, result.profiles) == (1, 1)
     assert result.chunks == result.total_chunks > 0
     assert result.model == settings.embedding_model
-    assert await kb_repo.count_chunks(db_session, source_type=KBSourceType.CARD) == 1
-    assert await kb_repo.count_chunks(db_session, source_type=KBSourceType.COMPANY_PROFILE) >= 1
+    assert (
+        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        == 1
+    )
+    assert (
+        await kb_repo.count_chunks(
+            db_session, user_id=user_a.id, source_type=KBSourceType.COMPANY_PROFILE
+        )
+        >= 1
+    )
 
 
-async def test_reindex_khong_dua_vao_expire_on_commit(db_session, embedder):
+async def test_reindex_khong_dua_vao_expire_on_commit(db_session, user_a, embedder):
     """Bắt đúng lỗi đã gặp khi chạy thật 2026-09-16.
 
     `index_documents()` commit sau mỗi lô, và commit làm mọi object ORM hết hạn. Bản đầu của
@@ -379,96 +395,107 @@ async def test_reindex_khong_dua_vao_expire_on_commit(db_session, embedder):
     giữa một hàm async và nổ `MissingGreenlet`. Ở app thật không thấy vì `SessionLocal` đặt
     `expire_on_commit=False`; test này dùng session **có** hết hạn để lỗi ấy không quay lại.
     """
-    await seed(db_session)
+    await seed(db_session, user_a)
     strict = AsyncSession(
         bind=await db_session.connection(),
         join_transaction_mode="create_savepoint",
         expire_on_commit=True,
     )
 
-    result = await kb_router.reindex(strict)
+    result = await kb_router.reindex(strict, user_a)
 
     assert (result.cards, result.profiles) == (1, 1)
     await strict.close()
 
 
-async def test_reindex_hai_lan_khong_nhan_doi_du_lieu(db_session, embedder):
-    await seed(db_session)
+async def test_reindex_hai_lan_khong_nhan_doi_du_lieu(db_session, user_a, embedder):
+    await seed(db_session, user_a)
 
-    first = await kb_router.reindex(db_session)
-    second = await kb_router.reindex(db_session)
+    first = await kb_router.reindex(db_session, user_a)
+    second = await kb_router.reindex(db_session, user_a)
 
     assert second.total_chunks == first.total_chunks
 
 
-async def test_reindex_bo_qua_the_chua_xac_nhan_va_ho_so_draft(db_session, embedder):
-    company = make_company()
+async def test_reindex_bo_qua_the_chua_xac_nhan_va_ho_so_draft(db_session, user_a, embedder):
+    company = make_company(user_id=user_a.id)
     db_session.add(company)
     await db_session.flush()
     db_session.add_all(
         [
-            make_card(company_id=company.id, status=CardStatus.NEEDS_REVIEW.value),
+            make_card(
+                user_id=user_a.id,
+                company_id=company.id,
+                status=CardStatus.NEEDS_REVIEW.value,
+            ),
             make_profile(company, status="draft", description=None),
         ]
     )
     await db_session.flush()
 
-    result = await kb_router.reindex(db_session)
+    result = await kb_router.reindex(db_session, user_a)
 
     assert (result.cards, result.profiles, result.chunks) == (0, 0, 0)
 
 
-async def test_reindex_gioi_han_pham_vi_theo_scope(db_session, embedder):
-    await seed(db_session)
+async def test_reindex_gioi_han_pham_vi_theo_scope(db_session, user_a, embedder):
+    await seed(db_session, user_a)
 
-    result = await kb_router.reindex(db_session, scope=ReindexScope.CARD)
+    result = await kb_router.reindex(db_session, user_a, scope=ReindexScope.CARD)
 
     assert (result.cards, result.profiles) == (1, 0)
 
 
-async def test_reindex_bao_503_khi_embedder_chua_len(db_session):
-    await seed(db_session)
+async def test_reindex_bao_503_khi_embedder_chua_len(db_session, user_a):
+    await seed(db_session, user_a)
 
     with respx.mock(base_url=settings.embedder_url) as router:
         router.get("/health").mock(side_effect=httpx.ConnectError("connection refused"))
 
         with pytest.raises(HTTPException) as exc:
-            await kb_router.reindex(db_session)
+            await kb_router.reindex(db_session, user_a)
 
     assert exc.value.status_code == 503
 
 
-async def test_tim_theo_vector_tra_ve_dung_chunk_gan_nhat(db_session, embedder):
-    card, company, _ = await seed(db_session)
-    await kb_router.reindex(db_session)
+async def test_tim_theo_vector_tra_ve_dung_chunk_gan_nhat(db_session, user_a, embedder):
+    card, company, _ = await seed(db_session, user_a)
+    await kb_router.reindex(db_session, user_a)
 
-    chunk_content = (await kb_repo.card_batch(db_session))[0][0]
+    chunk_content = (await kb_repo.card_batch(db_session, user_id=user_a.id))[0][0]
     assert chunk_content is not None  # giữ cho mypy vui; dữ liệu đã có ở trên
 
-    truy_van = await kb_repo.search_similar(db_session, fake_vector("không liên quan"), top_k=5)
+    truy_van = await kb_repo.search_similar(
+        db_session, fake_vector("không liên quan"), user_id=user_a.id, top_k=5
+    )
     assert truy_van, "KB rỗng — reindex chưa ghi được gì"
 
     # Tìm bằng đúng vector của một chunk đã lưu thì chính nó phải đứng đầu, khoảng cách ~0.
     first = truy_van[0][0]
-    exact = await kb_repo.search_similar(db_session, fake_vector(first.content), top_k=1)
+    exact = await kb_repo.search_similar(
+        db_session, fake_vector(first.content), user_id=user_a.id, top_k=1
+    )
     assert exact[0][0].id == first.id
     assert exact[0][1] == pytest.approx(0.0, abs=1e-6)
 
 
-async def test_xoa_nguon_khoi_kb(db_session, embedder):
-    card, _, _ = await seed(db_session)
+async def test_xoa_nguon_khoi_kb(db_session, user_a, embedder):
+    card, _, _ = await seed(db_session, user_a)
     await kb.ingest_card(db_session, card)
 
     removed = await kb_repo.delete_for_source(
-        db_session, source_type=KBSourceType.CARD, source_id=card.id
+        db_session, user_id=user_a.id, source_type=KBSourceType.CARD, source_id=card.id
     )
 
     assert removed == 1
-    assert await kb_repo.count_chunks(db_session, source_type=KBSourceType.CARD) == 0
+    assert (
+        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        == 0
+    )
 
 
-async def test_ingest_ho_so_la_ham_T_goi_o_task_7_5(db_session, embedder):
-    _, company, profile = await seed(db_session)
+async def test_ingest_ho_so_la_ham_T_goi_o_task_7_5(db_session, user_a, embedder):
+    _, company, profile = await seed(db_session, user_a)
 
     written = await kb.ingest_company_profile(db_session, profile, company=company)
 

@@ -97,6 +97,21 @@ CLIProxyAPI về máy**:
 | localhost:51121 | Callback OAuth; không mở tay, trình duyệt tự quay về |
 | http://localhost:8001 | Service `embedder` (`/health`, `/embed`) |
 
+### Tạo tài khoản (bắt buộc từ D12)
+
+Hệ thống có đăng nhập nhiều người dùng, và **dữ liệu của mỗi tài khoản là riêng**. Chưa đăng nhập
+thì mọi đường dẫn đều bị chặn, trừ `/auth/*` và `/health`:
+
+1. Mở **http://localhost:8000** → bị chuyển sang trang đăng nhập.
+2. Bấm **Đăng ký**, nhập email + mật khẩu (tối thiểu 8 ký tự, có cả chữ lẫn số).
+3. Xong là vào thẳng ứng dụng; đổi tên hiển thị hoặc mật khẩu ở **/account**.
+
+Máy mới dựng từ `docker compose up -d` thì **không có tài khoản nào sẵn** — người đầu tiên tự đăng
+ký. Riêng máy đã có dữ liệu từ trước D12, migration `0005` dồn toàn bộ dữ liệu cũ về một tài khoản
+khởi tạo `owner@bizcard.local` **không đăng nhập được** (mật khẩu để ở dạng không bao giờ khớp);
+muốn dùng lại dữ liệu đó thì nối nó sang tài khoản của mình bằng SQL, hoặc nạp lại bằng
+`scripts/seed.py --user <email của bạn>`.
+
 ### Kết nối AI (bắt buộc trước khi quét hay tạo hồ sơ)
 
 1. Mở **http://localhost:8000/settings**.
@@ -116,7 +131,14 @@ docker compose exec api python -m scripts.seed
 
 # Bộ demo: 7 thẻ thật ở trạng thái cuối buổi demo, KHÔNG gọi model lần nào
 docker compose exec api python -m scripts.seed --demo
+
+# Nạp vào đúng tài khoản của bạn (mặc định là demo@bizcard.local / demo12345)
+docker compose exec api python -m scripts.seed --user ban@example.com --password matkhau123
 ```
+
+Dữ liệu seed **thuộc về một tài khoản cụ thể** (từ D12). Không truyền `--user` thì script dùng
+`demo@bizcard.local`, tự tạo nếu chưa có và in mật khẩu ra màn hình — đăng nhập bằng tài khoản đó
+mới thấy dữ liệu vừa nạp. Tài khoản đã tồn tại thì script **không đổi mật khẩu** của nó.
 
 Hai bộ khác nhau và khác mục đích — đọc docstring đầu `scripts/seed.py` trước khi dùng. Bộ
 `--demo` là lưới an toàn khi mạng hoặc OAuth hỏng giữa buổi trình bày; nạp nó rồi thì **không
@@ -138,6 +160,10 @@ quét lại được đúng những tấm ảnh đó** (hệ thống chặn trù
 | Câu hỏi tiếng Việt **gõ không dấu** không ra gì | Hạn chế đã biết (I-23 / B-10), chưa xử lý | Gõ có dấu |
 | Model trả `429 cooldown` | Tài khoản Google bị giới hạn tạm thời | Đổi `LLM_MODEL` sang model khác ở `/settings`, hoặc chờ |
 | `alembic` báo nhiều head | Hai người cùng sinh revision | **Chỉ Q sinh Alembic revision**; CI có job bắt lỗi này |
+| Mọi trang đều nhảy về `/auth/login`, API trả `401` | Đúng như thiết kế từ D12: chưa đăng nhập thì chỉ `/auth/*` và `/health` mở | Đăng ký một tài khoản (xem *Tạo tài khoản*). Cả `/docs` cũng cần đăng nhập |
+| Container `api` chết ngay khi khởi động, log báo `No module named 'argon2'` | Image cũ, dựng trước khi D12 thêm `argon2-cffi` + `itsdangerous` vào `requirements.txt` | `docker compose build api && docker compose up -d api` |
+| Mọi lệnh ghi báo `null value in column "user_id" … violates not-null constraint` | DB đã lên revision `0005` nhưng mã ứng dụng còn cũ hơn nó | `git pull` rồi `docker compose up -d api`; phần ORM khớp `0005` có từ task 12.5 |
+| Đăng nhập được nhưng không thấy dữ liệu đã quét trước D12 | Dữ liệu cũ thuộc tài khoản khởi tạo `owner@bizcard.local` (migration `0005`), không phải tài khoản mới của bạn | Xem *Tạo tài khoản* ở trên |
 | Script Python chết ngay dòng in đầu tiên trên Windows | stdout về `cp1252` khi không phải console, chữ Việt/Nhật không mã hoá được (B-01) | Đặt `PYTHONIOENCODING=utf-8`, hoặc chạy trong container |
 | Sau `docker compose down -v` mọi thứ trống trơn | `-v` xoá cả `pgdata`, `uploads` **và** `cliproxy_auths` | Kết nối lại OAuth rồi `python -m scripts.seed` |
 

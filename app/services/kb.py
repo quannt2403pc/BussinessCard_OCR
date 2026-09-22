@@ -1,10 +1,17 @@
 """Knowledge Base cho F3: biến danh thiếp / hồ sơ DN thành văn bản, chunk, nhúng vector.
 
-Chủ sở hữu: Q | Task: 6.2 | xem Task.md
+Chủ sở hữu: Q | Task: 6.2, 12.5 | xem Task.md
 
 Hai hàm ở cuối file là **hợp đồng với T** (bảng "Ba chỗ hai người gọi code của nhau", đầu
 Task.md): `ingest_card()` và `ingest_company_profile()`. T gọi hàm thứ hai ở cuối luồng enrich
 (task 7.5) và không cần biết gì về chunk, tiền tố hay pgvector.
+
+⚠️ **Task 12.5 — chữ ký hai hàm hợp đồng đó KHÔNG đổi, cố ý.** Chunk cần `user_id`, nhưng thay vì
+thêm một tham số (mà mọi chỗ gọi phải nhớ truyền đúng, và truyền sai thì ghi dữ liệu người này
+vào KB người khác), chủ sở hữu **suy ra từ chính bản ghi nguồn**: `card.user_id`,
+`profile.user_id`. Hệ quả đáng giá: `services/enrich_jobs.py` của T (task 7.5) gọi
+`ingest_company_profile(db, profile)` y như cũ, không phải sửa dòng nào, và **không có cách nào
+gọi sai người**.
 
 Ba quyết định đáng nêu, vì chúng quyết định chất lượng trả lời của trợ lý về sau:
 
@@ -90,8 +97,13 @@ class Document:
     """Toàn bộ chunk của **một** nguồn (một danh thiếp, hoặc một hồ sơ DN).
 
     Là đơn vị ghi đè: `index_documents()` xoá hết chunk cũ của `source_id` rồi ghi bộ mới.
+
+    `user_id` đi kèm ngay trong đơn vị ghi (task 12.5) chứ không truyền song song: một lượt
+    reindex xử lý nhiều Document, và một tham số `user_id` chung cho cả lô là chỗ để hai thứ
+    lệch nhau khi về sau có ai gom Document của nhiều nguồn vào một lời gọi.
     """
 
+    user_id: uuid.UUID
     source_type: KBSourceType
     source_id: uuid.UUID
     chunks: list[Chunk]
@@ -214,6 +226,7 @@ def build_card_document(card: BusinessCard, *, company_name: str | None = None) 
         "uploaded_at": _iso(card.uploaded_at),
     }
     return Document(
+        user_id=card.user_id,
         source_type=KBSourceType.CARD,
         source_id=card.id,
         chunks=_to_chunks(title, body, meta),
@@ -227,6 +240,15 @@ def build_profile_document(company: Company, profile: CompanyProfile) -> Documen
     hồ sơ" (6.7) có thể sinh ra hàng `company_profiles` mới với id khác. Neo theo `company_id`
     thì lần ghi sau tự xoá đè bản trước; neo theo id hồ sơ thì KB giữ lại cả hồ sơ đã bị thay.
     """
+    # Hai bảng, cùng một chủ sở hữu — `0005` gắn `user_id` cho cả `companies` lẫn
+    # `company_profiles`. Lệch nhau nghĩa là dữ liệu đã hỏng ở đâu đó phía trên (một hồ sơ nối
+    # sang công ty của người khác); ghi vào KB lúc đó là biến một lỗi dữ liệu thành đường rò.
+    if company.user_id != profile.user_id:
+        raise ValueError(
+            f"Hồ sơ {profile.id} (user {profile.user_id}) không cùng chủ với công ty "
+            f"{company.id} (user {company.user_id}) — không index."
+        )
+
     title, body = serialize_company_profile(company, profile)
     meta = {
         "kind": KBSourceType.COMPANY_PROFILE.value,
@@ -239,6 +261,7 @@ def build_profile_document(company: Company, profile: CompanyProfile) -> Documen
         "sources": _source_urls(profile.sources),
     }
     return Document(
+        user_id=profile.user_id,
         source_type=KBSourceType.COMPANY_PROFILE,
         source_id=company.id,
         chunks=_to_chunks(title, body, meta),
@@ -277,6 +300,7 @@ async def index_documents(
         cursor += len(doc.chunks)
         written += await kb_repo.replace_chunks(
             db,
+            user_id=doc.user_id,
             source_type=doc.source_type,
             source_id=doc.source_id,
             chunks=rows,

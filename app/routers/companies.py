@@ -259,8 +259,14 @@ async def archive_company_profile(
         )
     if profile.status != ProfileStatus.ARCHIVED:
         profile.status = ProfileStatus.ARCHIVED.value
+        # Q sửa một dòng ở task 12.5 (luật nới D12 — T review PR): `delete_for_source()` nay đòi
+        # `user_id`. Lấy từ `profile.user_id` chứ không từ người đang đăng nhập: route này chưa
+        # có `current_user` (đó là **task 12.6 của T**), mà chủ sở hữu hồ sơ thì bản ghi đã biết.
         await kb_repo.delete_for_source(
-            db, source_type=KBSourceType.COMPANY_PROFILE, source_id=company_id
+            db,
+            user_id=profile.user_id,
+            source_type=KBSourceType.COMPANY_PROFILE,
+            source_id=company_id,
         )
         await db.commit()
         logger.info("Company %s: ẩn hồ sơ", company_id)

@@ -39,6 +39,10 @@
         BusinessCard<span class="text-sky-600">OCR</span>
       </a>
 
+      {# Task 12.4: chưa đăng nhập thì chỉ còn trang `/auth/*`, nên nav trỏ vào các trang bị chặn
+         chỉ là những liên kết cụt — ẩn cả khối đi. `current_user` do context processor của
+         `core/templates.py` đưa vào **mọi** template, không route nào phải truyền. #}
+      {% if current_user %}
       <ul class="flex items-center gap-1 text-sm">
         {% for key, label, href in nav_items %}
         <li>
@@ -51,13 +55,28 @@
         </li>
         {% endfor %}
       </ul>
+      {% endif %}
 
       <div class="ml-auto flex items-center gap-3 text-sm">
+        {% if current_user %}
         {# Badge trạng thái OAuth CLIProxy được thay bằng nội dung thật ở task 2.5. #}
         {% block nav_status %}
         <a href="/settings" class="text-slate-400 hover:text-slate-600">Trạng thái kết nối</a>
         {% endblock %}
         <a href="/docs" class="text-slate-400 hover:text-slate-600">API</a>
+        <a href="/account" class="max-w-40 truncate font-medium text-slate-600 hover:text-slate-900"
+           title="{{ current_user.email }}">{{ current_user.label }}</a>
+        {# POST chứ không phải link: đăng xuất là hành động đổi trạng thái, mà `GET` thì mọi thứ
+           prefetch trước một liên kết đều đăng xuất người dùng hộ họ. #}
+        <form method="post" action="/auth/logout">
+          <button type="submit" class="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            Đăng xuất
+          </button>
+        </form>
+        {% else %}
+        <a href="/auth/login" class="font-medium text-sky-700 hover:text-sky-800">Đăng nhập</a>
+        <a href="/auth/register" class="text-slate-500 hover:text-slate-700">Đăng ký</a>
+        {% endif %}
       </div>
     </nav>
   </header>

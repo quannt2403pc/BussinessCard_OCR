@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.models.company import Company, CompanyProfile, EnrichJob, EnrichJobItem
+from app.models.user import User
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.routers import companies
@@ -40,6 +41,29 @@ from app.services.llm import (
     LLMNotConnectedError,
 )
 from app.services.normalize_company import normalize_company_name
+from tests.conftest import make_user
+
+#: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
+#: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
+#: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
+OWNER_ID = uuid.uuid4()
+
+
+@pytest.fixture
+async def owner(db_session: AsyncSession) -> User:
+    """Hàng `users` cho `OWNER_ID` (task 12.8).
+
+    Khoá ngoại `business_cards.user_id` / `companies.user_id` (revision `0005`) đòi chủ sở hữu
+    tồn tại thật, nên test nào **ghi xuống DB** cũng phải dựng hàng này trước. Test chạy trên
+    `FakeSession` thì không cần — vì thế fixture này không autouse.
+    """
+    return await make_user(
+        db_session,
+        "owner-company_enrich_jobs@example.com",
+        "Chủ sở hữu dữ liệu test",
+        user_id=OWNER_ID,
+    )
+
 
 JOB_ID = uuid.uuid4()
 COMPANY_ID = uuid.uuid4()
@@ -258,7 +282,7 @@ async def test_enrich_one_starts_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_company(db: Any, company_id: uuid.UUID) -> Company:
-        return Company(id=company_id, display_name="ABC", name_normalized="abc")
+        return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
 
     async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
         assert ids == [COMPANY_ID]
@@ -283,7 +307,7 @@ async def test_enrich_one_conflict_returns_existing_job(
     running_job = uuid.uuid4()
 
     async def fake_company(db: Any, company_id: uuid.UUID) -> Company:
-        return Company(id=company_id, display_name="ABC", name_normalized="abc")
+        return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
 
     async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
         return JobCreated(job_id=JOB_ID, accepted=0, skipped=list(ids))
@@ -450,7 +474,7 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
             return 7
 
     async def fake_get_company(db: Any, cid: uuid.UUID) -> Company:
-        return Company(id=cid, display_name="ABC", name_normalized="abc")
+        return Company(user_id=OWNER_ID, id=cid, display_name="ABC", name_normalized="abc")
 
     async def fake_contacts(db: Any, cid: uuid.UUID) -> list[Any]:
         return []
@@ -483,7 +507,9 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
 
 async def add_company(db: AsyncSession, display_name: str) -> Company:
     company = Company(
-        display_name=display_name, name_normalized=normalize_company_name(display_name)
+        user_id=OWNER_ID,
+        display_name=display_name,
+        name_normalized=normalize_company_name(display_name),
     )
     db.add(company)
     await db.flush()
@@ -503,6 +529,7 @@ async def item_status(db: AsyncSession, item_id: uuid.UUID) -> tuple[str, str | 
 
 async def test_db_second_active_item_for_same_company_is_rejected(
     db_session: AsyncSession,
+    owner: User,
 ) -> None:
     company = await add_company(db_session, "Công ty TNHH Logistics Đại Việt")
     first_job = await job_repo.create_job(db_session)
@@ -516,7 +543,9 @@ async def test_db_second_active_item_for_same_company_is_rejected(
     assert await job_repo.active_job_id(db_session, company.id) == first_job
 
 
-async def test_db_running_item_still_blocks_a_new_one(db_session: AsyncSession) -> None:
+async def test_db_running_item_still_blocks_a_new_one(
+    db_session: AsyncSession, owner: User
+) -> None:
     company = await add_company(db_session, "Hanwha Precision Vietnam")
     job_id = await job_repo.create_job(db_session)
     item_id = await job_repo.add_item(db_session, job_id, company.id)
@@ -532,7 +561,7 @@ async def test_db_running_item_still_blocks_a_new_one(db_session: AsyncSession) 
 
 @pytest.mark.parametrize("final", [JobItemStatus.DONE, JobItemStatus.ERROR])
 async def test_db_finished_item_frees_the_company(
-    db_session: AsyncSession, final: JobItemStatus
+    db_session: AsyncSession, owner: User, final: JobItemStatus
 ) -> None:
     company = await add_company(db_session, "Công ty CP Sữa Mộc Châu")
     job_id = await job_repo.create_job(db_session)
@@ -546,7 +575,9 @@ async def test_db_finished_item_frees_the_company(
     assert await job_repo.active_job_id(db_session, company.id) is not None
 
 
-async def test_db_stale_items_expire_and_fresh_ones_stay(db_session: AsyncSession) -> None:
+async def test_db_stale_items_expire_and_fresh_ones_stay(
+    db_session: AsyncSession, owner: User
+) -> None:
     stale_company = await add_company(db_session, "Alpha Stale")
     fresh_company = await add_company(db_session, "Beta Fresh")
     job_id = await job_repo.create_job(db_session)
@@ -571,6 +602,7 @@ async def test_db_stale_items_expire_and_fresh_ones_stay(db_session: AsyncSessio
 
 async def test_db_create_job_dedupes_input_and_reports_busy_companies(
     db_session: AsyncSession,
+    owner: User,
 ) -> None:
     idle = await add_company(db_session, "Alpha Idle")
     busy = await add_company(db_session, "Beta Busy")
@@ -584,7 +616,9 @@ async def test_db_create_job_dedupes_input_and_reports_busy_companies(
     assert await job_repo.pending_item_ids(db_session, created.job_id) != []
 
 
-async def test_db_create_job_with_nothing_accepted_is_finished(db_session: AsyncSession) -> None:
+async def test_db_create_job_with_nothing_accepted_is_finished(
+    db_session: AsyncSession, owner: User
+) -> None:
     busy = await add_company(db_session, "Beta Busy")
     await job_repo.add_item(db_session, await job_repo.create_job(db_session), busy.id)
 
@@ -714,7 +748,7 @@ async def job_finished(db: AsyncSession, job_id: uuid.UUID) -> bool:
 
 
 async def test_db_run_job_saves_every_company_and_closes_the_job(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     job_id = await run_enrich(
         db_session, pipeline, {"Alpha": [sourced_profile()], "Beta": [sourced_profile()]}
@@ -732,7 +766,7 @@ async def test_db_run_job_saves_every_company_and_closes_the_job(
 
 
 async def test_db_run_job_isolates_a_failing_company(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     job_id = await run_enrich(
         db_session,
@@ -750,7 +784,7 @@ async def test_db_run_job_isolates_a_failing_company(
 
 
 async def test_db_run_job_retries_transient_errors_until_success(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     job_id = await run_enrich(
         db_session,
@@ -764,7 +798,7 @@ async def test_db_run_job_retries_transient_errors_until_success(
 
 
 async def test_db_run_job_gives_up_after_max_attempts(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     job_id = await run_enrich(db_session, pipeline, {"Alpha": [LLMError("timeout")] * MAX_ATTEMPTS})
 
@@ -775,7 +809,7 @@ async def test_db_run_job_gives_up_after_max_attempts(
 
 
 async def test_db_run_job_aborts_remaining_items_when_cliproxy_is_not_connected(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     offline = [LLMNotConnectedError("no auth")]
     job_id = await run_enrich(
@@ -790,10 +824,14 @@ async def test_db_run_job_aborts_remaining_items_when_cliproxy_is_not_connected(
 
 
 async def test_db_failed_regeneration_keeps_the_existing_profile(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     company = await add_company(db_session, "Alpha")
-    db_session.add(CompanyProfile(company_id=company.id, tax_code="0309999999", status="verified"))
+    db_session.add(
+        CompanyProfile(
+            user_id=OWNER_ID, company_id=company.id, tax_code="0309999999", status="verified"
+        )
+    )
     await db_session.flush()
     pipeline.outcomes["Alpha"] = [NoSourcedDataError("Alpha")]
 
@@ -805,7 +843,7 @@ async def test_db_failed_regeneration_keeps_the_existing_profile(
 
 
 async def test_db_unexpected_error_still_closes_item_and_job(
-    db_session: AsyncSession, pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+    db_session: AsyncSession, owner: User, pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def broken(db: Any, company_id: uuid.UUID) -> None:
         raise RuntimeError("disk full")
@@ -837,7 +875,7 @@ async def cancel_now(db: AsyncSession, **target: uuid.UUID) -> list[uuid.UUID]:
 
 
 async def test_db_cancel_running_company_stops_it_and_drops_the_draft(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     gate = Gate()
     job_id, companies, task = await start_enrich(db_session, pipeline, {"Alpha": [gate]})
@@ -856,7 +894,7 @@ async def test_db_cancel_running_company_stops_it_and_drops_the_draft(
 
 
 async def test_db_cancel_job_also_skips_companies_still_waiting(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     gate = Gate()
     job_id, _, task = await start_enrich(
@@ -875,10 +913,14 @@ async def test_db_cancel_job_also_skips_companies_still_waiting(
 
 
 async def test_db_cancelled_regeneration_keeps_the_existing_profile(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     company = await add_company(db_session, "Alpha")
-    db_session.add(CompanyProfile(company_id=company.id, tax_code="0309999999", status="verified"))
+    db_session.add(
+        CompanyProfile(
+            user_id=OWNER_ID, company_id=company.id, tax_code="0309999999", status="verified"
+        )
+    )
     await db_session.flush()
     gate = Gate()
     pipeline.outcomes["Alpha"] = [gate]
@@ -894,7 +936,7 @@ async def test_db_cancelled_regeneration_keeps_the_existing_profile(
 
 
 async def test_db_cancel_cleans_an_orphaned_run_after_a_restart(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     company = await add_company(db_session, "Alpha")
     job_id = await job_repo.create_job(db_session)
@@ -912,7 +954,7 @@ async def test_db_cancel_cleans_an_orphaned_run_after_a_restart(
 
 
 async def test_db_cancel_without_a_running_job_does_nothing(
-    db_session: AsyncSession, pipeline: Pipeline
+    db_session: AsyncSession, owner: User, pipeline: Pipeline
 ) -> None:
     company = await add_company(db_session, "Alpha")
 
