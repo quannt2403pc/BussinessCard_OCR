@@ -14,6 +14,8 @@ pillow
 # E.164 cho SDT da quoc gia (task 3.6, chu so huu: Q)
 phonenumbers
 rapidfuzz
+argon2-cffi
+itsdangerous
 
 # Test
 pytest
