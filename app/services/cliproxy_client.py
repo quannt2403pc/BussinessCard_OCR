@@ -113,6 +113,14 @@ class CliProxyResponseError(CliProxyError):
     """4xx còn lại (ví dụ `400 invalid name`, `404 auth file not found`)."""
 
 
+class CliProxyCallbackError(CliProxyError):
+    """URL callback người dùng dán vào không dùng được (task 13.7).
+
+    Tách riêng vì đây là **lỗi thao tác của người dùng**, không phải sự cố hạ tầng: câu chữ
+    phải nói cho họ làm gì tiếp, và router trả 400 chứ không phải 502.
+    """
+
+
 class CliProxyUnavailableError(CliProxyError):
     """Không gọi được CLIProxy: lỗi mạng, timeout, hoặc 5xx sau khi hết lượt thử.
 
@@ -412,6 +420,49 @@ class CliProxyClient:
             error=(str(data["error"]) if data.get("error") else None),
         )
 
+    async def submit_oauth_callback(self, redirect_url: str, provider: str | None = None) -> None:
+        """Nộp hộ trình duyệt cái URL mà Google trả về — lối kết nối OAuth trên tên miền thật.
+
+        Vì sao cần (task 13.7, gỡ **I-29**): Google luôn chuyển trình duyệt về
+        `http://localhost:51121/oauth-callback` — giá trị `redirect_uri` **ghi cứng trong mã
+        nguồn** CLIProxy (`auth_files_provider_oauth.go:359` dựng từ hằng số
+        `antigravity.CallbackPort = 51121`), không có khoá cấu hình nào đổi được. Trên máy dev
+        điều đó thông một cách tình cờ vì máy chạy trình duyệt **cũng là** máy chạy CLIProxy.
+        Lên máy chủ thì `localhost` của người dùng là máy của **họ**, nên trình duyệt đâm vào
+        khoảng không và token không bao giờ được lưu.
+
+        Phương án dự phòng ghi sẵn trong kế hoạch — mở `51121` qua Caddy dưới
+        `oauth.ocrximi.io.vn` rồi đổi URL callback — **không dùng được**: `redirect_uri` phải
+        khớp đúng cái đã đăng ký cho client OAuth của Antigravity, mà đó là client của Google,
+        ta không sửa danh sách của nó.
+
+        Lối đi được là chính cái CLIProxy tự chừa cho TUI của nó
+        (`internal/tui/oauth_tab.go:371`): `POST /v0/management/oauth-callback` nhận trường
+        `redirect_url` rồi **tự bóc `code` và `state`** ra khỏi đó
+        (`oauth_callback.go:55-74`). Nghĩa là người dùng chỉ cần chép nguyên thanh địa chỉ của
+        trang báo lỗi rồi dán lại cho ta; phần đổi `code` lấy token vẫn chạy trên máy chủ.
+
+        Sau lời gọi này, phiên OAuth chuyển sang xong và vòng poll `get-auth-status` sẵn có
+        nhận ra — không phải nhân đôi phần gắn credential vào người dùng của 13.1.
+        """
+        if not redirect_url.strip():
+            raise ValueError("submit_oauth_callback() bắt buộc có `redirect_url`.")
+        try:
+            await self.request_json(
+                "POST",
+                "/oauth-callback",
+                json={
+                    "provider": provider or self.provider,
+                    "redirect_url": redirect_url.strip(),
+                },
+            )
+        except (CliProxyDisabledError, CliProxyResponseError) as exc:
+            # ⚠️ Bẫy: route này trả **404 cho `state` không còn tồn tại**, mà `request()` lại
+            # dịch mọi 404 trên nhánh quản trị thành "Management API bị tắt" — đúng cho các
+            # route khác, sai hẳn ở đây. Không dịch lại thì người dùng dán URL muộn 5 phút sẽ
+            # nhận một thông báo bảo họ đi sửa `config.yaml`.
+            raise _callback_error(exc) from exc
+
     async def cancel_oauth(self, state: str) -> bool:
         """Huỷ một phiên OAuth đang chờ (người dùng đóng tab, hoặc UI hết giờ poll)."""
         if not state.strip():
@@ -479,6 +530,52 @@ class CliProxyClient:
 
 
 # --------------------------------------------------------------------------- tiện ích
+
+
+#: Câu chữ CLIProxy trả về ở `oauth_callback.go` → câu người dùng đọc hiểu được.
+#: Khớp theo chuỗi con vì upstream có thể thêm chi tiết vào sau.
+_CALLBACK_MESSAGES: tuple[tuple[str, str], ...] = (
+    (
+        "unknown or expired state",
+        "Phiên kết nối đã hết hạn (CLIProxy chỉ giữ 5 phút) hoặc đã bị huỷ. "
+        "Bấm “Kết nối CLIProxy (OAuth)” lại từ đầu rồi dán URL mới.",
+    ),
+    (
+        "already completed",
+        "URL này đã dùng rồi — mỗi lượt đăng nhập chỉ nộp được một lần. "
+        "Nếu badge vẫn báo chưa kết nối thì bấm kết nối lại từ đầu.",
+    ),
+    (
+        "code or error is required",
+        "URL dán vào không có tham số `code`. Hãy chép **nguyên** thanh địa chỉ của trang "
+        "báo lỗi sau khi đồng ý ở Google, gồm cả phần sau dấu `?`.",
+    ),
+    (
+        "state is required",
+        "URL dán vào không có tham số `state`. Hãy chép nguyên thanh địa chỉ, đừng cắt bớt.",
+    ),
+    (
+        "invalid state",
+        "Tham số `state` trong URL không hợp lệ. Bấm kết nối lại rồi dán URL của đúng lượt đó.",
+    ),
+    (
+        "provider does not match",
+        "URL này thuộc một luồng đăng nhập khác. Bấm kết nối lại rồi dán URL của đúng lượt đó.",
+    ),
+)
+
+
+def _callback_error(exc: CliProxyError) -> CliProxyCallbackError:
+    """Dịch lỗi của `/oauth-callback` sang câu nói được cho người dùng."""
+    raw = f"{exc.message} {exc.payload!r}".lower()
+    for needle, friendly in _CALLBACK_MESSAGES:
+        if needle in raw:
+            return CliProxyCallbackError(friendly, status_code=exc.status_code, payload=exc.payload)
+    return CliProxyCallbackError(
+        f"CLIProxy không nhận URL callback này: {exc.message}",
+        status_code=exc.status_code,
+        payload=exc.payload,
+    )
 
 
 def _safe_json(response: httpx.Response) -> Any:

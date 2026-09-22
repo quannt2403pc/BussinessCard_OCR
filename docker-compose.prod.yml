@@ -1,0 +1,127 @@
+# Lớp phủ cho bản chạy thật trên Compute Engine.
+# Chủ sở hữu: Q | Task: 13.6 | xem Task.md, Plan.md mục 10
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# File này KHÔNG chạy một mình — nó chỉ sửa lại những chỗ khác đi so với bản localhost:
+#
+#   | Hạng mục       | docker-compose.yml         | + file này                       |
+#   |----------------|----------------------------|----------------------------------|
+#   | Cổng ra ngoài  | 8000, 5432, 8080, 8001,    | **chỉ Caddy 80/443**             |
+#   |                | 8317, 51121                |                                  |
+#   | Mã nguồn       | bind mount + --reload      | nằm trong image, không reload    |
+#   | Bí mật         | mặc định `change-me`       | bắt buộc có trong `.env`, thiếu  |
+#   |                |                            | là compose chết ngay             |
+#   | Cookie phiên   | thường                     | `Secure`                         |
+#   | Adminer        | chạy                       | tắt hẳn                          |
+#
+# ⚠️ **BẪY ĐÃ ĐO THẬT, ĐỌC TRƯỚC KHI SỬA FILE NÀY.** Compose **gộp** các trường dạng danh
+# sách giữa hai file chứ không thay thế: viết `ports: []` trong lớp phủ thì cổng của file
+# gốc **vẫn còn nguyên**. Đo ngày 2026-09-22 bằng `docker compose -f a.yml -f b.yml config`:
+# `ports: []` và `volumes: []` bị bỏ qua sạch. Nghĩa là nếu tin vào cách viết đó thì
+# PostgreSQL vẫn phơi cổng 5432 ra Internet — đúng rủi ro **R9**, và hỏng theo kiểu im lặng
+# vì `up -d` vẫn xanh.
+#
+# Cách đúng là hai thẻ YAML của Compose: `!reset` (xoá hẳn trường) và `!override` (thay cả
+# danh sách thay vì nối thêm). **Cần Docker Compose ≥ v2.24** — `scripts/deploy.sh` kiểm tra
+# phiên bản trước khi chạy, vì bản cũ hơn sẽ *bỏ qua thẻ này mà không báo lỗi*.
+#
+# Kiểm bất cứ lúc nào, không cần máy chủ:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml config | grep -n "published"
+#
+# Chỉ được phép hiện 80 và 443.
+
+services:
+  caddy:
+    # Reverse proxy + tự xin/gia hạn chứng chỉ Let's Encrypt. Xem `Caddyfile`.
+    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Bỏ dòng này nếu VPC firewall rule không mở UDP 443 — Caddy vẫn chạy
+      # bình thường trên TCP, chỉ mất HTTP/3.
+      - "443:443/udp"
+    environment:
+      # Không có mặc định: thiếu là compose chết ngay chứ không lặng lẽ xin chứng chỉ
+      # cho một tên miền sai rồi bị Let's Encrypt giới hạn tần suất.
+      SITE_DOMAIN: "${SITE_DOMAIN:?thieu SITE_DOMAIN trong .env - vi du ocrximi.io.vn}"
+      ACME_EMAIL: "${ACME_EMAIL:?thieu ACME_EMAIL trong .env - dia chi nhan thu khi chung chi sap het han}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Chứng chỉ + khoá riêng. MẤT VOLUME NÀY LÀ PHẢI XIN LẠI CHỨNG CHỈ, mà Let's Encrypt
+      # giới hạn 5 lần/tuần cho mỗi bộ tên miền — xin lại vài lần là khoá cả tuần.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  api:
+    # Không publish gì nữa: chỉ Caddy trong cùng mạng Docker gọi tới `api:8000`.
+    ports: !reset []
+    # `!override` chứ không phải `!reset`: vẫn cần volume ảnh danh thiếp, chỉ bỏ các bind
+    # mount mã nguồn của môi trường dev (`./app`, `./templates`, `./scripts`, `./samples`…).
+    # Mã nguồn nay nằm trong image — sửa code trên máy chủ không còn tác dụng, đúng ý đồ.
+    volumes: !override
+      - uploads:/data/uploads
+    # Bỏ `--reload`. Thêm `--forwarded-allow-ips`: uvicorn mặc định chỉ tin header
+    # `X-Forwarded-*` khi chúng đến từ 127.0.0.1, mà Caddy gọi sang từ một IP khác trong
+    # mạng bridge → không có cờ này thì ứng dụng tưởng mình đang chạy HTTP. `*` an toàn ở
+    # đây đúng vì `api` không publish cổng nào: chỉ Caddy gọi tới được.
+    command: !override
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "*",
+      ]
+    environment:
+      # Ép cứng, KHÔNG đọc từ `.env`: đây là hai thứ quên một dòng là hỏng âm thầm —
+      # cookie phiên gửi qua HTTP, hoặc trang lỗi phơi traceback ra Internet.
+      SESSION_COOKIE_SECURE: "true"
+      DEBUG: "false"
+      # Bí mật thì ngược lại: bắt buộc `.env` phải có, không mặc định.
+      DATABASE_URL: "${DATABASE_URL:?thieu DATABASE_URL trong .env}"
+      SECRET_KEY: "${SECRET_KEY:?thieu SECRET_KEY trong .env - sinh bang python3 -c import secrets, print token_urlsafe 48}"
+      CLIPROXY_MGMT_KEY: "${CLIPROXY_MGMT_KEY:?thieu CLIPROXY_MGMT_KEY trong .env - phai TRUNG secret-key trong cliproxy config.yaml}"
+    restart: unless-stopped
+
+  db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?thieu POSTGRES_PASSWORD trong .env - khong duoc de change-me}"
+    restart: unless-stopped
+
+  embedder:
+    ports: !reset []
+    restart: unless-stopped
+
+  cliproxy:
+    # Bỏ cả `8317` lẫn `51121`.
+    #
+    # `51121` là cổng callback OAuth (I-04) và trên máy dev thì bắt buộc phải publish.
+    # Trên máy chủ thì **publish cũng vô ích**: Google chuyển trình duyệt về
+    # `http://localhost:51121/oauth-callback` — tức localhost của MÁY NGƯỜI DÙNG, không
+    # phải của máy chủ. Kết luận đo được ở task 13.7, xem `docs/deploy.md` mục "Kết nối
+    # OAuth trên tên miền thật". Mở nó ra Internet chỉ thêm một cổng phải bảo vệ mà không
+    # sửa được gì.
+    ports: !reset []
+    restart: unless-stopped
+
+  adminer:
+    # Tắt hẳn. Không xoá được service trong lớp phủ, nhưng gán cho nó một profile mà ta
+    # không bao giờ bật thì Compose bỏ qua service này hoàn toàn (đã đo bằng
+    # `docker compose config --services`: adminer biến mất khỏi danh sách).
+    profiles: ["khong-bao-gio-chay-tren-may-chu"]
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:
