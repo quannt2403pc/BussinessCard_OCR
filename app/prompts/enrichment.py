@@ -54,6 +54,12 @@ QUY TẮC:
 4. Thông tin ghi "không tìm thấy" hoặc "không chắc chắn" → null.
 5. "founded_year" là số nguyên 4 chữ số.
 6. Chỉ trả về JSON, không giải thích, không bọc trong ```.
+7. NGÔN NGỮ: "industry", "products", "size_label" và "description" LUÔN viết bằng tiếng Việt, dù
+   kết quả tra cứu hay trang nguồn viết bằng tiếng nào (Anh, Hàn, Nhật, Trung, Thái, Ả Rập…).
+   Tên ngành theo mã phân loại chính thức cũng dịch nghĩa sang tiếng Việt và bỏ mã số.
+   Tên sản phẩm là nhãn hiệu thì giữ nhãn hiệu, dịch phần mô tả đi kèm.
+8. "legal_name", "address", "website", "email", "phone", "tax_code" chép nguyên văn như nguồn,
+   KHÔNG dịch — đó là dữ liệu dùng để đối chiếu với giấy tờ chính thức.
 
 ĐỊNH DẠNG:
 {schema}
