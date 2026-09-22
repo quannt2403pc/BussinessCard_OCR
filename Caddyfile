@@ -1,0 +1,73 @@
+# Reverse proxy + HTTPS cho bản triển khai thật.
+# Chủ sở hữu: Q | Task: 13.6 | xem Task.md, Plan.md mục 10
+#
+# Caddy là thứ DUY NHẤT giữ cổng ra Internet (80/443). Mọi service khác nói chuyện
+# trong mạng nội bộ Docker — xem `docker-compose.prod.yml`.
+#
+# Chạy thử ngay ở máy dev, không cần tên miền và không gọi Let's Encrypt:
+#
+#     SITE_DOMAIN=localhost ACME_EMAIL=dev@example.com \
+#       docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#     curl -k https://localhost/health
+#
+# Caddy đối xử đặc biệt với `localhost` và `*.localhost`: tự ký bằng CA nội bộ,
+# không đụng tới ACME. Nhờ vậy kiểm được đúng file này trước khi có máy chủ.
+
+{
+	# Địa chỉ Let's Encrypt gửi thư khi chứng chỉ sắp hết hạn hoặc ACME có sự cố.
+	# Bỏ trống thì Caddy vẫn xin được chứng chỉ, nhưng mất hẳn đường cảnh báo.
+	email {$ACME_EMAIL}
+
+	# Caddy tự mở :80 để chuyển hướng sang :443 và để trả lời thử thách ACME HTTP-01.
+	# KHÔNG tự viết thêm khối `http://…` chỉ để đổi mã 301: làm vậy là giành mất cổng 80
+	# của chính cơ chế xin chứng chỉ. Mã Caddy dùng là **308** (permanent redirect giữ
+	# nguyên method) chứ không phải 301 như sơ đồ ở Plan.md mục 10 vẽ — về hiệu lực với
+	# trình duyệt là như nhau, ghi ra đây để sau không ai tưởng là cấu hình sai.
+}
+
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	# `www` chỉ để không ai gõ vào khoảng không — đẩy hết về tên miền chính.
+	@www host www.{$SITE_DOMAIN}
+	redir @www https://{$SITE_DOMAIN}{uri} 301
+
+	encode zstd gzip
+
+	header {
+		# 30 ngày, KHÔNG preload và KHÔNG includeSubDomains. Đây là bản demo chạy trên
+		# tên miền có thể dùng lại vào việc khác: HSTS 1 năm + preload là thứ gỡ ra rất
+		# phiền (trình duyệt nhớ cứng, không xoá được từ phía máy chủ).
+		Strict-Transport-Security "max-age=2592000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Caddy mặc định đã không gửi header này; xoá cho chắc nếu upstream thêm vào.
+		-Server
+	}
+
+	# --- Giới hạn kích thước body ---
+	# Mặc định Caddy KHÔNG giới hạn. Trên máy 4GB thì đó là một đường làm nghẽn máy chủ
+	# chỉ bằng một lệnh curl. Hai mức, bám đúng giới hạn của chính ứng dụng:
+	#   * batch upload: 50 ảnh × 10MB (routers/cards.py MAX_BATCH_FILES, MAX_UPLOAD_MB)
+	#   * còn lại: 1 ảnh 10MB + phần biên của multipart
+	@batch path /api/cards/batch-upload
+	request_body @batch {
+		max_size 520MB
+	}
+	request_body {
+		max_size 12MB
+	}
+
+	reverse_proxy api:8000 {
+		# Quét một ảnh mất 3–5s, tạo hồ sơ doanh nghiệp lâu hơn hẳn, một lượt hỏi trợ lý
+		# đo được ~20s ở task 9.5. Mặc định của Caddy là không timeout đọc phản hồi, nhưng
+		# ghi rõ để sau này ai siết lại thì biết con số thật phải tính từ đâu.
+		transport http {
+			read_timeout 300s
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

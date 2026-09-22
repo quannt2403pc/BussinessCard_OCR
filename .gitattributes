@@ -14,5 +14,8 @@
 
 # Cung ly do: Dockerfile va file cau hinh duoc doc trong container Linux.
 Dockerfile text eol=lf
+# Caddyfile KHONG co duoi file nen khong rule nao o duoi phu duoc - phai goi ten thang.
+# No duoc container caddy doc tren may chu (task 13.6).
+Caddyfile text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf

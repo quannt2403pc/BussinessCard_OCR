@@ -49,6 +49,9 @@ CLAUDE.local.md
 .env
 .env.*
 !.env.example
+# Bản mẫu cho máy chủ (task 13.6). Chỉ là khuôn có chú thích, mọi giá trị đều là chỗ trống
+# ghi "SINH-NGAU-NHIEN" — file `.env` thật trên máy chủ vẫn bị `.env.*` ở trên chặn.
+!.env.prod.example
 *.pem
 *.key
 secrets/

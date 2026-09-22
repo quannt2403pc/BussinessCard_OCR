@@ -12,6 +12,13 @@
 
   ⚠️ Badge LUÔN lấy từ /api/integration/status (đọc `auth-files`), không bao giờ từ kết quả
   poll. Poll không kèm `state` sẽ trả "ok" kể cả khi chưa đăng nhập bao giờ (I-02).
+
+  Bước 3' — lối thứ hai về đích, thêm ở task 13.7 (gỡ I-29):
+    3'. người dùng dán URL callback -> POST /api/integration/oauth-callback {state, redirect_url}
+  Cần vì Google luôn trả trình duyệt về `http://localhost:51121/oauth-callback` (ghi cứng trong
+  mã nguồn CLIProxy). Chạy localhost thì trùng máy nên bước 3 tự xong; mở từ `ocrximi.io.vn`
+  thì `localhost` là máy của người dùng, bước 3 không bao giờ chuyển sang "ok" nếu không có
+  bước 3'. Cả hai lối cùng đi qua `finishConnect()` để không có hai bản logic lệch nhau.
 #}
 {% extends "base.html" %}
 
@@ -68,6 +75,32 @@
     </button>
   </div>
 
+  {# Lối hoàn tất kết nối khi callback không tự về (task 13.7, gỡ I-29).
+     Google luôn chuyển trình duyệt về `http://localhost:51121/oauth-callback` — giá trị ghi
+     cứng trong mã nguồn CLIProxy, không đổi được. Chạy trên máy mình thì đó đúng là máy chạy
+     CLIProxy nên callback tự về; mở từ `ocrximi.io.vn` thì `localhost` là máy của **người
+     dùng**, trang sẽ báo không kết nối được. Khi đó chép nguyên thanh địa chỉ vào ô này là
+     xong — phần đổi `code` lấy token vẫn chạy trên máy chủ. #}
+  <div id="paste-box" class="mt-4 hidden rounded-md border border-slate-200 bg-slate-50 p-4">
+    <p class="text-sm font-medium text-slate-800">
+      Sau khi đồng ý, trang báo “không kết nối được localhost”?
+    </p>
+    <p class="mt-1 text-sm text-slate-600">
+      Đó là chuyện bình thường khi dùng qua Internet. Chép <strong>nguyên</strong> địa chỉ trên
+      thanh địa chỉ của trang đó (bắt đầu bằng <code>http://localhost:51121/oauth-callback?…</code>)
+      rồi dán vào đây.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
+             placeholder="http://localhost:51121/oauth-callback?state=…&amp;code=…"
+             class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
+      <button id="btn-paste" type="button"
+              class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
+        Hoàn tất kết nối
+      </button>
+    </div>
+  </div>
+
   <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
 </section>
 
@@ -117,6 +150,9 @@
   const btnDisconnect = el("btn-disconnect");
   const btnCancel = el("btn-cancel");
   const btnRefresh = el("btn-refresh");
+  const pasteBox = el("paste-box");
+  const callbackUrl = el("callback-url");
+  const btnPaste = el("btn-paste");
 
   // `state` của phiên OAuth đang chờ; null nghĩa là không có phiên nào đang chạy.
   let pendingState = null;
@@ -244,7 +280,32 @@
     }
     pendingState = null;
     btnCancel.classList.add("hidden");
+    pasteBox.classList.add("hidden");
+    callbackUrl.value = "";
     btnConnect.disabled = false;
+  }
+
+  /** Xử lý chung cho cả hai lối về đích: vòng poll tự bắt được, và người dùng dán URL. */
+  async function finishConnect(data) {
+    if (data.status === "ok") {
+      stopPolling();
+      clearMessage();
+      // Poll báo xong mới được hỏi auth-files để vẽ badge (Plan.md mục 2.5 bước 3).
+      const status = await refreshStatus();
+      if (status && status.connected) {
+        showMessage("Kết nối thành công: " + status.accounts.join(", "), "ok");
+      } else {
+        showMessage("CLIProxy báo xong nhưng chưa thấy credential nào. Thử bấm Làm mới.", "error");
+      }
+      return true;
+    }
+    if (data.status === "error") {
+      stopPolling();
+      showMessage("Đăng nhập thất bại: " + (data.error || "không rõ lý do"), "error");
+      await refreshStatus();
+      return true;
+    }
+    return false; // "wait" — người dùng còn đang ở màn hình đồng ý của Google.
   }
 
   /** Poll 2s/lần trong lúc chờ người dùng đồng ý. CHỈ dùng ở đây, và luôn kèm `state` (I-02). */
@@ -253,6 +314,7 @@
     const deadline = Date.now() + OAUTH_TIMEOUT_MS;
     btnConnect.disabled = true;
     btnCancel.classList.remove("hidden");
+    pasteBox.classList.remove("hidden");
     setBadge("waiting");
 
     pollTimer = setInterval(async () => {
@@ -274,22 +336,7 @@
         return;
       }
 
-      if (data.status === "ok") {
-        stopPolling();
-        clearMessage();
-        // Poll báo xong mới được hỏi auth-files để vẽ badge (Plan.md mục 2.5 bước 3).
-        const status = await refreshStatus();
-        if (status && status.connected) {
-          showMessage("Kết nối thành công: " + status.accounts.join(", "), "ok");
-        } else {
-          showMessage("CLIProxy báo xong nhưng chưa thấy credential nào. Thử bấm Làm mới.", "error");
-        }
-      } else if (data.status === "error") {
-        stopPolling();
-        showMessage("Đăng nhập thất bại: " + (data.error || "không rõ lý do"), "error");
-        await refreshStatus();
-      }
-      // status === "wait": người dùng đang ở màn hình đồng ý của Google, chờ tiếp.
+      await finishConnect(data);
     }, POLL_INTERVAL_MS);
   }
 
@@ -322,6 +369,37 @@
       showMessage("Đã mở tab đăng nhập Google. Đồng ý xong quay lại trang này.", "info");
     }
     startPolling(data.state);
+  });
+
+  btnPaste.addEventListener("click", async () => {
+    const state = pendingState;
+    const url = callbackUrl.value.trim();
+    if (!state) {
+      showMessage("Không có phiên đăng nhập nào đang chờ. Bấm “Kết nối” trước.", "error");
+      return;
+    }
+    if (!url) {
+      showMessage("Chưa dán địa chỉ nào.", "error");
+      return;
+    }
+    btnPaste.disabled = true;
+    btnPaste.textContent = "Đang hoàn tất…";
+    try {
+      const data = await api("/api/integration/oauth-callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ state: state, redirect_url: url }),
+      });
+      if (!(await finishConnect(data))) {
+        // CLIProxy nhận URL nhưng phiên chưa chuyển trạng thái — để vòng poll đang chạy lo nốt.
+        showMessage("Đã nhận địa chỉ, đang chờ CLIProxy đổi mã lấy token…", "info");
+      }
+    } catch (err) {
+      showMessage("Không hoàn tất được: " + err.message, "error");
+    } finally {
+      btnPaste.disabled = false;
+      btnPaste.textContent = "Hoàn tất kết nối";
+    }
   });
 
   btnCancel.addEventListener("click", async () => {

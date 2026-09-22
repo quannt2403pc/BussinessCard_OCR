@@ -23,6 +23,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
@@ -37,6 +38,7 @@ from app.models.integration import IntegrationStatus
 from app.services import llm, user_credentials
 from app.services.cliproxy_client import (
     CliProxyAuthError,
+    CliProxyCallbackError,
     CliProxyClient,
     CliProxyDisabledError,
     CliProxyError,
@@ -97,6 +99,17 @@ class OAuthStatusOut(BaseModel):
 
     status: str
     error: str | None = None
+
+
+class OAuthCallbackIn(BaseModel):
+    """URL người dùng chép từ thanh địa chỉ của trang báo lỗi sau khi đồng ý ở Google (13.7)."""
+
+    state: str = Field(min_length=1, description="`state` nhận từ /connect")
+    redirect_url: str = Field(
+        min_length=1,
+        max_length=4096,
+        description="Nguyên văn URL `http://localhost:51121/oauth-callback?...`",
+    )
 
 
 class DisconnectOut(BaseModel):
@@ -259,6 +272,63 @@ async def oauth_status(
     return OAuthStatusOut(status=result.status, error=result.error)
 
 
+@router.post("/api/integration/oauth-callback", response_model=OAuthStatusOut, tags=["integration"])
+async def submit_oauth_callback(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
+    payload: OAuthCallbackIn,
+) -> OAuthStatusOut:
+    """Nhận hộ cái URL callback mà trình duyệt không tự gửi được — lối kết nối trên tên miền thật.
+
+    Task 13.7, gỡ **I-29**. Trên `localhost` đường này không cần tới: CLIProxy dựng forwarder ở
+    cổng 51121 ngay trên máy người dùng nên callback tự về. Trên `ocrximi.io.vn` thì
+    `http://localhost:51121` là máy của **người dùng**, chứ không phải máy chủ — chi tiết và lý
+    do phương án "mở 51121 qua Caddy" không dùng được: `CliProxyClient.submit_oauth_callback`.
+
+    Xong lời gọi này thì phiên chuyển sang trạng thái xong; hàm cũng gắn luôn credential vào
+    người đang đăng nhập (13.1) thay vì bắt UI chờ nhịp poll kế tiếp.
+    """
+    if not user_credentials.owns_session(payload.state, user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+
+    pasted_state = _state_in_url(payload.redirect_url)
+    if pasted_state is not None and pasted_state != payload.state:
+        # Dán nhầm URL của một lượt kết nối khác. CLIProxy cũng bắt được, nhưng bắt ở đây thì
+        # thông báo nói đúng việc phải làm và không tiêu một lượt gọi mạng.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="URL này thuộc một lượt kết nối khác. Bấm “Kết nối” lại rồi dán URL mới nhất.",
+        )
+
+    try:
+        async with CliProxyClient() as proxy:
+            await proxy.submit_oauth_callback(payload.redirect_url)
+            result = await proxy.oauth_status(payload.state)
+            if result.is_done:
+                await user_credentials.claim(db, user, proxy, payload.state)
+    except CliProxyCallbackError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+    except user_credentials.CredentialTakenError as exc:
+        return OAuthStatusOut(
+            status="error",
+            error=f"Tài khoản Google {exc.label} đang được một người dùng khác kết nối. "
+            "Hãy đăng nhập bằng tài khoản Google của riêng bạn.",
+        )
+    except user_credentials.CredentialNotFoundError:
+        return OAuthStatusOut(
+            status="error",
+            error="CLIProxy báo xong nhưng không thấy credential mới nào. Bấm kết nối lại.",
+        )
+    except CliProxyUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
+    except CliProxyError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
+
+    if not result.is_waiting:
+        user_credentials.forget_session(payload.state)
+    return OAuthStatusOut(status=result.status, error=result.error)
+
+
 @router.delete("/api/integration/oauth-session", tags=["integration"])
 async def cancel_oauth(
     user: CurrentUser,
@@ -371,3 +441,17 @@ async def _save_cache(
 
 def _elapsed_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
+
+
+def _state_in_url(raw: str) -> str | None:
+    """`state` nằm trong URL người dùng dán, hoặc `None` nếu không bóc ra được.
+
+    `None` **không** phải lỗi ở đây: cứ để CLIProxy phán xét, nó mới là chỗ giữ phiên. Hàm này
+    chỉ bắt sớm trường hợp dán nhầm URL của lượt kết nối khác.
+    """
+    try:
+        query = urlsplit(raw.strip()).query
+    except ValueError:
+        return None
+    values = parse_qs(query).get("state") or []
+    return values[0] if values else None

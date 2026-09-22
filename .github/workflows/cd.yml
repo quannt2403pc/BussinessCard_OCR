@@ -1,0 +1,104 @@
+name: CD
+
+# Tự deploy lên https://ocrximi.io.vn. Chủ sở hữu: Q | Task: 13.8 | xem docs/deploy.md
+#
+# ⚠️ Kích hoạt theo **kết quả của CI**, không phải theo `push`. Nếu dùng `on: push: [main]`
+# thì workflow này chạy song song với CI và deploy xong trước khi biết test có xanh hay không
+# — tức là mã chưa ai kiểm lên thẳng máy chủ thật. `workflow_run` bắt buộc phải chờ.
+#
+# ⚠️ Vẫn chưa đủ chặt, và biết rõ vì sao: `main` hiện **không có branch protection** (I-14 —
+# repo private trên gói GitHub Free). Ai đẩy thẳng vào `main` thì CI vẫn chạy, và nếu nó xanh
+# thì bản đó lên máy chủ. Bước duyệt tay của environment `production` bên dưới là lớp chặn
+# duy nhất cho tới khi task 13.10 bật được branch protection.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Deploy lại một bản cũ mà không phải đẩy commit rỗng.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit hoặc nhánh muốn deploy (mặc định origin/main)"
+        required: false
+        default: "origin/main"
+
+# Hai lượt deploy chồng lên nhau trên cùng một máy là cách chắc chắn nhất để có một máy chủ
+# ở trạng thái không ai đoán được. `cancel-in-progress: false` — lượt đang chạy phải xong.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy lên ocrximi.io.vn
+    runs-on: ubuntu-latest
+    # Bỏ qua khi CI đỏ. `workflow_run` bắn cả khi thất bại nên nhánh này KHÔNG thừa.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    environment:
+      # Đặt "Required reviewers" cho environment này trong Settings → Environments →
+      # production. Đó là bước duyệt tay mà Plan.md mục 10 yêu cầu, và trong lúc I-14 chưa gỡ
+      # thì nó là thứ duy nhất chặn một commit đẩy thẳng lên máy chủ thật.
+      name: production
+      url: https://${{ vars.SITE_DOMAIN }}
+    steps:
+      - name: Ghi rõ đang deploy cái gì
+        run: |
+          echo "Sự kiện: ${{ github.event_name }}"
+          echo "Commit:  ${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "Tên miền: ${{ vars.SITE_DOMAIN }}"
+
+      - name: Chuẩn bị khoá SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$SSH_KEY" || { echo "::error title=Thiếu secret::DEPLOY_SSH_KEY chưa đặt"; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo "::error title=Thiếu secret::DEPLOY_KNOWN_HOSTS chưa đặt — lấy bằng 'ssh-keyscan <ip>'"; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # known_hosts thật, KHÔNG dùng StrictHostKeyChecking=no: tắt kiểm host là tự nguyện
+          # nhận bất kỳ máy nào trả lời, và ta đang gửi quyền chạy lệnh vào đó.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET_REF: ${{ github.event.inputs.ref || github.event.workflow_run.head_sha || 'origin/main' }}
+        run: |
+          test -n "$DEPLOY_HOST" || { echo "::error title=Thiếu secret::DEPLOY_HOST chưa đặt"; exit 1; }
+          test -n "$DEPLOY_USER" || { echo "::error title=Thiếu secret::DEPLOY_USER chưa đặt"; exit 1; }
+          # ⚠️ Kiểm trước xem VM có bật OS Login không. Bật thì khoá SSH thường trong metadata
+          # KHÔNG dùng được và bước này chết với "Permission denied (publickey)" — kiểu hỏng
+          # chỉ lòi ra lúc CD chạy thật lần đầu. Cách xử lý ở docs/deploy.md.
+          #
+          # Toàn bộ logic nằm trong scripts/deploy.sh để còn deploy tay được khi Actions hỏng.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=20 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "cd /opt/bizcard && ./scripts/deploy.sh '${TARGET_REF}'"
+
+      - name: Smoke test từ ngoài Internet
+        # Runner của GitHub nằm ngoài mạng của VM, nên bước này kiểm thêm đúng thứ mà smoke
+        # test bên trong `deploy.sh` không kiểm được: DNS, chứng chỉ, và tường lửa có thật sự
+        # cho gói tin vào hay không.
+        run: |
+          url="https://${{ vars.SITE_DOMAIN }}/health"
+          for i in $(seq 1 10); do
+            body="$(curl -sS --max-time 10 "$url" || true)"
+            if printf '%s' "$body" | grep -q '"status"'; then
+              echo "Đạt sau $i lần: $body"
+              exit 0
+            fi
+            echo "Lần $i/10 chưa đạt"
+            sleep 6
+          done
+          echo "::error title=Smoke test từ ngoài truợt::$url không trả về trạng thái ok. deploy.sh đã tự quay về bản trước; kiểm DNS, chứng chỉ và VPC firewall rule."
+          exit 1
