@@ -14,6 +14,10 @@ Vì sao dùng `phonenumbers` (bản port của libphonenumber) thay vì tự vi�
 dự án có 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung (Plan.md mục 1.3), mỗi nước một quy tắc mã vùng và
 số 0 đứng đầu. `+84 24 7300 7300`, `02-1234-5678`, `090-1234-5678` không có mẫu chung nào bắt
 được bằng regex mà không sai.
+
+Cập nhật EX-05 (2026-09-22): phạm vi ngôn ngữ mở ra **không giới hạn**, nên `REGION_BY_LANGUAGE`
+dài thêm. Chọn thư viện thay vì regex nay còn đáng giá hơn: quy tắc số của Thái Lan hay Ba Lan
+không phải thứ viết tay được, mà `phonenumbers` thì đã có sẵn cả 200+ nước.
 """
 
 from __future__ import annotations
@@ -30,13 +34,49 @@ logger = logging.getLogger(__name__)
 #: Vùng mặc định để đọc số viết theo kiểu nội địa (`0912…`) — suy từ `language_detected` mà
 #: prompt OCR trả về (task 3.3). Không đoán được vùng thì `phonenumbers` chỉ đọc được số đã có
 #: dấu `+`, phần còn lại giữ nguyên dạng đã dọn.
+#:
+#: EX-05 mở rộng ra ngoài 5 ngôn ngữ chính. Chỉ điền những ngôn ngữ **gắn chặt với một nước**:
+#: tiếng Thái → Thái Lan, tiếng Ba Lan → Ba Lan. Ngôn ngữ nói ở nhiều nước (Anh, Tây Ban Nha,
+#: Ả Rập, Bồ Đào Nha, Pháp, Đức) cố ý để `None` — đoán bừa một nước còn tệ hơn không đoán: số
+#: `030-1234567` đọc theo `DE` ra một số Berlin, đọc theo `AT` ra một số không tồn tại, và cả
+#: hai đều được ghi vào DB trông như thật. Không có vùng thì `phonenumbers` chỉ đọc số có dấu
+#: `+`, phần còn lại giữ nguyên dạng đã dọn — mất phần chuẩn hoá, không mất dữ liệu.
 REGION_BY_LANGUAGE: dict[str, str | None] = {
     "vi": "VN",
     "ko": "KR",
     "ja": "JP",
     "zh": "CN",
     "zh-tw": "TW",
+    "yue": "HK",
+    "th": "TH",
+    "km": "KH",
+    "lo": "LA",
+    "my": "MM",
+    "id": "ID",
+    "ms": "MY",
+    "tl": "PH",
+    "hi": "IN",
+    "ru": "RU",
+    "uk": "UA",
+    "pl": "PL",
+    "cs": "CZ",
+    "tr": "TR",
+    "he": "IL",
+    "el": "GR",
+    "it": "IT",
+    "nl": "NL",
+    "sv": "SE",
+    "fi": "FI",
+    "da": "DK",
+    "no": "NO",
+    "hu": "HU",
+    "ro": "RO",
     "en": None,  # tiếng Anh không gắn với nước nào — mặc định US sẽ đọc sai số Việt
+    "es": None,
+    "pt": None,
+    "fr": None,
+    "de": None,
+    "ar": None,
 }
 
 #: Nhãn hay đứng trước số trên danh thiếp; model thường chép cả nhãn vào trường `phone`.

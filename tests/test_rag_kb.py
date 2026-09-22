@@ -155,10 +155,16 @@ def test_serialize_card_phu_du_nam_ngon_ngu_trong_pham_vi(code: str, expected: s
 
 
 def test_serialize_card_ma_ngon_ngu_la_thi_giu_nguyen_khong_bia_ten():
-    """Model trả mã ngoài 5 ngôn ngữ đã chốt → ghi lại đúng mã, không đoán tên."""
-    _, body = kb.serialize_card(make_card(language_detected="th"))
+    """Mã không có nhãn trong `LANGUAGE_LABELS` → ghi lại đúng mã, không đoán tên.
 
-    assert "Ngôn ngữ: th" in body
+    Trước EX-05 ca này dùng `th`: hồi đó phạm vi đóng ở 5 ngôn ngữ nên tiếng Thái đúng là "mã
+    lạ". Nay `th` đã có nhãn (EX-05 mở phạm vi ra không giới hạn và bảng nhãn dài thêm), nên ca
+    kiểm phải chuyển sang một mã thật sự chưa có nhãn — `sw` (Swahili). **Hành vi được bảo vệ
+    không đổi một chữ**: gặp mã lạ thì chép nguyên mã, tuyệt đối không bịa tên tiếng Việt cho nó.
+    """
+    _, body = kb.serialize_card(make_card(language_detected="sw"))
+
+    assert "Ngôn ngữ: sw" in body
 
 
 def test_serialize_card_khong_co_ngon_ngu_thi_bo_han_dong():

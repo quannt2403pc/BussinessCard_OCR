@@ -90,6 +90,20 @@
   <section>
     <div id="banner" class="mb-4 hidden rounded-md px-4 py-3 text-sm"></div>
 
+    {# --- Bản Việt hoá (EX-06): bản dịch in to, bản gốc là chú thích nhỏ ngay dưới --- #}
+    <div id="vi-card" class="mb-4 hidden rounded-lg border border-sky-200 bg-sky-50/60 p-5">
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-sky-700">Bản Việt hoá</h2>
+        <span id="vi-meta" class="text-xs text-slate-500"></span>
+        <button type="button" id="btn-translate"
+                class="ml-auto rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50">
+          Dịch lại
+        </button>
+      </div>
+      <p id="vi-stale" class="mt-2 hidden rounded bg-amber-100 px-3 py-2 text-xs text-amber-800"></p>
+      <dl id="vi-body" class="mt-3 space-y-3"></dl>
+    </div>
+
     <form id="form" class="rounded-lg border border-slate-200 bg-white p-5">
       <div id="fields" class="grid gap-4 sm:grid-cols-2"></div>
 
@@ -130,18 +144,40 @@
   const REQUIRED = new Set(
     ["full_name", "job_title", "company_name_raw", "email", "phone", "address", "website"]);
 
+  // `vi` = tên cột chứa bản Việt hoá của trường đó (EX-06). Ô Việt hoá là ô nhập nhỏ nằm ngay
+  // dưới ô gốc: phiên âm là việc model làm sai được, mà người cầm tấm thẻ mới biết tên mình
+  // đọc thế nào — bắt họ chịu bản máy dịch thì bản dịch thành thứ phải chịu đựng chứ không
+  // phải thứ dùng được.
   const FIELDS = [
-    { name: "full_name",        label: "Họ tên",          type: "text" },
-    { name: "job_title",        label: "Chức vụ",         type: "text" },
-    { name: "company_name_raw", label: "Công ty",         type: "text", wide: true },
+    { name: "full_name",        label: "Họ tên",          type: "text",     vi: "full_name_vi" },
+    { name: "job_title",        label: "Chức vụ",         type: "text",     vi: "job_title_vi" },
+    { name: "company_name_raw", label: "Công ty",         type: "text",     wide: true, vi: "company_name_vi" },
     { name: "email",            label: "Email",           type: "email" },
     { name: "website",          label: "Website",         type: "url" },
     { name: "phone",            label: "Điện thoại",      type: "tel" },
     { name: "phone_alt",        label: "Điện thoại phụ",  type: "tel" },
-    { name: "address",          label: "Địa chỉ",         type: "textarea", wide: true },
+    { name: "address",          label: "Địa chỉ",         type: "textarea", wide: true, vi: "address_vi" },
     { name: "language_detected",label: "Ngôn ngữ",        type: "lang" },
     { name: "notes",            label: "Ghi chú",         type: "textarea", wide: true },
   ];
+
+  // Thứ tự hiển thị của khối "Bản Việt hoá" — tên đứng trước, địa chỉ cuối, giống cách đọc một
+  // tấm danh thiếp thật.
+  const VI_ROWS = [
+    { vi: "full_name_vi",     raw: "full_name",        label: "Họ tên", big: true },
+    { vi: "job_title_vi",     raw: "job_title",        label: "Chức vụ" },
+    { vi: "company_name_vi",  raw: "company_name_raw", label: "Công ty" },
+    { vi: "address_vi",       raw: "address",          label: "Địa chỉ" },
+  ];
+
+  const VI_SOURCES = {
+    llm:        "máy dịch",
+    mixed:      "máy dịch + bảng tra cứu",
+    dictionary: "bảng tra cứu",
+    manual:     "bạn tự sửa",
+    failed:     "chưa dịch được",
+    skipped:    "không có gì để dịch",
+  };
 
   const BADGES = {
     pending:      ["Chưa quét được", "bg-rose-50 text-rose-700 ring-rose-200"],
@@ -233,7 +269,30 @@
     note.dataset.note = spec.name;
     cell.append(note);
 
+    if (spec.vi) cell.append(buildViInput(spec));
+
     return cell;
+  }
+
+  /** Ô nhập bản Việt hoá, nhỏ hơn và nhạt hơn ô gốc — nó là bản phụ, không phải bản thay thế. */
+  function buildViInput(spec) {
+    const wrap = el("div", "mt-1 flex items-baseline gap-2");
+    const label = el("label", "shrink-0 text-xs text-sky-700", "Việt hoá");
+    label.htmlFor = `f-${spec.vi}`;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = `f-${spec.vi}`;
+    input.name = spec.vi;
+    input.placeholder = "— dùng bản gốc —";
+    input.className =
+      "w-full rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1 text-xs text-slate-700 " +
+      "focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500";
+    input.addEventListener("input", updateDirty);
+    inputs.set(spec.vi, input);
+
+    wrap.append(label, input);
+    return wrap;
   }
 
   function buildForm() {
@@ -258,11 +317,16 @@
     const confidence = card.confidence || {};
     let lowCount = 0;
 
-    for (const spec of FIELDS) {
-      const value = card[spec.name];
-      const input = inputs.get(spec.name);
+    // Đổ **mọi** ô, kể cả 4 ô Việt hoá — chúng cũng nằm trong `inputs` nên `changes()` và
+    // `updateDirty()` tự tính luôn, không cần đường lưu riêng.
+    for (const [name, input] of inputs) {
+      const value = card[name];
       input.value = value == null ? "" : String(value);
-      loaded[spec.name] = input.value;
+      loaded[name] = input.value;
+    }
+
+    for (const spec of FIELDS) {
+      const input = inputs.get(spec.name);
 
       const chip = input.parentElement.querySelector("span.ml-auto");
       const note = input.parentElement.querySelector(`[data-note="${spec.name}"]`);
@@ -313,9 +377,61 @@
       ? JSON.stringify(card.ocr_raw_json, null, 2)
       : "Chưa quét được nên chưa có JSON nào.";
 
+    renderVi(card);
     banner(card, lowCount);
     $("btn-confirm").textContent = card.status === "confirmed" ? "Xác nhận lại" : "Xác nhận";
     updateDirty();
+  }
+
+  /** Khối "Bản Việt hoá": bản dịch in to, bản gốc là chú thích nhỏ ngay dưới (yêu cầu EX). */
+  function renderVi(card) {
+    const box = $("vi-card");
+    const meta = card.translation_meta || {};
+    const rows = VI_ROWS.filter((row) => card[row.vi] || card[row.raw]);
+
+    // Không dịch được gì mà cũng không có chữ gốc nào (thẻ chưa quét được) → giấu hẳn khối này
+    // thay vì hiện một khung rỗng.
+    if (!rows.length) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+
+    $("vi-body").replaceChildren(...rows.map((row) => {
+      const cell = el("div");
+      const vi = card[row.vi];
+      const raw = card[row.raw];
+
+      cell.append(el("dt", "text-xs text-slate-500", row.label));
+      // Chưa có bản dịch thì in luôn bản gốc ở dòng chính — trường tiếng Việt và tiếng Anh
+      // không cần dịch, và để trống ở đây thì người dùng tưởng máy làm hỏng.
+      cell.append(el("dd",
+        row.big ? "text-lg font-semibold text-slate-900" : "text-sm text-slate-800",
+        vi || raw || "—"));
+      if (vi && raw) {
+        cell.append(el("dd", "text-xs text-slate-500", raw));
+      }
+      return cell;
+    }));
+
+    const bits = [];
+    if (meta.source) bits.push(VI_SOURCES[meta.source] || meta.source);
+    if (meta.source_language) bits.push(`ngôn ngữ: ${meta.source_language}`);
+    if (meta.name_method) bits.push(`tên riêng: ${meta.name_method}`);
+    if (meta.note) bits.push(meta.note);
+    $("vi-meta").textContent = bits.length ? `(${bits.join(" · ")})` : "";
+
+    const stale = $("vi-stale");
+    if (meta.stale) {
+      stale.textContent =
+        "Bản Việt hoá đang nói về nội dung cũ — bạn vừa sửa trường gốc. Bấm Dịch lại để cập nhật.";
+      stale.className = "mt-2 rounded bg-amber-100 px-3 py-2 text-xs text-amber-800";
+    } else if (meta.error) {
+      stale.textContent = `Lượt dịch gần nhất chưa xong: ${meta.error}`;
+      stale.className = "mt-2 rounded bg-rose-100 px-3 py-2 text-xs text-rose-800";
+    } else {
+      stale.className = "mt-2 hidden rounded px-3 py-2 text-xs";
+    }
   }
 
   function banner(card, lowCount) {
@@ -366,6 +482,7 @@
   function busy(on) {
     $("btn-save").disabled = on || Object.keys(changes()).length === 0;
     $("btn-confirm").disabled = on;
+    $("btn-translate").disabled = on;
   }
 
   // --- gọi API --------------------------------------------------------------
@@ -458,6 +575,28 @@
   });
 
   $("btn-confirm").addEventListener("click", confirmCard);
+
+  $("btn-translate").addEventListener("click", async () => {
+    clearMessage();
+    busy(true);
+    $("btn-translate").textContent = "Đang dịch…";
+    try {
+      // Lưu trước, im lặng: bấm Dịch lại ngay sau khi sửa tên mà không lưu thì server vẫn dịch
+      // bản cũ — đúng thứ người dùng vừa cố sửa. Cùng lý lẽ với nút Xác nhận.
+      if (!(await save({ quiet: true }))) return;
+
+      const res = await fetch(`/api/cards/${CARD_ID}/translate`, { method: "POST" });
+      if (!res.ok) {
+        message(await readError(res), "error");
+        return;
+      }
+      fill(await res.json());
+      message("Đã dịch lại.", "ok");
+    } finally {
+      $("btn-translate").textContent = "Dịch lại";
+      busy(false);
+    }
+  });
 
   $("btn-delete").addEventListener("click", async () => {
     if (!(await askDelete())) return;

@@ -59,6 +59,12 @@ _EMPTY_MARKERS = frozenset(
 )
 
 #: Model hay trả tên ngôn ngữ bằng chữ thay vì mã ISO 639-1.
+#:
+#: Danh sách này **không phải danh sách ngôn ngữ được hỗ trợ** — từ EX-05 hệ thống nhận mọi mã
+#: ISO 639-1/639-3 model trả về, mã lạ đi thẳng vào DB đúng như model đọc. Đây chỉ là bảng gom
+#: những cách viết khác nhau của cùng một ngôn ngữ, để `services/normalize.py` tra được mã vùng
+#: số điện thoại và `services/kb.py` in được nhãn tiếng Việt. Thiếu một dòng ở đây không làm
+#: mất dữ liệu, chỉ làm mất phần suy mã vùng của đúng ngôn ngữ đó.
 _LANGUAGE_ALIASES: dict[str, str] = {
     "english": "en",
     "vietnamese": "vi",
@@ -69,6 +75,34 @@ _LANGUAGE_ALIASES: dict[str, str] = {
     "zh-cn": "zh",
     "zh-hans": "zh",
     "zh-hant": "zh-tw",
+    # EX-05 — mở rộng ngoài 5 ngôn ngữ chính.
+    "thai": "th",
+    "russian": "ru",
+    "arabic": "ar",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "portuguese": "pt",
+    "italian": "it",
+    "indonesian": "id",
+    "malay": "ms",
+    "filipino": "tl",
+    "tagalog": "tl",
+    "hindi": "hi",
+    "khmer": "km",
+    "lao": "lo",
+    "burmese": "my",
+    "dutch": "nl",
+    "polish": "pl",
+    "turkish": "tr",
+    "hebrew": "he",
+    "greek": "el",
+    "czech": "cs",
+    "swedish": "sv",
+    "mandarin": "zh",
+    "cantonese": "yue",
+    "zh-tw": "zh-tw",
+    "pt-br": "pt",
 }
 
 
@@ -172,6 +206,11 @@ EDITABLE_FIELDS: tuple[str, ...] = (
     "website",
     "language_detected",
     "notes",
+    # Bản Việt hoá (EX-04) — xem ghi chú ở `CardUpdateIn`.
+    "full_name_vi",
+    "job_title_vi",
+    "company_name_vi",
+    "address_vi",
 )
 
 
@@ -192,6 +231,13 @@ class CardOut(BaseModel):
     website: str | None = None
     language_detected: str | None = None
     confidence: dict[str, float] | None = None
+    # Việt hoá sau khi quét (EX-02). `None` = bản gốc dùng được luôn, KHÔNG phải "chưa dịch" —
+    # giao diện chỉ hiện dòng chú thích khi hai bản thật sự khác nhau.
+    full_name_vi: str | None = None
+    job_title_vi: str | None = None
+    company_name_vi: str | None = None
+    address_vi: str | None = None
+    translation_meta: dict[str, Any] | None = None
     company_id: uuid.UUID | None = None
     notes: str | None = None
     image_path: str
@@ -243,6 +289,13 @@ class CardUpdateIn(BaseModel):
     website: str | None = None
     language_detected: str | None = None
     notes: str | None = None
+    # Bản Việt hoá cũng sửa tay được (EX-04): phiên âm là việc model có thể làm sai, và người
+    # cầm tấm thẻ trong tay là người biết tên mình đọc thế nào. Sửa tay thì `translation_meta`
+    # được đánh dấu `source="manual"` để lần *Dịch lại* sau không lặng lẽ ghi đè.
+    full_name_vi: str | None = None
+    job_title_vi: str | None = None
+    company_name_vi: str | None = None
+    address_vi: str | None = None
 
     def changes(self) -> dict[str, Any]:
         """Đúng những trường client gửi lên (kể cả khi giá trị là `null`)."""

@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     #: `aistudio`/`gemini` (cần API key), gọi qua `antigravity` sẽ không chạy. Xem I-03.
     llm_model: str = "gemini-3-flash"
 
+    #: Bật lượt Việt hoá sau khi quét (EX-02): dịch chức vụ / loại hình pháp nhân và phiên âm
+    #: tên riêng bằng một lời gọi model thứ hai. Tắt thì `services/translate.py` chỉ dùng bảng
+    #: tra cứu tất định — vẫn có kết quả cho chức vụ và loại hình quen thuộc, chỉ không phiên âm
+    #: được tên riêng. Để tắt được bằng env vì nó là lời gọi model **thứ hai** trên mỗi ảnh:
+    #: máy đang sát hạn mức (R5) thì thà mất bản dịch còn hơn mất lượt quét.
+    translate_after_ocr: bool = True
+
     # --- Embedding: KHÔNG đi qua CLIProxy, xem Plan.md mục 2.6 ---
     embedder_url: str = "http://embedder:8001"
     embedding_model: str = "intfloat/multilingual-e5-small"

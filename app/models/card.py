@@ -76,6 +76,24 @@ class BusinessCard(Base):
     # Điểm tin cậy từng trường do prompt OCR trả về (task 3.3) — UI tô vàng trường thấp (task 5.1).
     confidence: Mapped[dict | None] = mapped_column(JSONB)
 
+    # --- Việt hoá sau khi quét (EX-02, revision 0006) ---
+    #
+    # **Cột riêng, không ghi đè cột gốc.** Bốn cột trên vẫn giữ nguyên chữ in trên thẻ (quy tắc 3
+    # của `prompts/ocr.py`) — mất bản gốc là mất luôn khả năng đối chiếu với ảnh, và giao diện
+    # còn phải in nó làm chú thích nhỏ dưới bản dịch.
+    #
+    # `NULL` ở đây mang đúng một nghĩa: **bản gốc dùng được luôn, không cần bản dịch** — thẻ
+    # tiếng Việt và thẻ tiếng Anh rơi hết vào ca này (`services/translate.py::_finalize`). Nó
+    # KHÔNG có nghĩa "chưa dịch"; muốn biết đã dịch hay chưa thì đọc `translation_meta`.
+    full_name_vi: Mapped[str | None] = mapped_column(String(255))
+    job_title_vi: Mapped[str | None] = mapped_column(String(255))
+    company_name_vi: Mapped[str | None] = mapped_column(String(255))
+    address_vi: Mapped[str | None] = mapped_column(Text)
+    # Nguồn bản dịch (`llm` / `dictionary` / `mixed` / `failed` / `skipped`), ngôn ngữ & hệ chữ
+    # model nhận ra, cách phiên âm, và cờ `stale` bật khi người dùng sửa tay trường gốc mà chưa
+    # bấm *Dịch lại* (task EX-04).
+    translation_meta: Mapped[dict | None] = mapped_column(JSONB)
+
     # --- Trạng thái & liên kết ---
     status: Mapped[str] = mapped_column(
         String(16),

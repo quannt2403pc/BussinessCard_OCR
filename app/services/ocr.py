@@ -3,14 +3,15 @@
 Chủ sở hữu: Q | Task: 3.4 | xem Task.md
 
 Đường đi một ảnh: `routers/cards.py` (3.1) → `services/image.py` (3.2) → **file này** →
-`services/normalize.py` (3.6) → DB (3.5).
+`services/normalize.py` (3.6) → `services/translate.py` (EX-02) → DB (3.5).
 
 Hai chỗ hỏng đã biết trước khi viết dòng code đầu tiên:
 
 1. **I-15 — model bọc JSON trong khối ```json.** Đo thật ở task 2.3: prompt ghi rõ "không bọc"
-   mà `gemini-3-flash` vẫn bọc. `json.loads()` thẳng vào đó là `JSONDecodeError` ngay lời gọi
-   đầu tiên. `_to_json()` gỡ hàng rào code, và nếu vẫn hỏng thì quét lấy object `{…}` cân bằng
-   ngoặc đầu tiên trong chuỗi — bắt được cả trường hợp model thêm một câu dẫn trước JSON.
+   mà `gemini-3-flash` vẫn bọc. `services/llm_json.py` gỡ hàng rào code, và nếu vẫn hỏng thì
+   quét lấy object `{…}` cân bằng ngoặc đầu tiên trong chuỗi — bắt được cả trường hợp model
+   thêm một câu dẫn trước JSON. (Trước EX-02 phần này nằm ngay trong file; chuyển ra ngoài khi
+   lượt Việt hoá cần đúng logic đó cho lời gọi model thứ hai.)
 2. **Model trả JSON hợp lệ nhưng sai khoá / sai kiểu.** Không có hợp đồng nào ràng buộc nó cả.
    `CardExtraction` (task 3.4, `app/schemas/card.py`) lo phần này; ở đây chỉ lo cú pháp.
 
@@ -20,9 +21,9 @@ không — `CliProxyClient` đã lo retry mạng, còn 4xx thì thử lại ch�
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -35,7 +36,9 @@ from app.prompts import ocr as prompts
 from app.schemas.card import CardExtraction
 from app.services import image as image_service
 from app.services import llm
+from app.services import translate as translate_service
 from app.services.cliproxy_client import CliProxyClient
+from app.services.llm_json import JsonExtractError, extract_json_object
 from app.services.normalize import normalize_card_fields
 
 logger = logging.getLogger(__name__)
@@ -49,13 +52,6 @@ RETRY_HINT = (
     "Lượt trước bạn trả về chữ không phải JSON hợp lệ. Lần này chỉ in ra đúng một object JSON, "
     "ký tự đầu tiên là { và ký tự cuối cùng là }, không có chữ nào khác."
 )
-
-#: Hàng rào code ```json … ``` (I-15).
-_FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9_+-]*\s*\n?(?P<body>.*?)\n?\s*```\s*$", re.DOTALL)
-
-#: Dấu phẩy thừa trước `}` hoặc `]` — lỗi cú pháp JSON duy nhất mà model hay mắc và sửa được
-#: an toàn. Chỉ dùng ở bước cuối, sau khi đã cắt đúng phạm vi object.
-_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
 
 class OcrError(RuntimeError):
@@ -85,6 +81,23 @@ class OcrResult:
     model: str
     elapsed_ms: int
     attempts: int = 1
+    #: Bản Việt hoá (EX-02), `None` khi lượt quét không chạy bước đó. Cố ý **không** trộn vào
+    #: `extraction`: `CardExtraction` là *chữ model đọc được từ ảnh*, còn đây là kết quả của một
+    #: lời gọi model khác trên chính dữ liệu đó. Gộp làm một thì không còn phân biệt được
+    #: "model đọc sai chữ" với "model dịch sai chữ đọc đúng" — hai lỗi phải sửa ở hai chỗ.
+    translation: translate_service.Translation | None = None
+
+    def card_fields(self) -> dict[str, Any]:
+        """Toàn bộ phần ghi vào `business_cards`: trường OCR + 4 cột `*_vi` + `translation_meta`.
+
+        Chỗ **duy nhất** gộp hai nguồn, để hai đường vào (upload 1 ảnh ở `routers/cards.py` và
+        upload hàng loạt ở `services/card_batch.py`) không bao giờ lệch nhau về việc cột nào
+        được ghi — đúng lý lẽ đã viết ở `status_and_notes()`.
+        """
+        fields = self.extraction.card_columns()
+        if self.translation is not None:
+            fields.update(self.translation.columns())
+        return fields
 
 
 async def extract_card(
@@ -152,6 +165,34 @@ async def extract_card(
     raise last_error
 
 
+async def extract_and_translate(
+    image_bytes: bytes,
+    *,
+    mime_type: str = image_service.OUTPUT_MIME,
+    hint: str | None = None,
+    client: CliProxyClient | None = None,
+) -> OcrResult:
+    """`extract_card()` + lượt Việt hoá (EX-02). **Đây là hàm hai đường upload cùng gọi.**
+
+    Tách khỏi `extract_card()` chứ không nhét thẳng vào trong, vì hai lý do khác nhau:
+
+    * `extract_card()` là *đọc chữ trên ảnh* và có hợp đồng riêng — số lượt gọi model của nó
+      (`attempts`, `MAX_ATTEMPTS`) là thứ test và log đang đếm. Thêm một lời gọi nữa vào giữa
+      làm hỏng phép đếm đó.
+    * Việt hoá là **tiện ích**: hỏng thì thẻ vẫn phải quét xong. Ở đây lỗi bị nuốt hẳn
+      (`translate_card()` tự rơi về bảng tra cứu), còn `extract_card()` vẫn ném lỗi như cũ.
+    """
+    result = await extract_card(image_bytes, mime_type=mime_type, hint=hint, client=client)
+    translation = await translate_service.translate_card(
+        result.extraction.model_dump(),
+        language=result.extraction.language_detected,
+        client=client,
+    )
+    if translation.is_empty and translation.meta.get("source") in ("failed", "skipped"):
+        logger.info("Không Việt hoá được thẻ vừa quét: %s", translation.meta)
+    return dataclasses.replace(result, translation=translation)
+
+
 def parse_response(text: str) -> CardExtraction:
     """Chuỗi model trả về → `CardExtraction` đã chuẩn hoá. Tách riêng để test không cần gọi mạng."""
     return _validate(_to_json(text))
@@ -204,76 +245,17 @@ def _validate(raw_json: dict[str, Any]) -> CardExtraction:
 
 
 def _to_json(text: str) -> dict[str, Any]:
-    """Chuỗi model trả về → dict. Gỡ hàng rào code, cắt phần thừa, vá dấu phẩy thừa.
+    """Chuỗi model trả về → dict, dịch lỗi bóc JSON thành lỗi của F1.
 
-    Bốn lần thử, dừng ngay khi thành công:
-
-    1. nguyên văn — trường hợp model ngoan;
-    2. bỏ hàng rào ```…``` (I-15) — trường hợp gặp thật ở task 2.3;
-    3. quét lấy object `{…}` cân bằng ngoặc đầu tiên — bắt được cả lời dẫn kiểu "Đây là JSON:";
-    4. bỏ dấu phẩy thừa trước `}`/`]`.
+    Phần đếm ngoặc / gỡ hàng rào ```json (I-15) chuyển sang `services/llm_json.py` ở EX-02, khi
+    lượt Việt hoá cần đúng logic đó cho lời gọi model thứ hai. Giữ lại hàm này vì lớp dịch lỗi
+    mới là phần thuộc về F1: `OcrParseError` mang theo `raw_text` để dán vào `docs/bugs-f1-f3.md`.
     """
-    candidates = []
-    stripped = text.strip()
-    if stripped:
-        candidates.append(stripped)
-
-    fenced = _FENCE_RE.match(stripped)
-    if fenced:
-        candidates.append(fenced.group("body").strip())
-
-    span = _first_json_object(candidates[-1] if candidates else stripped)
-    if span:
-        candidates.append(span)
-        candidates.append(_TRAILING_COMMA_RE.sub(r"\1", span))
-
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(data, dict):
-            return data
-        # Model đôi khi gói kết quả trong mảng một phần tử.
-        if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
-            return data[0]
-
-    raise OcrParseError(
-        "Model không trả về JSON đọc được. Thường là do ảnh không phải danh thiếp hoặc model "
-        "trả lời bằng lời văn — xem `raw_text` trong log để biết chính xác.",
-        raw_text=text[:500],
-    )
-
-
-def _first_json_object(text: str) -> str | None:
-    """Cắt object JSON cân bằng ngoặc đầu tiên trong chuỗi.
-
-    Đếm ngoặc chứ không dùng regex: giá trị trong danh thiếp có thể chứa `{`/`}` (địa chỉ, tên
-    công ty), và chuỗi JSON có thể chứa dấu nháy đã escape — regex không xử lý nổi hai thứ đó.
-    """
-    start = text.find("{")
-    if start < 0:
-        return None
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(start, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : index + 1]
-    return None
+    try:
+        return extract_json_object(text)
+    except JsonExtractError as exc:
+        raise OcrParseError(
+            "Model không trả về JSON đọc được. Thường là do ảnh không phải danh thiếp hoặc model "
+            "trả lời bằng lời văn — xem `raw_text` trong log để biết chính xác.",
+            raw_text=text[:500],
+        ) from exc

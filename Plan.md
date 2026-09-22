@@ -34,7 +34,12 @@ Xây dựng hệ thống giúp doanh nghiệp chuyển hoá danh thiếp thu th�
 - Web app (FastAPI + giao diện web đơn giản) chạy localhost qua Docker Compose.
 - Upload 1 ảnh và upload hàng loạt (batch) danh thiếp; danh thiếp đã quét nằm ở một màn hình danh sách riêng.
 - **Lập hồ sơ đối tác kích hoạt thủ công**: màn hình Doanh nghiệp cho tích chọn 1..n công ty rồi chạy bằng một nút, có theo dõi tiến trình.
-- Danh thiếp **đa ngôn ngữ**: Anh, Việt, Hàn, Nhật, Trung.
+- Danh thiếp **đa ngôn ngữ**: ~~Anh, Việt, Hàn, Nhật, Trung.~~
+  **Mở rộng 2026-09-22 (yêu cầu của chủ dự án, mục `EX` của `Task.md`): KHÔNG giới hạn ngôn ngữ nào** —
+  năm thứ tiếng trên chỉ còn là bộ được đo kỹ nhất. Kèm theo đó là **bước Việt hoá sau khi quét**: chức vụ
+  và loại hình pháp nhân (株式会社, Co., Ltd, 주식회사…) được **dịch nghĩa**, tên riêng (người, công ty, địa
+  danh) được **phiên âm theo lối người Việt viết** — tiếng Nhật → Romaji, tiếng Trung → âm Hán Việt, còn lại
+  → dạng Latin thông dụng. **Bản gốc không bị ghi đè**, nó hiện làm chú thích nhỏ ngay dưới bản dịch.
 - **Nút bấm kết nối OAuth với CLIProxy** trên giao diện + hiển thị trạng thái kết nối.
 - Quản lý mã nguồn bằng Git, đóng gói toàn bộ bằng Docker.
 - *(Bổ sung 2026-09-21)* **Đăng ký/đăng nhập nhiều người dùng + tách dữ liệu theo người dùng** (F4).
@@ -235,6 +240,8 @@ business_cards
   id (uuid, pk), image_path, image_hash, uploaded_at, ocr_raw_json (jsonb),
   full_name, job_title, company_name_raw, email, phone, phone_alt, address,
   website, language_detected, confidence (jsonb),
+  full_name_vi, job_title_vi, company_name_vi, address_vi,   -- Việt hoá, thêm ở EX (revision 0006)
+  translation_meta (jsonb),                                  -- nguồn bản dịch, ngôn ngữ/hệ chữ, cờ stale
   status (pending | needs_review | confirmed),
   company_id (fk -> companies.id, nullable), notes, created_at, updated_at
 
@@ -318,6 +325,7 @@ giao cho cùng một người để tránh xung đột Git (bảng sở hữu fi
 | Web UI hồ sơ doanh nghiệp + dashboard | Tùng | Thuộc F2, cùng thư mục `templates/companies/` |
 | `services/llm.py` (client Gemini dùng chung) | Quân | File dùng chung; Quân cần vision + streaming, Tùng chỉ import |
 | `services/normalize.py` (chuẩn hoá SĐT/email — hậu xử lý sau khi quét) | Quân | Thuộc F1: tối ưu dữ liệu ngay sau bước OCR, gọi trong `ocr.py` |
+| `services/translate.py` + `prompts/translate.py` (Việt hoá — dịch chức vụ/loại hình pháp nhân, phiên âm tên riêng) | Quân | Cùng lý do: bước hậu xử lý thứ hai sau OCR, gọi trong `ocr.extract_and_translate()`. Phát sinh 2026-09-22, xem mục `EX` của `Task.md` |
 | `services/normalize_company.py` (chuẩn hoá tên công ty) | Tùng | Tách thành file riêng để giữ quy ước 1 chủ sở hữu/file; chỉ phục vụ dedupe F2 |
 | Bộ dữ liệu test (≥30 danh thiếp đa ngôn ngữ) | Tùng | Làm song song khi Quân dựng pipeline |
 | Prompt OCR, đo & tinh chỉnh độ chính xác (`docs/accuracy.md`) | Quân | Thuộc F1: trọn vòng lặp tối ưu sau khi quét; bộ ảnh mẫu + `expected.json` do Tùng chuẩn bị |
