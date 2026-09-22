@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.security import current_user
 from app.models.company import Company, CompanyProfile, EnrichJob, EnrichJobItem
 from app.models.user import User
 from app.repositories import company as company_repo
@@ -47,6 +48,7 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+OWNER = User(id=OWNER_ID, email="owner-enrich@example.com", password_hash="!")
 
 
 @pytest.fixture
@@ -102,6 +104,7 @@ async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
         yield session
 
     app.dependency_overrides[get_db] = fake_db
+    app.dependency_overrides[current_user] = lambda: OWNER
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -214,10 +217,10 @@ async def test_enrich_batch_accepts_and_starts(
 ) -> None:
     other = uuid.uuid4()
 
-    async def existing(db: Any, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    async def existing(db: Any, ids: list[uuid.UUID], **_: Any) -> set[uuid.UUID]:
         return set(ids)
 
-    async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
+    async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         return JobCreated(job_id=JOB_ID, accepted=1, skipped=[other])
 
     monkeypatch.setattr(job_repo, "existing_company_ids", existing)
@@ -236,10 +239,10 @@ async def test_enrich_batch_accepts_and_starts(
 async def test_enrich_batch_all_skipped_does_not_start(
     client: httpx.AsyncClient, started: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def existing(db: Any, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    async def existing(db: Any, ids: list[uuid.UUID], **_: Any) -> set[uuid.UUID]:
         return set(ids)
 
-    async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
+    async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         return JobCreated(job_id=JOB_ID, accepted=0, skipped=list(ids))
 
     monkeypatch.setattr(job_repo, "existing_company_ids", existing)
@@ -255,7 +258,7 @@ async def test_enrich_batch_all_skipped_does_not_start(
 async def test_enrich_batch_unknown_company(
     client: httpx.AsyncClient, started: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def existing(db: Any, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    async def existing(db: Any, ids: list[uuid.UUID], **_: Any) -> set[uuid.UUID]:
         return set()
 
     monkeypatch.setattr(job_repo, "existing_company_ids", existing)
@@ -281,14 +284,14 @@ async def test_enrich_one_starts_job(
     started: list[uuid.UUID],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_company(db: Any, company_id: uuid.UUID) -> Company:
+    async def fake_company(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
         return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
 
-    async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
+    async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         assert ids == [COMPANY_ID]
         return JobCreated(job_id=JOB_ID, accepted=1, skipped=[])
 
-    monkeypatch.setattr(company_repo, "get_company", fake_company)
+    monkeypatch.setattr(company_repo, "get_owned_company", fake_company)
     monkeypatch.setattr(enrich_jobs, "create_job", fake_create)
 
     response = await client.post(f"/api/companies/{COMPANY_ID}/enrich")
@@ -306,16 +309,16 @@ async def test_enrich_one_conflict_returns_existing_job(
 ) -> None:
     running_job = uuid.uuid4()
 
-    async def fake_company(db: Any, company_id: uuid.UUID) -> Company:
+    async def fake_company(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
         return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
 
-    async def fake_create(db: Any, ids: list[uuid.UUID]) -> JobCreated:
+    async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         return JobCreated(job_id=JOB_ID, accepted=0, skipped=list(ids))
 
-    async def fake_active(db: Any, company_id: uuid.UUID) -> uuid.UUID:
+    async def fake_active(db: Any, company_id: uuid.UUID, **_: Any) -> uuid.UUID:
         return running_job
 
-    monkeypatch.setattr(company_repo, "get_company", fake_company)
+    monkeypatch.setattr(company_repo, "get_owned_company", fake_company)
     monkeypatch.setattr(enrich_jobs, "create_job", fake_create)
     monkeypatch.setattr(job_repo, "active_job_id", fake_active)
 
@@ -329,10 +332,10 @@ async def test_enrich_one_conflict_returns_existing_job(
 async def test_enrich_one_unknown_company(
     client: httpx.AsyncClient, started: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def nothing(db: Any, company_id: uuid.UUID) -> None:
+    async def nothing(db: Any, company_id: uuid.UUID, **_: Any) -> None:
         return None
 
-    monkeypatch.setattr(company_repo, "get_company", nothing)
+    monkeypatch.setattr(company_repo, "get_owned_company", nothing)
     response = await client.post(f"/api/companies/{uuid.uuid4()}/enrich")
     assert response.status_code == 404
     assert started == []
@@ -353,10 +356,10 @@ async def test_job_progress(client: httpx.AsyncClient, monkeypatch: pytest.Monke
         (item("pending", attempts=0), "XYZ"),
     ]
 
-    async def fake_job(db: Any, job_id: uuid.UUID) -> EnrichJob:
+    async def fake_job(db: Any, job_id: uuid.UUID, **_: Any) -> EnrichJob:
         return job
 
-    async def fake_items(db: Any, job_id: uuid.UUID) -> list[tuple[EnrichJobItem, str]]:
+    async def fake_items(db: Any, job_id: uuid.UUID, **_: Any) -> list[tuple[EnrichJobItem, str]]:
         return items
 
     monkeypatch.setattr(job_repo, "get_job", fake_job)
@@ -383,7 +386,7 @@ async def test_job_progress(client: httpx.AsyncClient, monkeypatch: pytest.Monke
 
 
 async def test_job_unknown(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def nothing(db: Any, job_id: uuid.UUID) -> None:
+    async def nothing(db: Any, job_id: uuid.UUID, **_: Any) -> None:
         return None
 
     monkeypatch.setattr(job_repo, "get_job", nothing)

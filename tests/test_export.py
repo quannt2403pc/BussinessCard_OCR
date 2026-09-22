@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import current_user
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
@@ -20,6 +21,7 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. Test ở đây không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+OWNER = User(id=OWNER_ID, email="owner-export@example.com", password_hash="!")
 
 
 @pytest.fixture
@@ -56,6 +58,7 @@ async def client(
     monkeypatch.setattr(export, "SessionLocal", SessionFactory(db_session))
     app = FastAPI()
     app.include_router(export.router)
+    app.dependency_overrides[current_user] = lambda: OWNER
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http

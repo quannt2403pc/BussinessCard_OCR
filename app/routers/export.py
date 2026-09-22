@@ -11,6 +11,7 @@ from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal
+from app.core.security import CurrentUser
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.repositories import company as company_repo
@@ -36,7 +37,7 @@ CardStatusQuery = Annotated[
 ]
 
 
-def _cards_select(card_status: str | None) -> Select[Any]:
+def _cards_select(user_id: uuid.UUID, card_status: str | None) -> Select[Any]:
     stmt = (
         select(
             BusinessCard.id,
@@ -57,6 +58,7 @@ def _cards_select(card_status: str | None) -> Select[Any]:
             BusinessCard.updated_at,
         )
         .outerjoin(Company, Company.id == BusinessCard.company_id)
+        .where(BusinessCard.user_id == user_id)
         .order_by(BusinessCard.uploaded_at, BusinessCard.id)
     )
     if card_status is not None:
@@ -64,7 +66,7 @@ def _cards_select(card_status: str | None) -> Select[Any]:
     return stmt
 
 
-def _companies_select() -> Select[Any]:
+def _companies_select(user_id: uuid.UUID) -> Select[Any]:
     return (
         select(
             Company.id.label("company_id"),
@@ -89,25 +91,29 @@ def _companies_select() -> Select[Any]:
             CompanyProfile.generated_at,
         )
         .outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
+        .where(Company.user_id == user_id)
         .order_by(Company.display_name, Company.id)
     )
 
 
-async def count_cards(db: AsyncSession, card_status: str | None) -> int:
-    stmt = select(func.count(BusinessCard.id))
+async def count_cards(db: AsyncSession, user_id: uuid.UUID, card_status: str | None) -> int:
+    stmt = select(func.count(BusinessCard.id)).where(BusinessCard.user_id == user_id)
     if card_status is not None:
         stmt = stmt.where(BusinessCard.status == card_status)
     return int(await db.scalar(stmt) or 0)
 
 
-async def count_companies(db: AsyncSession) -> int:
-    return int(await db.scalar(select(func.count(Company.id))) or 0)
+async def count_companies(db: AsyncSession, user_id: uuid.UUID) -> int:
+    stmt = select(func.count(Company.id)).where(Company.user_id == user_id)
+    return int(await db.scalar(stmt) or 0)
 
 
-async def iter_cards(db: AsyncSession, card_status: str | None) -> AsyncIterator[CardExportRow]:
+async def iter_cards(
+    db: AsyncSession, user_id: uuid.UUID, card_status: str | None
+) -> AsyncIterator[CardExportRow]:
     cursor: tuple[datetime, uuid.UUID] | None = None
     while True:
-        stmt = _cards_select(card_status).limit(EXPORT_BATCH_SIZE)
+        stmt = _cards_select(user_id, card_status).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(BusinessCard.uploaded_at, BusinessCard.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -118,10 +124,10 @@ async def iter_cards(db: AsyncSession, card_status: str | None) -> AsyncIterator
         cursor = (rows[-1].uploaded_at, rows[-1].id)
 
 
-async def iter_companies(db: AsyncSession) -> AsyncIterator[CompanyExportRow]:
+async def iter_companies(db: AsyncSession, user_id: uuid.UUID) -> AsyncIterator[CompanyExportRow]:
     cursor: tuple[str, uuid.UUID] | None = None
     while True:
-        stmt = _companies_select().limit(EXPORT_BATCH_SIZE)
+        stmt = _companies_select(user_id).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(Company.display_name, Company.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -177,25 +183,33 @@ def _validated_status(card_status: str | None) -> str | None:
 
 
 @router.get("/cards.csv")
-async def export_cards_csv(card_status: CardStatusQuery = None) -> StreamingResponse:
+async def export_cards_csv(
+    user: CurrentUser, card_status: CardStatusQuery = None
+) -> StreamingResponse:
     selected = _validated_status(card_status)
+    user_id = user.id
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            async for chunk in _csv_body(iter_cards(db, selected), CardExportRow.columns()):
+            rows = iter_cards(db, user_id, selected)
+            async for chunk in _csv_body(rows, CardExportRow.columns()):
                 yield chunk
 
     return StreamingResponse(body(), media_type=CSV_MEDIA_TYPE, headers=_headers("cards", "csv"))
 
 
 @router.get("/cards.json", responses={200: {"model": CardsExportOut}})
-async def export_cards_json(card_status: CardStatusQuery = None) -> StreamingResponse:
+async def export_cards_json(
+    user: CurrentUser, card_status: CardStatusQuery = None
+) -> StreamingResponse:
     selected = _validated_status(card_status)
+    user_id = user.id
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            meta = _meta(await count_cards(db, selected), {"status": selected} if selected else {})
-            async for chunk in _json_body(iter_cards(db, selected), meta):
+            total = await count_cards(db, user_id, selected)
+            meta = _meta(total, {"status": selected} if selected else {})
+            async for chunk in _json_body(iter_cards(db, user_id, selected), meta):
                 yield chunk
 
     return StreamingResponse(
@@ -204,10 +218,13 @@ async def export_cards_json(card_status: CardStatusQuery = None) -> StreamingRes
 
 
 @router.get("/companies.csv")
-async def export_companies_csv() -> StreamingResponse:
+async def export_companies_csv(user: CurrentUser) -> StreamingResponse:
+    user_id = user.id
+
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            async for chunk in _csv_body(iter_companies(db), CompanyExportRow.columns()):
+            rows = iter_companies(db, user_id)
+            async for chunk in _csv_body(rows, CompanyExportRow.columns()):
                 yield chunk
 
     return StreamingResponse(
@@ -216,11 +233,13 @@ async def export_companies_csv() -> StreamingResponse:
 
 
 @router.get("/companies.json", responses={200: {"model": CompaniesExportOut}})
-async def export_companies_json() -> StreamingResponse:
+async def export_companies_json(user: CurrentUser) -> StreamingResponse:
+    user_id = user.id
+
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            meta = _meta(await count_companies(db), {})
-            async for chunk in _json_body(iter_companies(db), meta):
+            meta = _meta(await count_companies(db, user_id), {})
+            async for chunk in _json_body(iter_companies(db, user_id), meta):
                 yield chunk
 
     return StreamingResponse(

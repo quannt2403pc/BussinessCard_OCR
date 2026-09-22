@@ -19,6 +19,7 @@ from app.routers import export
 
 DATABASE = "bizcard_tuning"
 JOB_ID = "00000000-0000-0000-0000-000000000001"
+OWNER_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 INDUSTRIES = (
     "Logistics",
     "Sữa",
@@ -74,26 +75,27 @@ def seed(engine: Engine, *, companies: int, cards: int) -> None:
     industries = ", ".join(f"'{name}'" for name in INDUSTRIES)
     statements = [
         "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+        f"INSERT INTO users (id, email, password_hash) VALUES ('{OWNER_ID}', 'tuning@example.com', '!')",
         f"""
-        INSERT INTO companies (id, name_normalized, display_name, aliases)
-        SELECT gen_random_uuid(),
+        INSERT INTO companies (id, user_id, name_normalized, display_name, aliases)
+        SELECT gen_random_uuid(), '{OWNER_ID}',
                'cong ty ' || i,
                'Công ty ' || (ARRAY[{industries}])[1 + mod(i, {len(INDUSTRIES)})] || ' ' || i,
                ARRAY['Alias ' || i]
         FROM generate_series(1, {companies}) AS i
         """,
-        """
-        INSERT INTO company_profiles (id, company_id, status, tax_code, industry, sources)
-        SELECT gen_random_uuid(), id, (ARRAY['generated', 'verified', 'draft'])[1 + mod(n, 3)],
-               lpad(n::text, 10, '0'), ARRAY['Ngành ' || mod(n, 20)], '{}'::jsonb
+        f"""
+        INSERT INTO company_profiles (id, user_id, company_id, status, tax_code, industry, sources)
+        SELECT gen_random_uuid(), '{OWNER_ID}', id, (ARRAY['generated', 'verified', 'draft'])[1 + mod(n, 3)],
+               lpad(n::text, 10, '0'), ARRAY['Ngành ' || mod(n, 20)], '{{}}'::jsonb
         FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM companies) AS c
         WHERE mod(n, 2) = 0
         """,
         f"""
         WITH c AS (SELECT id, row_number() OVER (ORDER BY id) - 1 AS n FROM companies)
         INSERT INTO business_cards
-            (id, image_path, image_hash, full_name, status, company_id, uploaded_at)
-        SELECT gen_random_uuid(), 'tuning/' || i || '.jpg', md5(i::text) || md5((-i)::text),
+            (id, user_id, image_path, image_hash, full_name, status, company_id, uploaded_at)
+        SELECT gen_random_uuid(), '{OWNER_ID}', 'tuning/' || i || '.jpg', md5(i::text) || md5((-i)::text),
                'Người ' || i,
                (ARRAY['pending', 'needs_review', 'confirmed', 'confirmed'])[1 + mod(i, 4)],
                CASE WHEN mod(i, 5) = 0 THEN NULL ELSE c.id END,
@@ -114,6 +116,8 @@ def seed(engine: Engine, *, companies: int, cards: int) -> None:
     with engine.begin() as connection:
         connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
         Base.metadata.create_all(connection)
+        for name in CANDIDATES:
+            connection.exec_driver_sql(f"DROP INDEX IF EXISTS {name}")
         for statement in statements:
             connection.exec_driver_sql(statement)
 
@@ -143,7 +147,10 @@ def probes(engine: Engine, *, companies: int, cards: int) -> dict[str, Select[An
     def company_page(
         *, q: str | None = None, has_profile: bool | None = None, page: int = 1
     ) -> Select[Any]:
-        conditions = company_repo._list_conditions(q=q, has_profile=has_profile)
+        conditions = [
+            Company.user_id == OWNER_ID,
+            *company_repo._list_conditions(q=q, has_profile=has_profile),
+        ]
         return (
             company_repo._company_rows()
             .where(*conditions)
@@ -157,7 +164,10 @@ def probes(engine: Engine, *, companies: int, cards: int) -> dict[str, Select[An
             select(func.count())
             .select_from(Company)
             .outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
-            .where(*company_repo._list_conditions(q=q, has_profile=None))
+            .where(
+                Company.user_id == OWNER_ID,
+                *company_repo._list_conditions(q=q, has_profile=None),
+            )
         )
 
     uploaded_at: datetime = card_cursor.uploaded_at
@@ -177,10 +187,10 @@ def probes(engine: Engine, *, companies: int, cards: int) -> dict[str, Select[An
             EnrichJobItem.company_id == busy_company,
             EnrichJobItem.status.in_(ACTIVE_JOB_ITEM_STATUSES),
         ),
-        "export cards: batch mid-table": export._cards_select(None)
+        "export cards: batch mid-table": export._cards_select(OWNER_ID, None)
         .where(tuple_(BusinessCard.uploaded_at, BusinessCard.id) > (uploaded_at, card_id))
         .limit(200),
-        "export companies: batch mid-table": export._companies_select()
+        "export companies: batch mid-table": export._companies_select(OWNER_ID)
         .where(
             tuple_(Company.display_name, Company.id)
             > (company_cursor.display_name, company_cursor.id)

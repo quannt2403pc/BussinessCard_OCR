@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
@@ -30,12 +31,20 @@ async def dashboard_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/stats", response_model=StatsOut, tags=["stats"])
-async def get_stats(db: Annotated[AsyncSession, Depends(get_db)]) -> StatsOut:
-    companies = select(func.count()).select_from(Company).scalar_subquery()
+async def get_stats(db: Annotated[AsyncSession, Depends(get_db)], user: CurrentUser) -> StatsOut:
+    companies = (
+        select(func.count())
+        .select_from(Company)
+        .where(Company.user_id == user.id)
+        .scalar_subquery()
+    )
     profiles = (
         select(func.count())
         .select_from(CompanyProfile)
-        .where(CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES))
+        .where(
+            CompanyProfile.user_id == user.id,
+            CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES),
+        )
         .scalar_subquery()
     )
     row = (
@@ -50,7 +59,7 @@ async def get_stats(db: Annotated[AsyncSession, Depends(get_db)]) -> StatsOut:
                 ),
                 companies,
                 profiles,
-            )
+            ).where(BusinessCard.user_id == user.id)
         )
     ).one()
 
