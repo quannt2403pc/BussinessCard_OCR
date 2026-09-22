@@ -54,7 +54,14 @@ check_prerequisites() {
 
     # Bat cac gia tri con nguyen van mau. Mot ban deploy voi POSTGRES_PASSWORD=change-me la
     # ban khong ai muon phat hien vao ngay nghiem thu.
-    if grep -qE '(change-me|SINH-NGAU-NHIEN|doi-thanh-email-that)' "${ROOT}/.env"; then
+    #
+    # ⚠️ CHI soi dong KHAI BIEN, phai bo qua chu thich. `.env.prod.example` nhac ca ba chuoi
+    # nay ngay trong phan giai thich (dong noi ve `secret-key: "change-me"` cua CLIProxy,
+    # dong huong dan sinh bi mat), ma `.env` that thi chep tu file do nen thua huong luon.
+    # Grep ca file = bao dong gia 100%: vap that o lan deploy dau tien 2026-09-22, chan dung
+    # mot `.env` hoan toan hop le.
+    if grep -vE '^[[:space:]]*#' "${ROOT}/.env" \
+            | grep -qE '(change-me|SINH-NGAU-NHIEN|doi-thanh-email-that)'; then
         die ".env con gia tri mau (change-me / SINH-NGAU-NHIEN / doi-thanh-email-that). Dien gia tri that truoc da."
     fi
     echo "  .env - co, khong con gia tri mau"
