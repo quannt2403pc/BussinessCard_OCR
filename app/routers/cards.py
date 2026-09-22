@@ -69,7 +69,7 @@ from app.schemas.card import (
     CardUpdateIn,
     CardUploadOut,
 )
-from app.services import card_batch, kb, llm, normalize, ocr, translate
+from app.services import card_batch, kb, llm, normalize, ocr, translate, user_credentials
 from app.services import image as image_service
 from app.services.embeddings import EmbeddingError
 
@@ -218,7 +218,11 @@ async def upload_card(
     ocr_result: ocr.OcrResult | None = None
     ocr_error: str | None = None
     try:
-        ocr_result = await ocr.extract_and_translate(processed.data, mime_type=processed.mime_type)
+        ocr_result = await ocr.extract_and_translate(
+            processed.data,
+            mime_type=processed.mime_type,
+            model=user_credentials.model_for(user),
+        )
     except (llm.LLMError, ocr.OcrError) as exc:
         ocr_error = str(exc)
         logger.warning("Quét ảnh %s thất bại: %s", relative_path, exc)
@@ -499,7 +503,10 @@ async def translate_card(
 
     try:
         translation = await translate.translate_card(
-            source, language=card.language_detected, raise_on_error=True
+            source,
+            language=card.language_detected,
+            model=user_credentials.model_for(user),
+            raise_on_error=True,
         )
     except llm.LLMNotConnectedError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

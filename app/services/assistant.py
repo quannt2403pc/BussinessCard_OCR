@@ -39,7 +39,7 @@ from app.models.chat import ChatRole
 from app.models.kb import KBSourceType
 from app.prompts import assistant as prompt
 from app.repositories import kb as kb_repo
-from app.services import llm, retriever
+from app.services import llm, retriever, user_credentials
 from app.services.retriever import Hit
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,7 @@ async def answer(
     context = prompt.build_context([context_block(hit) for hit in hits])
     raw = await llm.generate_text(
         prompt.build_prompt(text, context, history=history_text(history)),
+        model=await user_credentials.model_for_user_id(db, user_id),
         system=prompt.SYSTEM_PROMPT,
         temperature=TEMPERATURE,
         max_output_tokens=MAX_OUTPUT_TOKENS,

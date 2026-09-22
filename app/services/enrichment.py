@@ -29,6 +29,7 @@ from app.services.llm import (
     TOOL_GOOGLE_SEARCH,
     LLMBlockedError,
     LLMError,
+    base_model,
     generate_content,
 )
 
@@ -97,7 +98,9 @@ async def enrich_company(
         )
         raw = parse_profile_json(response_text(structure_data))
 
-    profile = validate_profile(raw, grounding, llm_model=model_name, generated_at=datetime.now(UTC))
+    profile = validate_profile(
+        raw, grounding, llm_model=base_model(model_name), generated_at=datetime.now(UTC)
+    )
     logger.info(
         "Enrich %r: %d grounding sources, %d sourced fields, unverified %s",
         company_name,

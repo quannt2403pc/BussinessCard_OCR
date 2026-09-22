@@ -485,7 +485,14 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
     async def fake_draft(db: Any, cid: uuid.UUID) -> None:
         return None
 
-    async def fake_enrich(name: str, hints: Any) -> Profile:
+    models: list[str] = []
+
+    async def fake_model(db: Any, user_id: uuid.UUID) -> str:
+        assert user_id == OWNER_ID
+        return "uowner/gemini-3-flash"
+
+    async def fake_enrich(name: str, hints: Any, *, model: str) -> Profile:
+        models.append(model)
         return Profile()
 
     async def fake_save(db: Any, cid: uuid.UUID, profile: Any, **kwargs: Any) -> Saved:
@@ -503,9 +510,11 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(enrich_jobs, "enrich_company", fake_enrich)
     monkeypatch.setattr(enrich_jobs, "build_hints", lambda cards: {})
     monkeypatch.setattr(enrich_jobs, "index_profile", fake_index)
+    monkeypatch.setattr(enrich_jobs.user_credentials, "model_for_user_id", fake_model)
 
     assert await enrich_jobs.enrich_and_save(company_id) == 7
     assert order == ["save", f"index:{profile_id}"]
+    assert models == ["uowner/gemini-3-flash"]
 
 
 async def add_company(db: AsyncSession, display_name: str) -> Company:

@@ -222,6 +222,7 @@ async def translate_card(
     fields: Mapping[str, Any],
     *,
     language: str | None = None,
+    model: str | None = None,
     client: CliProxyClient | None = None,
     raise_on_error: bool = False,
 ) -> Translation:
@@ -244,7 +245,7 @@ async def translate_card(
 
     if settings.translate_after_ocr:
         try:
-            raw = await _ask_model(source, language=language, client=client)
+            raw = await _ask_model(source, language=language, model=model, client=client)
         except Exception as exc:  # noqa: BLE001 — xem docstring: dịch hỏng ≠ quét hỏng
             logger.warning("Việt hoá bằng model thất bại, dùng bảng tra cứu: %s", exc)
             if raise_on_error:
@@ -323,6 +324,7 @@ async def _ask_model(
     source: Mapping[str, Any],
     *,
     language: str | None,
+    model: str | None,
     client: CliProxyClient | None,
 ) -> dict[str, Any]:
     """Một lượt gọi model, trả về JSON đã bóc khỏi câu trả lời.
@@ -334,6 +336,7 @@ async def _ask_model(
     text = await llm.generate_text(
         prompts.build_prompt(dict(source), language=language),
         system=prompts.SYSTEM_PROMPT,
+        model=model,
         temperature=0.0,
         client=client,
     )

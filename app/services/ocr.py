@@ -105,6 +105,7 @@ async def extract_card(
     *,
     mime_type: str = image_service.OUTPUT_MIME,
     hint: str | None = None,
+    model: str | None = None,
     client: CliProxyClient | None = None,
 ) -> OcrResult:
     """Đọc một ảnh danh thiếp đã tiền xử lý thành `CardExtraction` đã chuẩn hoá.
@@ -129,6 +130,7 @@ async def extract_card(
             image_bytes,
             mime_type=mime_type,
             system=prompts.SYSTEM_PROMPT,
+            model=model,
             temperature=0.0,
             client=client,
         )
@@ -170,6 +172,7 @@ async def extract_and_translate(
     *,
     mime_type: str = image_service.OUTPUT_MIME,
     hint: str | None = None,
+    model: str | None = None,
     client: CliProxyClient | None = None,
 ) -> OcrResult:
     """`extract_card()` + lượt Việt hoá (EX-02). **Đây là hàm hai đường upload cùng gọi.**
@@ -182,10 +185,13 @@ async def extract_and_translate(
     * Việt hoá là **tiện ích**: hỏng thì thẻ vẫn phải quét xong. Ở đây lỗi bị nuốt hẳn
       (`translate_card()` tự rơi về bảng tra cứu), còn `extract_card()` vẫn ném lỗi như cũ.
     """
-    result = await extract_card(image_bytes, mime_type=mime_type, hint=hint, client=client)
+    result = await extract_card(
+        image_bytes, mime_type=mime_type, hint=hint, model=model, client=client
+    )
     translation = await translate_service.translate_card(
         result.extraction.model_dump(),
         language=result.extraction.language_detected,
+        model=model,
         client=client,
     )
     if translation.is_empty and translation.meta.get("source") in ("failed", "skipped"):

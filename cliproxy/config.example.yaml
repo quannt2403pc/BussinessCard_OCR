@@ -42,3 +42,12 @@ auth-dir: "/root/.cli-proxy-api"
 api-keys: []
 
 debug: false
+
+# Moi nguoi dung co credential OAuth rieng, gan tien to u<12 hex dau cua user id> (task 13.1,
+# docs/adr-multiuser-oauth.md). Bat true: loi goi model KHONG co tien to chi dung credential
+# KHONG co tien to, nen quen tien to la loi chu khong muon nham tai khoan Google cua nguoi khac.
+force-model-prefix: true
+
+# Khai ro thay vi an mac dinh round-robin (ADR 12.1 muc 4). Moi tien to chi co mot credential.
+routing:
+  strategy: "fill-first"

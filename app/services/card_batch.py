@@ -36,7 +36,7 @@ from app.core.db import SessionLocal
 from app.models.card import CardStatus
 from app.repositories import card as card_repo
 from app.services import image as image_service
-from app.services import llm, ocr
+from app.services import llm, ocr, user_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -265,12 +265,14 @@ async def _scan(item: BatchItem) -> None:
     except OSError as exc:
         raise BatchItemError(f"Không đọc được ảnh đã lưu: {exc}") from exc
 
-    # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
-    # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
-    result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME)
-
     if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
         raise BatchItemError("Mục này không biết thuộc về ai.")
+
+    async with SessionLocal() as db:
+        model = await user_credentials.model_for_user_id(db, item.user_id)
+    # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
+    # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
+    result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME, model=model)
 
     async with SessionLocal() as db:
         card = await card_repo.get(db, item.card_id, user_id=item.user_id)
