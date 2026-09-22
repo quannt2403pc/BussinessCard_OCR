@@ -102,13 +102,18 @@ class OAuthStatusOut(BaseModel):
 
 
 class OAuthCallbackIn(BaseModel):
-    """URL người dùng chép từ thanh địa chỉ của trang báo lỗi sau khi đồng ý ở Google (13.7)."""
+    """Thứ người dùng dán vào sau khi đồng ý ở Google (13.7).
 
-    state: str = Field(min_length=1, description="`state` nhận từ /connect")
-    redirect_url: str = Field(
+    `pasted` cố ý **dễ tính**: nhận cả URL đầy đủ lẫn mỗi đoạn `code`. Bước này là chỗ duy
+    nhất trong hệ thống bắt người dùng làm việc của máy, nên mọi cách chép hợp lý đều phải
+    chạy — kén chọn ở đây chỉ đổi lấy một lượt đăng nhập hỏng.
+    """
+
+    state: str = Field(min_length=1, description="`state` của phiên UI đang chờ")
+    pasted: str = Field(
         min_length=1,
         max_length=4096,
-        description="Nguyên văn URL `http://localhost:51121/oauth-callback?...`",
+        description="URL `http://localhost:51121/oauth-callback?...` hoặc chỉ đoạn `code`",
     )
 
 
@@ -288,24 +293,29 @@ async def submit_oauth_callback(
     Xong lời gọi này thì phiên chuyển sang trạng thái xong; hàm cũng gắn luôn credential vào
     người đang đăng nhập (13.1) thay vì bắt UI chờ nhịp poll kế tiếp.
     """
-    if not user_credentials.owns_session(payload.state, user.id):
+    pasted = payload.pasted.strip()
+
+    # `state` lấy từ **chính URL vừa dán**, không phải từ phiên UI đang chờ. Nghe ngược đời
+    # nhưng đây mới đúng: bấm nút Kết nối hai lần là có hai phiên, và lượt người dùng thật sự
+    # đăng nhập xong là lượt nằm trong URL họ cầm về — không nhất thiết là lượt mới nhất.
+    # Bản trước bắt hai giá trị phải trùng nhau và từ chối thẳng, tức phạt người dùng vì một
+    # cú bấm thừa. Luật tách người dùng **không hề bị nới**: `owns_session()` ngay dưới vẫn
+    # đòi phiên đó phải do chính người đang đăng nhập mở ra.
+    state = _state_in_url(pasted) or payload.state
+    if not user_credentials.owns_session(state, user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
-    pasted_state = _state_in_url(payload.redirect_url)
-    if pasted_state is not None and pasted_state != payload.state:
-        # Dán nhầm URL của một lượt kết nối khác. CLIProxy cũng bắt được, nhưng bắt ở đây thì
-        # thông báo nói đúng việc phải làm và không tiêu một lượt gọi mạng.
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="URL này thuộc một lượt kết nối khác. Bấm “Kết nối” lại rồi dán URL mới nhất.",
-        )
+    # Có `code=` (hoặc có phần truy vấn) thì coi là URL; còn lại coi là người dùng chỉ chép
+    # được mỗi đoạn mã.
+    looks_like_url = "code=" in pasted or "?" in pasted
+    sent = {"redirect_url": pasted} if looks_like_url else {"code": pasted, "state": state}
 
     try:
         async with CliProxyClient() as proxy:
-            await proxy.submit_oauth_callback(payload.redirect_url)
-            result = await proxy.oauth_status(payload.state)
+            await proxy.submit_oauth_callback(**sent)
+            result = await proxy.oauth_status(state)
             if result.is_done:
-                await user_credentials.claim(db, user, proxy, payload.state)
+                await user_credentials.claim(db, user, proxy, state)
     except CliProxyCallbackError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
     except user_credentials.CredentialTakenError as exc:
@@ -325,7 +335,7 @@ async def submit_oauth_callback(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=exc.message) from exc
 
     if not result.is_waiting:
-        user_credentials.forget_session(payload.state)
+        user_credentials.forget_session(state)
     return OAuthStatusOut(status=result.status, error=result.error)
 
 

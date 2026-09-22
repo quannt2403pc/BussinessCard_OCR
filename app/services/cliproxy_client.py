@@ -420,7 +420,14 @@ class CliProxyClient:
             error=(str(data["error"]) if data.get("error") else None),
         )
 
-    async def submit_oauth_callback(self, redirect_url: str, provider: str | None = None) -> None:
+    async def submit_oauth_callback(
+        self,
+        *,
+        redirect_url: str | None = None,
+        code: str | None = None,
+        state: str | None = None,
+        provider: str | None = None,
+    ) -> None:
         """Nộp hộ trình duyệt cái URL mà Google trả về — lối kết nối OAuth trên tên miền thật.
 
         Vì sao cần (task 13.7, gỡ **I-29**): Google luôn chuyển trình duyệt về
@@ -445,17 +452,21 @@ class CliProxyClient:
         Sau lời gọi này, phiên OAuth chuyển sang xong và vòng poll `get-auth-status` sẵn có
         nhận ra — không phải nhân đôi phần gắn credential vào người dùng của 13.1.
         """
-        if not redirect_url.strip():
-            raise ValueError("submit_oauth_callback() bắt buộc có `redirect_url`.")
+        body: dict[str, str] = {"provider": provider or self.provider}
+        if redirect_url and redirect_url.strip():
+            # Gửi nguyên URL cho CLIProxy tự bóc. Tự bóc ở phía mình cũng chạy, nhưng sẽ nhận
+            # lấy việc phân tích URL mà upstream đã làm sẵn, và lệch ngay khi Google thêm
+            # tham số mới (đã thấy `iss`, `authuser`, `prompt` trong URL thật).
+            body["redirect_url"] = redirect_url.strip()
+        elif code and code.strip():
+            # Người dùng chỉ chép được mỗi đoạn `code` — vẫn nhận, `state` ta đang giữ sẵn.
+            body["code"] = code.strip()
+            if state and state.strip():
+                body["state"] = state.strip()
+        else:
+            raise ValueError("submit_oauth_callback() cần `redirect_url` hoặc `code`.")
         try:
-            await self.request_json(
-                "POST",
-                "/oauth-callback",
-                json={
-                    "provider": provider or self.provider,
-                    "redirect_url": redirect_url.strip(),
-                },
-            )
+            await self.request_json("POST", "/oauth-callback", json=body)
         except (CliProxyDisabledError, CliProxyResponseError) as exc:
             # ⚠️ Bẫy: route này trả **404 cho `state` không còn tồn tại**, mà `request()` lại
             # dịch mọi 404 trên nhánh quản trị thành "Management API bị tắt" — đúng cho các

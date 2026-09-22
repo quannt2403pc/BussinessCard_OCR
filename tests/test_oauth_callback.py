@@ -98,7 +98,11 @@ class CallbackProxy:
     def _callback(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         self.callbacks.append(body)
-        state, code = _parse(body.get("redirect_url", ""))
+        if "redirect_url" in body:
+            state, code = _parse(body["redirect_url"])
+        else:
+            # Dạng thứ hai của hợp đồng: người dùng chỉ chép được mỗi `code`.
+            state, code = str(body.get("state", "")), str(body.get("code", ""))
         if not state:
             return httpx.Response(400, json={"status": "error", "error": "state is required"})
         if not code:
@@ -205,7 +209,7 @@ async def test_pasting_the_url_connects_and_claims_the_credential(
         state = (await http.post("/api/integration/connect")).json()["state"]
         done = await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state)},
+            json={"state": state, "pasted": callback_url(state)},
         )
         status = (await http.get("/api/integration/status")).json()
 
@@ -228,9 +232,11 @@ async def test_backend_forwards_the_whole_url_not_just_the_code(
         state = (await http.post("/api/integration/connect")).json()["state"]
         await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state, "code-xyz")},
+            json={"state": state, "pasted": callback_url(state, "code-xyz")},
         )
 
+    # `pasted` là hợp đồng API của ta; `redirect_url` là hợp đồng của CLIProxy. Hai tên khác
+    # nhau ở hai đầu là cố ý — đừng đổi cái này theo cái kia.
     assert proxy.callbacks == [
         {"provider": PROVIDER, "redirect_url": callback_url(state, "code-xyz")}
     ]
@@ -239,21 +245,47 @@ async def test_backend_forwards_the_whole_url_not_just_the_code(
 # --------------------------------------------------------------------------- dán sai
 
 
-async def test_url_of_another_login_round_is_refused(
-    app_client: ClientFactory, proxy: CallbackProxy, alice: User
+async def test_url_of_an_earlier_round_still_works(
+    db_session: AsyncSession, app_client: ClientFactory, proxy: CallbackProxy, alice: User
 ) -> None:
-    """Dán URL của lượt kết nối trước: chặn ngay ở backend, không tiêu lượt gọi CLIProxy."""
+    """Bấm nút Kết nối hai lần rồi dán URL của lượt ĐẦU — vẫn phải xong.
+
+    `state` lấy từ chính URL dán vào, không phải từ phiên mới nhất của UI. Bản đầu bắt hai
+    giá trị phải trùng nhau và trả 400, tức phạt người dùng vì một cú bấm thừa — trong khi
+    lượt họ thật sự đăng nhập xong chính là lượt nằm trong URL họ cầm về.
+    """
     async with app_client(alice) as http:
         first = (await http.post("/api/integration/connect")).json()["state"]
-        second = (await http.post("/api/integration/connect")).json()["state"]
-        response = await http.post(
+        (await http.post("/api/integration/connect")).json()  # lỡ bấm thêm lần nữa
+        done = await http.post(
             "/api/integration/oauth-callback",
-            json={"state": second, "redirect_url": callback_url(first)},
+            json={"state": "state-cua-luot-moi-nhat", "pasted": callback_url(first)},
         )
 
-    assert response.status_code == 400
-    assert "lượt kết nối khác" in response.json()["detail"]
-    assert proxy.callbacks == []
+    assert done.json() == {"status": "ok", "error": None}
+    assert alice.cliproxy_auth_file == f"{PROVIDER}-alice.google@gmail.com.json"
+
+
+async def test_bare_code_is_accepted_too(
+    app_client: ClientFactory, proxy: CallbackProxy, alice: User
+) -> None:
+    """Chép hụt, chỉ lấy được đoạn `code` — vẫn nhận, `state` thì backend đang giữ sẵn.
+
+    Bước dán là chỗ duy nhất hệ thống bắt người dùng làm việc của máy; kén chọn ở đây chỉ
+    đổi lấy một lượt đăng nhập hỏng.
+    """
+    async with app_client(alice) as http:
+        state = (await http.post("/api/integration/connect")).json()["state"]
+        done = await http.post(
+            "/api/integration/oauth-callback",
+            json={"state": state, "pasted": "4/0AVMBsJ-chi-moi-code"},
+        )
+
+    assert done.json()["status"] == "ok"
+    # Không có URL thì gửi `code` + `state` rời, đúng dạng thứ hai của hợp đồng CLIProxy.
+    assert proxy.callbacks == [
+        {"provider": PROVIDER, "code": "4/0AVMBsJ-chi-moi-code", "state": state}
+    ]
 
 
 async def test_expired_state_says_so_instead_of_blaming_the_config(
@@ -270,7 +302,7 @@ async def test_expired_state_says_so_instead_of_blaming_the_config(
         proxy.pending.clear()  # CLIProxy đã quên phiên này (quá 5 phút)
         response = await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state)},
+            json={"state": state, "pasted": callback_url(state)},
         )
 
     detail = response.json()["detail"]
@@ -289,7 +321,7 @@ async def test_url_without_code_is_a_user_error_not_a_server_error(
             "/api/integration/oauth-callback",
             json={
                 "state": state,
-                "redirect_url": f"http://localhost:51121/oauth-callback?state={state}",
+                "pasted": f"http://localhost:51121/oauth-callback?state={state}",
             },
         )
 
@@ -305,10 +337,10 @@ async def test_reusing_the_same_url_twice_is_refused(
         state = (await http.post("/api/integration/connect")).json()["state"]
         url = callback_url(state)
         first = await http.post(
-            "/api/integration/oauth-callback", json={"state": state, "redirect_url": url}
+            "/api/integration/oauth-callback", json={"state": state, "pasted": url}
         )
         second = await http.post(
-            "/api/integration/oauth-callback", json={"state": state, "redirect_url": url}
+            "/api/integration/oauth-callback", json={"state": state, "pasted": url}
         )
 
     assert first.json()["status"] == "ok"
@@ -335,7 +367,7 @@ async def test_callback_of_another_user_is_404(
     async with app_client(bob) as http:
         stolen = await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state)},
+            json={"state": state, "pasted": callback_url(state)},
         )
 
     assert stolen.status_code == 404
@@ -353,14 +385,14 @@ async def test_two_users_paste_their_own_urls_and_each_keeps_a_separate_prefix(
         state = (await http.post("/api/integration/connect")).json()["state"]
         await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state)},
+            json={"state": state, "pasted": callback_url(state)},
         )
     async with app_client(bob) as http:
         proxy.next_email = "bob.google@gmail.com"
         state = (await http.post("/api/integration/connect")).json()["state"]
         await http.post(
             "/api/integration/oauth-callback",
-            json={"state": state, "redirect_url": callback_url(state)},
+            json={"state": state, "pasted": callback_url(state)},
         )
         bob_status = (await http.get("/api/integration/status")).json()
     async with app_client(alice) as http:
