@@ -1,0 +1,52 @@
+{# Macro dùng chung cho mọi template: icon từ sprite + dải thông báo. #}
+{# Chủ sở hữu: Q | Task: 14.2 (D14) | luật kèm theo ở docs/ui-kit.md mục 6–7 #}
+{#
+  Cách dùng:
+      {% from "_macros.html" import icon, banner %}
+      <button class="btn-primary">{{ icon("scan") }} Quét</button>
+      <button class="btn-icon" aria-label="Xoá danh thiếp">{{ icon("trash") }}</button>
+      {{ banner("warn", "Chưa kết nối AI. Mở Cài đặt để kết nối.", "/settings", "Kết nối") }}
+
+  Vì sao đường dẫn sprite viết thẳng `/static/...` mà không `url_for`: macro được `import` **không
+  kèm context**, nên trong thân macro không có `request` — `url_for` sẽ ném lỗi. `/static` là điểm
+  mount cố định khai trong `app/main.py`, đổi nó là đổi cả chục chỗ khác chứ không riêng file này.
+#}
+
+{#
+  Icon trang trí, mặc định `aria-hidden="true"`.
+
+  Đây là mặc định đúng cho 95% trường hợp: icon đứng cạnh chữ thì trình đọc màn hình đã đọc chữ rồi,
+  đọc thêm tên icon là lặp. Nút **chỉ có icon** thì tên hành động đặt ở `aria-label` của chính nút,
+  không phải ở icon — xem `docs/ui-kit.md` mục 6 luật 2.
+
+  `size`: "" (20px, mặc định) · "sm" (16px) · "lg" (24px).
+#}
+{% macro icon(name, size="") -%}
+<svg class="icon{% if size %} icon-{{ size }}{% endif %}" aria-hidden="true" focusable="false"><use href="/static/img/icons.svg?v={{ asset_v }}#i-{{ name }}"/></svg>
+{%- endmacro %}
+
+{#
+  Dải thông báo tĩnh (server render sẵn). Bốn loại: info · success · warn · error.
+
+  Hai thứ cố ý gắn cứng ở đây thay vì để từng trang tự chọn:
+  - **`role`**: `error` → `alert` (trình đọc màn hình ngắt lời để báo), còn lại → `status` (đọc khi
+    rảnh). Để mỗi trang tự quyết thì sẽ có trang không khai gì.
+  - **icon đi kèm**: trạng thái không được phân biệt **chỉ bằng màu** — người mù màu đỏ–lục không
+    tách được *lỗi* với *xong*. Màu + icon + chữ, cả ba.
+#}
+{% macro banner(kind, text, action_href=none, action_label=none) -%}
+{% set tone = {
+  "info":    ("bg-brand-50 text-brand-700 border-brand-100", "info"),
+  "success": ("bg-emerald-50 text-emerald-800 border-emerald-200", "check-circle"),
+  "warn":    ("bg-amber-50 text-amber-900 border-amber-200", "warn"),
+  "error":   ("bg-rose-50 text-rose-800 border-rose-200", "error"),
+}.get(kind, ("bg-slate-50 text-slate-700 border-slate-200", "info")) %}
+<div class="flex items-center gap-3 rounded-md border px-4 py-3 text-sm {{ tone[0] }}"
+     role="{% if kind == 'error' %}alert{% else %}status{% endif %}">
+  {{ icon(tone[1]) }}
+  <span class="min-w-0 flex-1">{{ text }}</span>
+  {% if action_href and action_label %}
+  <a href="{{ action_href }}" class="link shrink-0 font-medium underline underline-offset-2">{{ action_label }}</a>
+  {% endif %}
+</div>
+{%- endmacro %}

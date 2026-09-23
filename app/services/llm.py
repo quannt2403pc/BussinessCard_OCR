@@ -82,7 +82,7 @@ class LLMError(RuntimeError):
 class LLMNotConnectedError(LLMError):
     """Chưa kết nối OAuth, hoặc token hết hạn — gom ba dạng response ở bảng đầu file vào một lỗi.
 
-    Gom lại vì cách xử lý y hệt nhau: mời người dùng bấm "Kết nối CLIProxy (OAuth)" ở
+    Gom lại vì cách xử lý y hệt nhau: mời người dùng bấm "Kết nối AI" ở
     `/settings`. Router chỉ cần bắt đúng loại này để hiện lời mời đó.
     """
 
@@ -235,7 +235,7 @@ async def _translate_error(
     if isinstance(exc, CliProxyAuthError):
         return LLMNotConnectedError(
             "CLIProxy từ chối credential đang có (401/403) — token hỏng hoặc hết hạn. "
-            "Vào /settings bấm 'Kết nối CLIProxy (OAuth)' để đăng nhập lại."
+            "Vào /settings bấm 'Kết nối AI' để đăng nhập lại."
         )
     if isinstance(exc, CliProxyNoCredentialError):
         # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, nhưng dán lên
@@ -243,7 +243,7 @@ async def _translate_error(
         logger.info("CLIProxy báo thiếu credential: %s", exc.message)
         return LLMNotConnectedError(
             "Chưa kết nối OAuth: CLIProxy không có credential nào cho channel "
-            f"{settings.cliproxy_auth_provider!r}. Vào /settings bấm 'Kết nối CLIProxy (OAuth)'."
+            f"{settings.cliproxy_auth_provider!r}. Vào /settings bấm 'Kết nối AI'."
         )
     if isinstance(exc, CliProxyResponseError):
         if exc.status_code == 400 and "unknown provider for model" in str(exc.message).lower():
@@ -281,7 +281,7 @@ async def _explain_unknown_provider(
     if known is True:
         return LLMNotConnectedError(
             f"Model {model_name!r} có thật trong channel {channel!r} nhưng CLIProxy chưa nạp "
-            "credential nào phục vụ được nó. Vào /settings bấm 'Kết nối CLIProxy (OAuth)'."
+            "credential nào phục vụ được nó. Vào /settings bấm 'Kết nối AI'."
         )
     if known is False:
         return LLMInvalidModelError(

@@ -1,114 +1,246 @@
-{# Layout + nav (Danh thiếp / Doanh nghiệp / Trợ lý AI / Cài đặt) + Tailwind CDN. #}
-{# Chủ sở hữu: Q | Task: 1.3 | xem Task.md #}
+{# Layout dùng chung: <head>, header + nav 4 mục, menu người dùng, bong bóng chat. #}
+{# Chủ sở hữu: Q | Task: 1.3, dựng lại ở 14.7 (D14) | xem Task.md, docs/ui-kit.md #}
 {#
   Trang con kế thừa file này:
       {% extends "base.html" %}
       {% block title %}Danh thiếp{% endblock %}
       {% block content %} ... {% endblock %}
-  Biến `active_nav` (cards | companies | assistant | settings) để tô sáng mục nav đang mở.
-  Cần đổi file này → báo Q, đừng tự sửa (quy ước chống xung đột số 2, Task.md).
+  Biến `active_nav` (home | cards | companies | assistant | settings) để tô sáng mục nav đang mở.
+
+  Ba thay đổi của 14.7 so với bản D1, đều có lý do đo được chứ không phải gu thẩm mỹ:
+
+  1. **Nav còn 4 mục.** Bản cũ có 5 mục nav + 4 liên kết bên phải = 9 mục trên một hàng, tràn ngang
+     ở 375px. `Trạng thái kết nối` / `API` / tên người dùng / `Đăng xuất` gom vào **một** menu
+     người dùng; `Bảng số liệu` gộp vào trang chủ theo **QĐ-2** (`/dashboard` → 301 về `/`).
+  2. **Tên sản phẩm là `OCR Xì Mi`**, không phải `BusinessCard OCR`. `BusinessCard_OCR` từ nay chỉ
+     còn là tên repo. `alt` của logo viết có dấu, có khoảng trắng — trình đọc màn hình gặp
+     `OCRXÌMI` sẽ đánh vần từng chữ cái thay vì đọc ra tên.
+  3. **Khối nội dung mặc định của D1 đã xoá.** `/` nay render `home.html`; dòng "Khung dự án đã
+     dựng xong (D1)" chính là thứ khách vào `ocrximi.io.vn` nhìn thấy đầu tiên trước D14.
+
+  Cần đổi file này → báo Q (quy ước chống xung đột số 2, Task.md).
 #}
+{% from "_macros.html" import icon %}
 <!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Trang chủ{% endblock %} · BusinessCard OCR</title>
+  <title>{% block title %}Trang chủ{% endblock %} · OCR Xì Mi</title>
+  <meta name="description" content="Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác bằng AI.">
+
+  {# Thẻ xem trước khi dán link vào Zalo/Slack/Facebook. `og:site_name` viết có dấu — cùng lý do
+     với `alt` của logo. #}
+  <meta property="og:site_name" content="OCR Xì Mi">
+  <meta property="og:title" content="{{ self.title() }} · OCR Xì Mi">
+  <meta property="og:description" content="Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác bằng AI.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="{{ url_for('static', path='img/og-image.png') }}">
+
+  <link rel="icon" href="{{ url_for('static', path='img/favicon.ico') }}" sizes="any">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='img/apple-touch-icon.png') }}">
+
+  {# Plus Jakarta Sans, đúng 3 nét (400/500/600). `preconnect` cắt một vòng bắt tay TLS; `swap`
+     để chữ hiện ngay bằng font hệ thống thay vì trang trắng trong lúc chờ tải. #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
   <script src="https://cdn.tailwindcss.com"></script>
+  {# Token màu của docs/ui-kit.md mục 1. Tailwind chạy bằng CDN nên **không có bước build** —
+     cấu hình phải khai ở đây, ngay sau thẻ script của CDN. Bản sao dưới dạng biến CSS nằm ở
+     `static/css/app.css`; đổi màu thì sửa cả hai chỗ, và chỉ hai chỗ đó. #}
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: "#eff6ff",
+              100: "#dbeafe",
+              600: "#2563eb",
+              700: "#1d4ed8",
+              ink: "#1e293b",
+              // #0ea5e9 (đúng ô cyan trong logo) chỉ đạt 2.77:1 trên nền trắng —
+              // không dùng được cho chữ lẫn thanh tiến trình. Xem docs/ui-kit.md mục 1.
+              accent: "#0369a1",
+            },
+            surface: "#f8fafc",
+            line: "#e2e8f0",
+            muted: "#475569",
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+          },
+        },
+      },
+    };
+  </script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}?v={{ asset_v }}">
   {% block head %}{% endblock %}
 </head>
-<body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
+{# `min-h-dvh` chứ không `min-h-screen`: trên điện thoại `100vh` tính cả phần thanh địa chỉ đang
+   trượt, nên trang luôn thừa ra một dải cuộn không có gì. #}
+<body class="flex min-h-dvh flex-col bg-surface font-sans text-slate-800 antialiased">
 
-  {# I-26: `/dashboard` (task 7.7 của T) là trang chính thức trong `docs/api.md` mục 7 nhưng
-     trước 10.2 không có lối vào nào từ nav — phải bấm nút trên /companies hoặc gõ thẳng URL.
-     Chủ file này là Q nên T không tự thêm được; thêm ở đây là đúng quy ước số 2. Khoá
-     'dashboard' khớp `active_nav` mà `routers/stats.py::dashboard_page` truyền xuống. #}
   {% set nav_items = [
-    ('cards',     'Danh thiếp',   '/cards'),
-    ('companies', 'Doanh nghiệp', '/companies'),
-    ('assistant', 'Trợ lý AI',    '/assistant'),
-    ('dashboard', 'Bảng số liệu', '/dashboard'),
-    ('settings',  'Cài đặt',      '/settings')
+    ('cards',     'Danh thiếp',   '/cards',     'card'),
+    ('companies', 'Doanh nghiệp', '/companies', 'building'),
+    ('assistant', 'Trợ lý AI',    '/assistant', 'sparkles'),
+    ('settings',  'Cài đặt',      '/settings',  'settings')
   ] %}
 
-  <header class="border-b border-slate-200 bg-white">
-    <nav class="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
-      <a href="/" class="text-lg font-semibold tracking-tight text-slate-900">
-        BusinessCard<span class="text-sky-600">OCR</span>
+  <header class="z-header sticky top-0 border-b border-line bg-white/95 backdrop-blur">
+    <nav class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-2.5 sm:px-6">
+      <a href="/" class="link flex items-center gap-2 rounded-md">
+        <img src="{{ url_for('static', path='img/logo-mark-64.webp') }}" alt="OCR Xì Mi"
+             width="32" height="32" class="h-8 w-8">
+        <span class="text-base font-semibold tracking-tight text-brand-ink">OCR Xì Mi</span>
       </a>
 
       {# Task 12.4: chưa đăng nhập thì chỉ còn trang `/auth/*`, nên nav trỏ vào các trang bị chặn
          chỉ là những liên kết cụt — ẩn cả khối đi. `current_user` do context processor của
          `core/templates.py` đưa vào **mọi** template, không route nào phải truyền. #}
       {% if current_user %}
-      <ul class="flex items-center gap-1 text-sm">
-        {% for key, label, href in nav_items %}
+      <ul class="hidden items-center gap-1 text-sm md:flex">
+        {% for key, label, href, icon_name in nav_items %}
         <li>
           <a href="{{ href }}"
-             class="rounded-md px-3 py-1.5 transition
-                    {% if active_nav == key %}bg-sky-50 font-medium text-sky-700
-                    {% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
-            {{ label }}
+             {% if active_nav == key %}aria-current="page"{% endif %}
+             class="link flex items-center gap-1.5 rounded-md px-3 py-1.5 transition
+                    {% if active_nav == key %}bg-brand-50 font-medium text-brand-700
+                    {% else %}text-muted hover:bg-slate-100 hover:text-brand-ink{% endif %}">
+            {{ icon(icon_name, "sm") }} {{ label }}
           </a>
         </li>
         {% endfor %}
       </ul>
-      {% endif %}
 
-      <div class="ml-auto flex items-center gap-3 text-sm">
-        {% if current_user %}
-        {# Badge trạng thái OAuth CLIProxy được thay bằng nội dung thật ở task 2.5. #}
-        {% block nav_status %}
-        <a href="/settings" class="text-slate-400 hover:text-slate-600">Trạng thái kết nối</a>
-        {% endblock %}
-        <a href="/docs" class="text-slate-400 hover:text-slate-600">API</a>
-        <a href="/account" class="max-w-40 truncate font-medium text-slate-600 hover:text-slate-900"
-           title="{{ current_user.email }}">{{ current_user.label }}</a>
-        {# POST chứ không phải link: đăng xuất là hành động đổi trạng thái, mà `GET` thì mọi thứ
-           prefetch trước một liên kết đều đăng xuất người dùng hộ họ. #}
-        <form method="post" action="/auth/logout">
-          <button type="submit" class="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-            Đăng xuất
-          </button>
-        </form>
-        {% else %}
-        <a href="/auth/login" class="font-medium text-sky-700 hover:text-sky-800">Đăng nhập</a>
-        <a href="/auth/register" class="text-slate-500 hover:text-slate-700">Đăng ký</a>
-        {% endif %}
+      <div class="ml-auto flex items-center gap-1">
+        {# Menu người dùng — gộp 4 thứ từng nằm rời trên nav. `<details>` chứ không JS: nó đã có
+           sẵn bàn phím (Enter/Space mở, Tab đi tiếp) và không cần một dòng script nào để mở ra. #}
+        <details class="user-menu relative">
+          <summary class="btn-icon list-none" aria-label="Menu tài khoản: {{ current_user.email }}">
+            {{ icon("user") }}
+          </summary>
+          <div class="z-panel absolute right-0 mt-1 w-60 rounded-lg border border-line bg-white p-1 shadow-lg">
+            <div class="truncate px-3 py-2 text-xs text-muted" title="{{ current_user.email }}">
+              {{ current_user.label }}
+            </div>
+            <div class="my-1 border-t border-line"></div>
+            {% block nav_status %}
+            <a href="/settings" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
+              {{ icon("link", "sm") }} Trạng thái kết nối
+            </a>
+            {% endblock %}
+            <a href="/account" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
+              {{ icon("user", "sm") }} Tài khoản
+            </a>
+            <a href="/docs" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
+              {{ icon("file", "sm") }} API
+            </a>
+            {# POST chứ không phải link: đăng xuất là hành động đổi trạng thái, mà `GET` thì mọi thứ
+               prefetch trước một liên kết đều đăng xuất người dùng hộ họ. #}
+            <form method="post" action="/auth/logout">
+              <button type="submit"
+                      class="link flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-muted hover:bg-surface">
+                {{ icon("logout", "sm") }} Đăng xuất
+              </button>
+            </form>
+          </div>
+        </details>
+
+        {# Hamburger — chỉ dưới 768px. Trước D14 nav 9 mục tràn ngang ở 375px. #}
+        <details class="user-menu relative md:hidden">
+          <summary class="btn-icon list-none" aria-label="Menu điều hướng">{{ icon("menu") }}</summary>
+          <div class="z-panel absolute right-0 mt-1 w-52 rounded-lg border border-line bg-white p-1 shadow-lg">
+            {% for key, label, href, icon_name in nav_items %}
+            <a href="{{ href }}"
+               class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm
+                      {% if active_nav == key %}bg-brand-50 font-medium text-brand-700{% else %}text-muted hover:bg-surface{% endif %}">
+              {{ icon(icon_name, "sm") }} {{ label }}
+            </a>
+            {% endfor %}
+          </div>
+        </details>
       </div>
+      {% else %}
+      <div class="ml-auto flex items-center gap-2 text-sm">
+        <a href="/auth/login" class="link font-medium text-brand-700 hover:text-brand-600">Đăng nhập</a>
+        <a href="/auth/register" class="btn-primary">Đăng ký</a>
+      </div>
+      {% endif %}
     </nav>
   </header>
 
   {% block flash %}{% endblock %}
 
-  <main class="mx-auto max-w-6xl px-6 py-8">
-    {% block content %}
-    {# Nội dung mặc định: trang chủ D1. Các trang thật sẽ ghi đè block này. #}
-    <h1 class="text-2xl font-semibold text-slate-900">Số hoá danh thiếp &amp; hồ sơ doanh nghiệp</h1>
-    <p class="mt-2 max-w-2xl text-slate-600">
-      Bản demo chạy localhost. Khung dự án đã dựng xong (D1); các màn hình bên dưới được
-      triển khai dần theo <code class="rounded bg-slate-100 px-1">Task.md</code>.
-    </p>
-
-    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {% for key, label, href in nav_items %}
-      <a href="{{ href }}"
-         class="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-sky-300 hover:shadow-sm">
-        <div class="font-medium text-slate-900">{{ label }}</div>
-        <div class="mt-1 text-sm text-slate-500">{{ href }}</div>
-      </a>
-      {% endfor %}
-    </div>
-    {% endblock %}
+  {# `scroll-padding-bottom`: nút tròn của bong bóng chat nổi ở góc phải dưới. Không chừa chỗ thì
+     phần tử cuối cùng mà bàn phím Tab tới sẽ nằm **dưới** nút đó — WCAG 2.2 AA gọi đúng tên là
+     lỗi *Focus Not Obscured*. #}
+  <main class="mx-auto w-full max-w-6xl flex-1 scroll-pb-24 px-4 py-8 sm:px-6">
+    {% block content %}{% endblock %}
   </main>
 
-  <footer class="mx-auto max-w-6xl px-6 pb-10 text-xs text-slate-400">
-    BusinessCard_OCR · bản demo nội bộ ·
-    <a href="/health" class="hover:text-slate-600">/health</a>
+  {# Chân trang thật, dính đáy trang kể cả khi nội dung ngắn (`body` là flex cột, `main` co giãn).
+     Bản cũ chỉ là một dòng chữ xám "bản demo nội bộ · /health" — ghi chú cho người phát triển,
+     không phải chân trang cho người dùng.
+
+     Cố ý **không có logo**: đo ở 14.10, biểu tượng thu xuống 16px thành một vệt mờ không đọc ra
+     hình gì. Bản đủ wordmark (`logo-full.webp`) dùng ở trang đăng nhập và `og-image`, nơi nó có
+     đủ chỗ thở. #}
+  <footer class="mt-8 border-t border-line bg-white">
+    <div class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm sm:flex-row sm:items-start sm:px-6">
+      <div class="sm:max-w-sm">
+        <div class="font-semibold text-brand-ink">OCR Xì Mi</div>
+        <p class="mt-1 text-xs leading-relaxed text-muted">
+          Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác bằng AI.
+        </p>
+      </div>
+
+      {% if current_user %}
+      <nav class="flex flex-wrap gap-x-6 gap-y-2 sm:ml-auto" aria-label="Liên kết chân trang">
+        {% for key, label, href, icon_name in nav_items %}
+        <a href="{{ href }}" class="link text-xs text-muted underline-offset-4 hover:text-brand-700 hover:underline">
+          {{ label }}
+        </a>
+        {% endfor %}
+      </nav>
+      {% endif %}
+    </div>
+
+    <div class="border-t border-line">
+      <div class="mx-auto max-w-6xl px-4 py-4 text-xs text-muted sm:px-6">
+        © {{ year }} OCR Xì Mi
+      </div>
+    </div>
   </footer>
 
+  {# Bong bóng chat (14.5) — mọi trang **trừ** chính `/assistant`: hai thể hiện trợ lý trên cùng
+     một màn hình tranh nhau `sessionStorage`, mà trang riêng đã là bản đầy đủ. #}
+  {% if current_user and active_nav != 'assistant' %}
+    {% include "_assistant_widget.html" %}
+  {% endif %}
+
+  <script>
+    // Hai menu <details> ở header: đóng khi bấm ra ngoài hoặc bấm Esc. Bản thân <details> không
+    // tự đóng, nên thiếu đoạn này thì menu ở lại trên màn hình suốt cả trang.
+    document.addEventListener("click", (event) => {
+      document.querySelectorAll("details.user-menu[open]").forEach((menu) => {
+        if (!menu.contains(event.target)) menu.open = false;
+      });
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll("details.user-menu[open]").forEach((menu) => {
+        menu.open = false;
+        menu.querySelector("summary").focus();
+      });
+    });
+  </script>
+  {# Ô thông báo dùng chung (14.8) — nạp ở đây để trang nào cũng có, gồm cả trang của T. #}
+  <script src="{{ url_for('static', path='js/toast.js') }}?v={{ asset_v }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

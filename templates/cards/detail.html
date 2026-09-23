@@ -20,6 +20,7 @@
      người dùng sửa một trường rồi xác nhận và thay đổi đó bốc hơi không một lời nào.
 #}
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 
 {% block title %}Review danh thiếp{% endblock %}
 
@@ -39,7 +40,8 @@
   </a>
 </div>
 
-<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"
+     role="status" aria-live="polite"></div>
 
 <div id="loading" class="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500">
   Đang tải danh thiếp…
@@ -53,7 +55,7 @@
       <a id="image-link" href="#" target="_blank" rel="noopener" class="block">
         <img id="image" src="" alt="Ảnh danh thiếp" class="w-full bg-slate-100 object-contain">
       </a>
-      <figcaption class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+      <figcaption class="border-t border-slate-100 px-3 py-2 text-xs text-muted">
         Đây là ảnh <strong>sau tiền xử lý</strong> — đúng bản mà model đã đọc (task 3.2).
       </figcaption>
     </figure>
@@ -73,13 +75,13 @@
       </div>
       <div class="mt-2 flex items-center justify-between gap-3">
         <dt class="text-slate-500">Hash ảnh</dt>
-        <dd id="m-hash" class="font-mono text-xs text-slate-400"></dd>
+        <dd id="m-hash" class="font-mono text-xs text-muted"></dd>
       </div>
     </dl>
 
     <details class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
       <summary class="cursor-pointer text-slate-600">JSON gốc model trả về</summary>
-      <p class="mt-2 text-xs text-slate-400">
+      <p class="mt-2 text-xs text-muted">
         Nguyên văn trước khi chuẩn hoá — dùng để đối chiếu khi nghi máy đọc sai.
       </p>
       <pre id="m-raw" class="mt-2 max-h-80 overflow-auto rounded bg-slate-900 p-3 text-xs leading-relaxed text-slate-100"></pre>
@@ -91,13 +93,12 @@
     <div id="banner" class="mb-4 hidden rounded-md px-4 py-3 text-sm"></div>
 
     {# --- Bản Việt hoá (EX-06): bản dịch in to, bản gốc là chú thích nhỏ ngay dưới --- #}
-    <div id="vi-card" class="mb-4 hidden rounded-lg border border-sky-200 bg-sky-50/60 p-5">
+    <div id="vi-card" class="mb-4 hidden rounded-lg border border-brand-100 bg-brand-50/60 p-5">
       <div class="flex flex-wrap items-center gap-3">
-        <h2 class="text-xs font-semibold uppercase tracking-wide text-sky-700">Bản Việt hoá</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-brand-700">Bản Việt hoá</h2>
         <span id="vi-meta" class="text-xs text-slate-500"></span>
-        <button type="button" id="btn-translate"
-                class="ml-auto rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50">
-          Dịch lại
+        <button type="button" id="btn-translate" class="btn ml-auto border-brand-600 text-brand-700">
+          {{ icon("retry", "sm") }} Dịch lại
         </button>
       </div>
       <p id="vi-stale" class="mt-2 hidden rounded bg-amber-100 px-3 py-2 text-xs text-amber-800"></p>
@@ -108,23 +109,23 @@
       <div id="fields" class="grid gap-4 sm:grid-cols-2"></div>
 
       <div class="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
-        <button type="submit" id="btn-save"
-                class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-          Lưu
-        </button>
+        <button type="submit" id="btn-save" class="btn">{{ icon("check") }} Lưu</button>
+        {# Nút chính của màn hình này giữ màu emerald: "xác nhận" là màu **ngữ nghĩa**
+           (xong/đồng ý), đổi sang brand là mất nghĩa — xem docs/ui-kit.md mục 1. #}
         <button type="button" id="btn-confirm"
-                class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
-          Xác nhận
+                class="btn-primary bg-emerald-600 hover:bg-emerald-700 disabled:hover:bg-emerald-600">
+          {{ icon("check-circle") }} Xác nhận
         </button>
         <span id="dirty" class="text-xs text-amber-700"></span>
-        <button type="button" id="btn-delete"
-                class="ml-auto rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
-          Xoá danh thiếp
+        {# Hành động xoá **luôn giữ chữ** (ui-kit mục 6 luật 3): icon thùng rác đứng một mình
+           là lời mời bấm nhầm. #}
+        <button type="button" id="btn-delete" class="btn ml-auto border-rose-200 text-rose-700 hover:bg-rose-50">
+          {{ icon("trash") }} Xoá danh thiếp
         </button>
       </div>
     </form>
 
-    <p class="mt-3 text-xs text-slate-400">
+    <p class="mt-3 text-xs text-muted">
       Xác nhận chỉ gắn danh thiếp vào bảng công ty. Hồ sơ doanh nghiệp <strong>không</strong> tự
       sinh — sang màn hình Doanh nghiệp tích chọn rồi bấm nút.
     </p>
@@ -187,7 +188,7 @@
 
   const BASE_INPUT =
     "mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-1";
-  const NORMAL = `${BASE_INPUT} border-slate-300 focus:border-sky-500 focus:ring-sky-500`;
+  const NORMAL = `${BASE_INPUT} border-slate-300 focus:border-brand-600 focus:ring-brand-600`;
   const LOW_CONF = `${BASE_INPUT} border-amber-300 bg-amber-50 focus:border-amber-500 focus:ring-amber-500`;
 
   const $ = (id) => document.getElementById(id);
@@ -206,17 +207,13 @@
     return node;
   }
 
-  function message(text, kind) {
-    const box = $("message");
-    box.textContent = text;
-    box.className = kind === "error"
-      ? "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800"
-      : "mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800";
-    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  function message(text, kind, retry) {
+    // Thân hàm ở static/js/toast.js (14.8) — trước D14 đoạn này bị chép ra 5 chỗ.
+    toastShow($("message"), text, kind, retry);
   }
 
   function clearMessage() {
-    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+    toastClear($("message"));
   }
 
   function formatDate(value) {
@@ -277,7 +274,7 @@
   /** Ô nhập bản Việt hoá, nhỏ hơn và nhạt hơn ô gốc — nó là bản phụ, không phải bản thay thế. */
   function buildViInput(spec) {
     const wrap = el("div", "mt-1 flex items-baseline gap-2");
-    const label = el("label", "shrink-0 text-xs text-sky-700", "Việt hoá");
+    const label = el("label", "shrink-0 text-xs text-brand-700", "Việt hoá");
     label.htmlFor = `f-${spec.vi}`;
 
     const input = document.createElement("input");
@@ -286,8 +283,8 @@
     input.name = spec.vi;
     input.placeholder = "— dùng bản gốc —";
     input.className =
-      "w-full rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1 text-xs text-slate-700 " +
-      "focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500";
+      "w-full rounded-md border border-brand-100 bg-brand-50/60 px-2 py-1 text-xs text-slate-700 " +
+      "focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600";
     input.addEventListener("input", updateDirty);
     inputs.set(spec.vi, input);
 
@@ -363,7 +360,7 @@
     $("image-link").href = `/api/cards/${card.id}/image`;
     $("image").addEventListener("error", () => {
       $("image").replaceWith(el("div",
-        "flex h-48 items-center justify-center bg-slate-100 text-sm text-slate-400",
+        "flex h-48 items-center justify-center bg-slate-100 text-sm text-muted",
         "Ảnh không còn trong volume uploads."));
     }, { once: true });
 

@@ -47,8 +47,7 @@ def build_app() -> FastAPI:
     @app.get("/boom/oauth")
     async def _oauth() -> None:
         raise LLMNotConnectedError(
-            "Chưa kết nối OAuth: CLIProxy không có credential nào. "
-            "Vào /settings bấm 'Kết nối CLIProxy (OAuth)'."
+            "Chưa kết nối OAuth: CLIProxy không có credential nào. Vào /settings bấm 'Kết nối AI'."
         )
 
     @app.get("/boom/llm")
@@ -186,7 +185,8 @@ async def test_trang_html_nhan_trang_loi_co_nav():
     assert "text/html" in response.headers["content-type"]
     assert "Không tìm thấy" in response.text
     # Trang lỗi kế thừa base.html → vẫn còn nav để đi tiếp, không phải ngõ cụt.
-    assert "BusinessCard" in response.text
+    # Tên trên giao diện là **OCR Xì Mi** từ task 14.7; `BusinessCard_OCR` nay chỉ còn là tên repo.
+    assert "OCR Xì Mi" in response.text
 
 
 async def test_fetch_cua_chinh_ui_van_nhan_json():

@@ -13,27 +13,22 @@
   danh sách: Xác nhận (task 4.3) và Xoá (task 4.2).
 #}
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 
 {% block title %}Danh thiếp{% endblock %}
 
 {% block content %}
 <div class="flex flex-wrap items-center gap-3">
   <div>
-    <h1 class="text-2xl font-semibold text-slate-900">Danh thiếp đã quét</h1>
+    <h1 class="text-2xl font-semibold text-brand-ink">Danh thiếp đã quét</h1>
     <p class="mt-1 text-sm text-slate-600">
       Danh thiếp mới quét ở trạng thái <strong>Chờ duyệt</strong>. Kiểm lại rồi bấm
       <em>Xác nhận</em> để gắn vào danh sách doanh nghiệp.
     </p>
   </div>
   <div class="ml-auto flex items-center gap-2">
-    <a href="/cards/batch"
-       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-      Quét hàng loạt
-    </a>
-    <a href="/cards/upload"
-       class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
-      Quét danh thiếp mới
-    </a>
+    <a href="/cards/batch" class="btn">{{ icon("upload") }} Hàng loạt</a>
+    <a href="/cards/upload" class="btn-primary">{{ icon("scan") }} Quét mới</a>
   </div>
 </div>
 
@@ -42,13 +37,13 @@
     <label class="flex-1 min-w-[16rem] text-sm">
       <span class="text-slate-500">Tìm kiếm</span>
       <input id="f-q" type="search" name="q" placeholder="Họ tên, tên công ty hoặc email…"
-             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
     </label>
 
     <label class="text-sm">
       <span class="text-slate-500">Trạng thái</span>
       <select id="f-status" name="status"
-              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
         <option value="">Tất cả</option>
         {% for value in status_choices %}
         <option value="{{ value }}">{{ value }}</option>
@@ -59,7 +54,7 @@
     <label class="text-sm">
       <span class="text-slate-500">Ngôn ngữ</span>
       <select id="f-language" name="language"
-              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
         <option value="">Tất cả</option>
         <option value="vi">vi — Việt</option>
         <option value="en">en — Anh</option>
@@ -69,15 +64,13 @@
       </select>
     </label>
 
-    <button type="reset" id="btn-reset"
-            class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50">
-      Xoá bộ lọc
-    </button>
+    <button type="reset" id="btn-reset" class="btn">{{ icon("filter") }} Bỏ lọc</button>
     <span id="summary" class="ml-auto text-sm text-slate-500">Đang tải…</span>
   </form>
 </section>
 
-<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"
+     role="status" aria-live="polite"></div>
 
 <section class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
   <table class="w-full text-left text-sm">
@@ -99,15 +92,9 @@
 </section>
 
 <nav class="mt-4 flex items-center gap-3 text-sm">
-  <button id="btn-prev" type="button"
-          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
-    ← Trang trước
-  </button>
+  <button id="btn-prev" type="button" class="btn">{{ icon("arrow-left", "sm") }} Trước</button>
   <span id="page-label" class="text-slate-500"></span>
-  <button id="btn-next" type="button"
-          class="rounded-md border border-slate-300 px-3 py-1.5 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
-    Trang sau →
-  </button>
+  <button id="btn-next" type="button" class="btn">Sau {{ icon("chevron-right", "sm") }}</button>
 </nav>
 {% endblock %}
 
@@ -139,16 +126,13 @@
     return node;
   }
 
-  function message(text, kind) {
-    const box = $("message");
-    box.textContent = text;
-    box.className = kind === "error"
-      ? "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800"
-      : "mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-800";
+  function message(text, kind, retry) {
+    // Thân hàm ở static/js/toast.js (14.8) — trước D14 đoạn này bị chép ra 5 chỗ.
+    toastShow($("message"), text, kind, retry);
   }
 
   function clearMessage() {
-    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+    toastClear($("message"));
   }
 
   function formatDate(value) {
@@ -212,12 +196,12 @@
     // Bản Việt hoá đứng ở dòng chính, bản gốc thành chú thích nhỏ ngay dưới (EX-06). Ở màn hình
     // này lợi ích rõ nhất: một danh sách trộn `田中 太郎`, `김민준` và `Nguyễn Văn A` thì không
     // đọc lướt được dòng nào, mà đọc lướt chính là việc người ta làm với một bảng danh sách.
-    const open = el("a", "font-medium text-sky-700 hover:underline",
+    const open = el("a", "font-medium text-brand-700 hover:underline",
       card.full_name_vi || card.full_name || "(chưa có tên)");
     open.href = `/cards/${card.id}`;
     who.append(open);
     if (card.full_name_vi && card.full_name) {
-      who.append(el("div", "text-xs text-slate-400", card.full_name));
+      who.append(el("div", "text-xs text-muted", card.full_name));
     }
     who.append(el("div", "text-xs text-slate-500", card.job_title_vi || card.job_title || "—"));
     tr.append(who);
@@ -226,7 +210,7 @@
     company.append(el("div", "text-slate-800",
       card.company_name_vi || card.company_name_raw || "—"));
     if (card.company_name_vi && card.company_name_raw) {
-      company.append(el("div", "text-xs text-slate-400", card.company_name_raw));
+      company.append(el("div", "text-xs text-muted", card.company_name_raw));
     }
     if (card.company_id) {
       company.append(el("div", "text-xs text-emerald-600", "đã gắn hồ sơ công ty"));
@@ -241,7 +225,7 @@
     const state = el("td", "px-4 py-3");
     state.append(statusBadge(card.status));
     if (card.language_detected) {
-      state.append(el("div", "mt-1 text-xs text-slate-400", card.language_detected));
+      state.append(el("div", "mt-1 text-xs text-muted", card.language_detected));
     }
     tr.append(state);
 
@@ -332,7 +316,7 @@
       body = await res.json();
     } catch (err) {
       $("summary").textContent = "";
-      message(`Không tải được danh sách: ${err.message}`, "error");
+      message("Không tải được danh sách. Thử lại.", "error", load);
       return;
     }
 

@@ -1,14 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
-from app.core.templates import templates
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.repositories.company import FINISHED_PROFILE_STATUSES
@@ -25,9 +24,18 @@ class StatsOut(BaseModel):
     review_rate: float
 
 
-@router.get("/dashboard", response_class=HTMLResponse, tags=["ui"])
-async def dashboard_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "dashboard.html", {"active_nav": "dashboard"})
+@router.get("/dashboard", tags=["ui"])
+async def dashboard_page() -> RedirectResponse:
+    """`/dashboard` gộp vào trang chủ — chuyển hướng **301** về `/` (QĐ-2 của D14, task 14.6).
+
+    Hai trang đang chồng nhau: `/` là khung rỗng của D1, `/dashboard` mới là chỗ có nội dung. Giữ
+    cả hai thì nav 5 mục + 4 liên kết bên phải = 9 mục một hàng, tràn ngang ở 375px.
+
+    301 chứ không 302: đây là chuyển nhà vĩnh viễn, để trình duyệt và trang đánh dấu của người
+    dùng cập nhật luôn. `docs/api.md` mục 7 và `docs/demo-runbook.md` còn trỏ vào `/dashboard`,
+    nên **không** được xoá thẳng route — xoá là 404 ngay giữa buổi demo.
+    """
+    return RedirectResponse("/", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @router.get("/api/stats", response_model=StatsOut, tags=["stats"])

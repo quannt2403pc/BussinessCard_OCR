@@ -549,7 +549,7 @@ _CALLBACK_MESSAGES: tuple[tuple[str, str], ...] = (
     (
         "unknown or expired state",
         "Phiên kết nối đã hết hạn (CLIProxy chỉ giữ 5 phút) hoặc đã bị huỷ. "
-        "Bấm “Kết nối CLIProxy (OAuth)” lại từ đầu rồi dán URL mới.",
+        "Bấm “Kết nối AI” lại từ đầu rồi dán URL mới.",
     ),
     (
         "already completed",

@@ -1,7 +1,142 @@
-/* Tuỳ biến nhỏ ngoài Tailwind CDN. Chủ sở hữu: Q | Task: 1.3 */
+/* Tuỳ biến nhỏ ngoài Tailwind CDN. Chủ sở hữu: Q | Task: 1.3, mở rộng ở 14.1 (D14)
+ *
+ * Luật chơi của file này: **không có bước build** (Tailwind chạy bằng CDN), nên ở đây là CSS
+ * thuần — không `@apply`, không `@layer`. Token màu khai hai lần một cách có chủ đích:
+ *   - biến CSS dưới đây  → dùng trong chính file này và cho chỗ nào cần `var()`;
+ *   - `tailwind.config`  → sinh ra các lớp `bg-brand-600`, `text-brand-ink`… cho template.
+ * Đổi màu thì sửa cả hai chỗ, và chỉ hai chỗ đó. Xem `docs/ui-kit.md`.
+ */
+
+:root {
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-ink: #1e293b;
+  --brand-accent: #0369a1;
+  --surface: #f8fafc;
+  --line: #e2e8f0;
+  --muted: #475569;
+
+  /* Thang z-index của ui-kit mục 4. Khai bằng biến để không ai phải nhớ con số. */
+  --z-header: 20;
+  --z-bubble: 40;
+  --z-panel: 50;
+  --z-toast: 60;
+}
+
 [x-cloak] { display: none !important; }
+
+/* Thuộc tính `hidden` phải thắng lớp `display` của Tailwind.
+ *
+ * `[hidden]` và `.flex` cùng độ ưu tiên (0,1,0), mà bảng của Tailwind nạp sau → `.flex` thắng.
+ * Hậu quả đo được ở 14.10: panel bong bóng chat khai `hidden` vẫn **hiện sẵn** trên mọi trang.
+ * Đây là cái bẫy chung cho mọi phần tử vừa có `hidden` vừa có lớp bố cục, nên vá ở đây một lần. */
+[hidden] { display: none !important; }
 
 /* Chỉ báo đang tải của HTMX (dùng lại ở các trang có poll: settings, batch, companies). */
 .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
 .htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator { opacity: 1; }
+
+/* --- thang z-index ------------------------------------------------------- */
+.z-header { z-index: var(--z-header); }
+.z-bubble { z-index: var(--z-bubble); }
+.z-panel  { z-index: var(--z-panel); }
+.z-toast  { z-index: var(--z-toast); }
+
+/* --- icon ----------------------------------------------------------------
+ * `currentColor` là toàn bộ lý do dùng sprite: icon ăn theo màu chữ của nút chứa nó, nên
+ * không cần một biến thể icon cho mỗi màu nút.
+ */
+.icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-sm { width: 1rem; height: 1rem; }
+.icon-lg { width: 1.5rem; height: 1.5rem; }
+
+/* --- nút -----------------------------------------------------------------
+ * Ba lớp này thay cho chuỗi 12 lớp Tailwind lặp ở 17 file. Viền focus khai ngay trong lớp nút
+ * nên **không thể quên**: trước D14 chỉ 4/17 file có `focus:ring`, và cả 4 đều ở form đăng nhập.
+ */
+.btn,
+.btn-primary,
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-icon:focus-visible,
+.link:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 2px;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #334155;
+}
+.btn:hover { background: var(--surface); border-color: #cbd5e1; }
+
+.btn-primary {
+  padding: 0.5rem 1.25rem;
+  border: 1px solid transparent;
+  background: var(--brand-600);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--brand-700); }
+
+.btn:disabled,
+.btn-primary:disabled,
+.btn-icon:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary:disabled:hover { background: var(--brand-600); }
+
+/* Nút chỉ-icon: icon 20px nhưng **vùng bấm 44px** (WCAG 2.2 AA — Target Size). Kích thước
+ * ở đây là ràng buộc về khả năng bấm trúng, không phải về thẩm mỹ; đừng bóp lại cho gọn. */
+.btn-icon {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid transparent;
+  color: var(--muted);
+  background: transparent;
+}
+.btn-icon:hover { background: var(--surface); color: var(--brand-ink); }
+
+/* --- hiệu ứng ------------------------------------------------------------
+ * `prefers-reduced-motion` trước D14 xuất hiện **0 lần** trong repo. Bong bóng chat là thứ
+ * trượt/mờ dần mỗi lần mở, tức đúng loại hiệu ứng gây chóng mặt cho người đã tắt chuyển động
+ * trong cài đặt hệ điều hành. Khai một lần ở đây, mọi chỗ khác hưởng theo.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- menu <details> ở header --------------------------------------------
+ * Bỏ mũi tên mặc định của <summary>. `list-style: none` đủ cho Firefox/Chrome, nhưng Safari
+ * vẽ mũi tên bằng một pseudo-element riêng nên phải tắt thêm dòng thứ hai.
+ */
+.user-menu > summary { list-style: none; cursor: pointer; }
+.user-menu > summary::-webkit-details-marker { display: none; }

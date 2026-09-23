@@ -212,7 +212,7 @@ def _html_error(
             "hint": _HINTS.get(status_code),
             "request_id": request_id,
             # Màn hình riêng cho ca hay gặp nhất của demo. Nhận diện bằng chính câu mà
-            # `services/llm.py` sinh ra ("… vào /settings bấm 'Kết nối CLIProxy (OAuth)'"),
+            # `services/llm.py` sinh ra ("… vào /settings bấm 'Kết nối AI'"),
             # nên cả lỗi router tự ánh xạ thành 503 lẫn lỗi lọt xuống handler đều khớp.
             "show_oauth": "/settings" in message,
             "active_nav": None,

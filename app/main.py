@@ -82,5 +82,14 @@ async def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse, tags=["ui"])
 async def home(request: Request) -> HTMLResponse:
-    """Trang chủ — hiện tại chỉ render khung `base.html` (task 1.3)."""
-    return templates.TemplateResponse(request, "base.html", {"active_nav": "home"})
+    """Trang chủ (task 14.7).
+
+    Trước D14 route này render thẳng `base.html`, tức là khách nhìn thấy khối mặc định của D1 —
+    dòng "Khung dự án đã dựng xong (D1)" — làm màn hình đầu tiên của `ocrximi.io.vn`. Nay nó trỏ
+    sang `home.html`: số liệu, việc đang chờ duyệt và 3 hành động chính.
+
+    Số liệu **không** lấy ở đây mà do trang tự gọi `GET /api/stats`. Lý do: route này không có
+    session DB (nó ở `main.py`, ngoài mọi router), và nhét truy vấn vào đây là mở lại đúng cái
+    vòng import mà `core/templates.py` sinh ra để tránh.
+    """
+    return templates.TemplateResponse(request, "home.html", {"active_nav": "home"})

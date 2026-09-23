@@ -21,6 +21,7 @@
   bước 3'. Cả hai lối cùng đi qua `finishConnect()` để không có hai bản logic lệch nhau.
 #}
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 
 {% block title %}Cài đặt{% endblock %}
 
@@ -43,10 +44,7 @@
       Provider <code class="rounded bg-slate-100 px-1">{{ provider }}</code> ·
       Model <code class="rounded bg-slate-100 px-1">{{ model }}</code>
     </span>
-    <button id="btn-refresh" type="button"
-            class="ml-auto text-sm text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline">
-      Làm mới
-    </button>
+    <button id="btn-refresh" type="button" class="btn ml-auto">{{ icon("retry", "sm") }} Làm mới</button>
   </div>
 
   <dl id="account-box" class="mt-4 hidden border-t border-slate-100 pt-4 text-sm">
@@ -57,17 +55,12 @@
   <p id="status-detail" class="mt-4 hidden rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800"></p>
 
   <div class="mt-6 flex flex-wrap gap-3">
-    <button id="btn-connect" type="button"
-            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50">
-      Kết nối CLIProxy (OAuth)
-    </button>
-    <button id="btn-test" type="button"
-            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-      Kiểm tra kết nối
-    </button>
-    <button id="btn-disconnect" type="button"
-            class="rounded-md border border-rose-200 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">
-      Ngắt kết nối
+    {# Nhãn rút theo luật ≤ 2 từ (ui-kit mục 6). "Kết nối CLIProxy (OAuth)" là tên cũ, còn nằm
+       trong 5 tài liệu — **task 14.11 của T** phải sửa theo, danh sách chỗ phải sửa ghi ở Task.md. #}
+    <button id="btn-connect" type="button" class="btn-primary">{{ icon("link") }} Kết nối AI</button>
+    <button id="btn-test" type="button" class="btn">{{ icon("check-circle") }} Kiểm tra</button>
+    <button id="btn-disconnect" type="button" class="btn border-rose-200 text-rose-700 hover:bg-rose-50">
+      {{ icon("close") }} Ngắt kết nối
     </button>
   </div>
 
@@ -100,15 +93,14 @@
       <ol class="space-y-5">
 
         <li id="step-1" class="flex gap-3">
-          <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">1</span>
+          <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">1</span>
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-slate-900">Đăng nhập Google và bấm <em>Cho phép</em></p>
             <p class="mt-1 text-sm text-slate-600">
               Một cửa sổ nhỏ sẽ mở ra bên cạnh. Hộp thoại này vẫn ở đây để bạn nhìn theo.
             </p>
-            <button id="btn-start-oauth" type="button"
-                    class="mt-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50">
-              Mở cửa sổ đăng nhập Google
+            <button id="btn-start-oauth" type="button" class="btn-primary mt-2">
+              {{ icon("external") }} Đăng nhập Google
             </button>
             <p id="oauth-link-fallback" class="mt-2 hidden break-all text-xs text-slate-500"></p>
           </div>
@@ -137,7 +129,7 @@
               <div class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-600">
                 <p class="font-medium text-slate-700">Trang này hiện không hoạt động</p>
                 <p class="mt-1">localhost không gửi bất kỳ dữ liệu nào — <code>ERR_EMPTY_RESPONSE</code></p>
-                <p class="mt-1 text-slate-400">…hoặc “localhost đã từ chối kết nối”, tuỳ máy</p>
+                <p class="mt-1 text-muted">…hoặc “localhost đã từ chối kết nối”, tuỳ máy</p>
               </div>
               <p class="mt-2 text-xs text-emerald-700">
                 ✓ Đúng như vậy, không phải hỏng. Thứ cần nằm ở <strong>thanh địa chỉ</strong>.
@@ -162,11 +154,8 @@
               <div class="mt-2 flex flex-wrap gap-2">
                 <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
                        placeholder="Nhấn Ctrl+V vào đây…"
-                       class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
-                <button id="btn-clip" type="button"
-                        class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                  Lấy từ clipboard
-                </button>
+                       class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-brand-600 focus:outline-none">
+                <button id="btn-clip" type="button" class="btn">{{ icon("file", "sm") }} Dán</button>
                 <button id="btn-paste" type="button"
                         class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
                   Hoàn tất kết nối
@@ -180,7 +169,8 @@
         </li>
       </ol>
 
-      <div id="dlg-message" class="mt-5 hidden rounded-md px-4 py-3 text-sm"></div>
+      <div id="dlg-message" class="mt-5 hidden rounded-md px-4 py-3 text-sm"
+           data-toast-class="mt-5" role="status" aria-live="polite"></div>
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-6 py-3">
@@ -192,7 +182,8 @@
     </div>
   </dialog>
 
-  <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+  <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"
+     role="status" aria-live="polite"></div>
 </section>
 
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
@@ -279,26 +270,20 @@
     badgeText.textContent = textOverride || label;
   }
 
-  function showMessage(text, kind) {
-    const palette = {
-      ok:    "bg-emerald-50 text-emerald-800",
-      error: "bg-rose-50 text-rose-800",
-      info:  "bg-slate-100 text-slate-700",
-    };
+  function showMessage(text, kind, retry) {
     // Hộp thoại đang mở thì báo NGAY TRONG nó. Ghi ra vùng thông báo của trang lúc đó là
     // ghi vào chỗ bị lớp phủ che mất — người dùng không thấy gì và tưởng nút chết.
+    //
+    // Thân hàm ở static/js/toast.js (14.8): thành công tự tắt sau 4s, lỗi ở lại kèm nút thử lại.
     const target = dlg.open ? dlgMessage : message;
-    target.className = (dlg.open ? "mt-5 " : "mt-4 ") +
-      "rounded-md px-4 py-3 text-sm " + palette[kind || "info"];
-    target.textContent = text;
-    target.classList.remove("hidden");
+    toastShow(target, text, kind, retry);
   }
 
   function clearMessage() {
-    for (const node of [message, dlgMessage]) {
-      node.classList.add("hidden");
-      node.textContent = "";
-    }
+    // Cả hai ô: hộp thoại có thể đóng lại giữa chừng, tin cũ còn nằm trong đó sẽ hiện lại
+    // nguyên vẹn ở lần mở sau.
+    toastClear(message);
+    toastClear(dlgMessage);
   }
 
   function setDetail(text) {
@@ -331,7 +316,7 @@
     modelList.innerHTML = "";
     if (!models || models.length === 0) {
       const li = document.createElement("li");
-      li.className = "text-slate-400";
+      li.className = "text-muted";
       li.textContent = "Chưa lấy được danh mục (CLIProxy chưa chạy?).";
       modelList.appendChild(li);
       return;
@@ -340,7 +325,7 @@
       const li = document.createElement("li");
       const current = id === model;
       li.className = "rounded-full px-2 py-1 " +
-        (current ? "bg-sky-100 font-medium text-sky-800" : "bg-slate-100");
+        (current ? "bg-brand-100 font-medium text-brand-700" : "bg-slate-100");
       li.textContent = current ? id + " (đang dùng)" : id;
       modelList.appendChild(li);
     }
@@ -410,7 +395,7 @@
         dot.textContent = "✓";
       } else {
         dot.className = "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white " +
-          (i === n ? "bg-sky-600" : "bg-slate-300");
+          (i === n ? "bg-brand-600" : "bg-slate-300");
         dot.textContent = String(i);
       }
     }
@@ -610,7 +595,7 @@
       a.href = data.url;
       a.target = "_blank";
       a.rel = "noopener";
-      a.className = "text-sky-700 underline";
+      a.className = "text-brand-700 underline";
       a.textContent = "Mở trang đăng nhập Google";
       oauthLinkFallback.append(a);
       oauthLinkFallback.classList.remove("hidden");

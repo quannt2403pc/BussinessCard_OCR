@@ -1,0 +1,140 @@
+{# Bong bóng chat trợ lý AI, nổi trên mọi trang. #}
+{# Chủ sở hữu: Q | Task: 14.5 (D14) | xem Task.md, docs/ui-kit.md mục 4 (thang z-index) #}
+{#
+  `base.html` include file này **trừ** chính trang `/assistant` — hai thể hiện trợ lý trên cùng
+  một màn hình vừa thừa vừa tranh nhau `sessionStorage`, mà trang riêng thì đã là bản đầy đủ rồi.
+
+  Mỗi lần chuyển trang là **tải lại trang** (Jinja + HTMX, không phải SPA) → panel không giữ được
+  DOM. Nó nhớ hội thoại theo đúng cách duy nhất còn lại: cất `session_id` vào `sessionStorage`,
+  mở ra thì gọi `GET /api/chat/{id}` dựng lại. Chi phí: một lượt fetch mỗi lần mở panel; đổi lại
+  không phải bê trạng thái chat qua server.
+
+  Bốn ràng buộc bắt buộc, đều là tiêu chí nghiệm thu của 14.10 chứ không phải điểm cộng:
+  1. `Esc` đóng panel **và trả focus về nút tròn** — không trả thì người dùng bàn phím rơi về đầu
+     trang, phải Tab lại từ đầu.
+  2. `role="dialog"` + `aria-modal="false"`: panel **không** bẫy focus. Tab từ trong panel đi tiếp
+     ra trang là đúng — đây là panel phụ trợ, không phải hộp thoại chặn.
+  3. Hiệu ứng mở/đóng tôn trọng `prefers-reduced-motion` (khai một lần ở `static/css/app.css`).
+  4. Nút tròn **không được che ô đang focus** của bàn phím (WCAG 2.2 AA) → `base.html` chừa
+     `scroll-padding-bottom` cho `main`.
+#}
+{% from "_macros.html" import icon %}
+
+<div id="assistant-widget">
+  {# --- nút tròn --- #}
+  <button type="button" data-w="toggle"
+          aria-expanded="false" aria-controls="assistant-panel"
+          aria-label="Mở trợ lý AI"
+          class="z-bubble fixed bottom-5 right-5 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+    {{ icon("chat", "lg") }}
+  </button>
+
+  {# --- panel ---
+     Desktop: 380×560 neo góc phải dưới. Dưới 640px: tấm phủ toàn màn hình — panel 380px trên
+     điện thoại 375px thì vừa tràn ngang vừa không còn chỗ gõ.
+
+     `max-h` trừ 11rem = 96px lề dưới + 64px header + 16px thở. Đo ở 14.10 trên cửa sổ cao
+     639px: để 8rem thì panel trèo lên che mất header, nửa cái icon tài khoản thò ra trên
+     nóc panel. #}
+  <div id="assistant-panel" data-w="panel" hidden
+       role="dialog" aria-modal="false" aria-label="Trợ lý AI"
+       class="z-panel fixed inset-0 flex flex-col border-slate-200 bg-white/95 shadow-lg backdrop-blur
+              sm:inset-auto sm:bottom-24 sm:right-5 sm:h-[560px] sm:max-h-[calc(100dvh-11rem)] sm:w-[380px] sm:rounded-lg sm:border">
+
+    <header class="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+      <span class="text-brand-600">{{ icon("sparkles") }}</span>
+      <span class="text-sm font-semibold text-brand-ink">Trợ lý AI</span>
+
+      <a data-w="expand" href="/assistant" class="btn-icon ml-auto" aria-label="Mở trong trang riêng">
+        {{ icon("expand", "sm") }}
+      </a>
+      <button type="button" data-a="new" class="btn-icon" aria-label="Hội thoại mới">
+        {{ icon("plus", "sm") }}
+      </button>
+      <button type="button" data-w="close" class="btn-icon" aria-label="Đóng trợ lý">
+        {{ icon("close", "sm") }}
+      </button>
+    </header>
+
+    <div data-a="thread" class="flex-1 space-y-4 overflow-y-auto px-4 py-4"></div>
+
+    <div data-a="samples" class="px-4">
+      <div class="flex flex-wrap gap-2 pb-2">
+        {% for question in widget_questions %}
+        <button type="button" data-sample="{{ question }}"
+                class="link rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 transition hover:border-brand-600 hover:text-brand-700">
+          {{ question }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div data-a="message" class="hidden" role="status" aria-live="polite"></div>
+
+    <form data-a="form" class="flex items-end gap-2 border-t border-slate-200 p-3">
+      <label class="sr-only" for="w-question">Câu hỏi</label>
+      <textarea id="w-question" data-a="question" rows="1" required maxlength="2000"
+                placeholder="Hỏi một câu…"
+                class="max-h-32 flex-1 resize-none rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-600"></textarea>
+      <button data-a="send" type="submit" class="btn-icon bg-brand-600 text-white hover:bg-brand-700 hover:text-white"
+              aria-label="Gửi câu hỏi">
+        {{ icon("send", "sm") }}
+      </button>
+    </form>
+  </div>
+</div>
+
+<script src="{{ url_for('static', path='js/assistant.js') }}?v={{ asset_v }}" defer></script>
+<script>
+  (() => {
+    "use strict";
+    const root = document.getElementById("assistant-widget");
+    const panel = root.querySelector('[data-w="panel"]');
+    const toggle = root.querySelector('[data-w="toggle"]');
+    const expand = root.querySelector('[data-w="expand"]');
+    const STORAGE_KEY = "assistant.session";
+
+    let api = null;
+
+    function syncExpand(id) {
+      expand.href = id ? "/assistant?session=" + encodeURIComponent(id) : "/assistant";
+    }
+    try { syncExpand(sessionStorage.getItem(STORAGE_KEY)); } catch (_) { /* chế độ riêng tư */ }
+
+    function open() {
+      panel.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Đóng trợ lý AI");
+      // Khởi tạo **lần đầu mở**, không phải lúc tải trang: trang nào cũng có bong bóng, mà phần
+      // lớn lượt xem không ai mở nó — nạp lại lịch sử chat cho mọi lượt xem là tốn vô ích.
+      if (!api) {
+        let saved = null;
+        try { saved = sessionStorage.getItem(STORAGE_KEY); } catch (_) { /* bỏ qua */ }
+        api = initAssistant(panel, {
+          compact: true,
+          sessionId: saved,
+          storageKey: STORAGE_KEY,
+          onSession: syncExpand,
+        });
+      }
+      api.focus();
+    }
+
+    function close() {
+      panel.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-label", "Mở trợ lý AI");
+      toggle.focus();  // ràng buộc 1 — không có dòng này thì focus rơi về <body>
+    }
+
+    toggle.addEventListener("click", () => (panel.hidden ? open() : close()));
+    root.querySelector('[data-w="close"]').addEventListener("click", close);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !panel.hidden) {
+        event.stopPropagation();
+        close();
+      }
+    });
+  })();
+</script>

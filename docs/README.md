@@ -14,6 +14,7 @@ File nào chưa có nghĩa là task tương ứng chưa làm.
 | `adr-websearch.md` | T | 2.7 | Chốt cách gọi tìm kiếm Google qua CLIProxy |
 | `oauth-setup.md` | Q | 2.5 | Hướng dẫn kết nối OAuth |
 | `accuracy.md` | **Q** | 7.8 / 10.8 | Độ chính xác OCR |
+| `ui-kit.md` | **Q** | 14.1 | Token màu/chữ/khoảng cách, thang z-index, luật viết thông báo & nhãn nút, số đo tương phản |
 | `profile-quality.md` | T | 10.9 | Chất lượng hồ sơ doanh nghiệp |
 | `db-tuning.md` | T | 9.8 | Index đề xuất để Q tạo migration |
 | `bugs-f1-f3.md` | Q | 10.1 | Nhật ký bug F1 + F3 |

@@ -10,7 +10,7 @@ from app.services.cliproxy_client import AuthFile, CliProxyClient, CliProxyRespo
 from app.services.llm import LLMNotConnectedError
 
 NOT_CONNECTED = (
-    "Tài khoản của bạn chưa kết nối AI — vào /settings bấm “Kết nối CLIProxy (OAuth)” "
+    "Tài khoản của bạn chưa kết nối AI — vào /settings bấm “Kết nối AI” "
     "bằng tài khoản Google của chính bạn."
 )
 PENDING_LIMIT = 200

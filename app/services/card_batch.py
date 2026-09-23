@@ -221,7 +221,7 @@ async def _process(job: BatchJob, item: BatchItem, semaphore: asyncio.Semaphore)
                 # đốt một phút để in ra 30 lần cùng một câu.
                 job.aborted_reason = (
                     f"Dừng cả lượt vì chưa kết nối CLIProxy: {exc} "
-                    "Vào /settings bấm “Kết nối CLIProxy (OAuth)” rồi quét lại."
+                    "Vào /settings bấm “Kết nối AI” rồi quét lại."
                 )
                 _fail(item, job.aborted_reason)
                 return

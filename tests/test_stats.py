@@ -53,10 +53,15 @@ def card(status: CardStatus) -> BusinessCard:
     )
 
 
-async def test_dashboard_page_renders(page_client: httpx.AsyncClient) -> None:
+async def test_dashboard_redirects_to_home(page_client: httpx.AsyncClient) -> None:
+    """QĐ-2 của D14: `/dashboard` gộp vào trang chủ, route cũ chuyển hướng 301 (task 14.6).
+
+    Giữ lại phép kiểm chứ không xoá: `docs/api.md` mục 7 và `docs/demo-runbook.md` còn trỏ vào
+    `/dashboard`, nên đường dẫn này phải **còn sống**. Xoá route là 404 ngay giữa buổi demo.
+    """
     response = await page_client.get("/dashboard")
-    assert response.status_code == 200
-    assert "Bảng số liệu" in response.text
+    assert response.status_code == 301
+    assert response.headers["location"] == "/"
 
 
 async def test_stats_counts_cards_companies_and_profiles(

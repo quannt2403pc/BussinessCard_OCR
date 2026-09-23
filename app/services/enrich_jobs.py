@@ -76,7 +76,7 @@ def is_unreachable(exc: BaseException) -> bool:
 def describe_failure(exc: BaseException) -> Failure:
     if isinstance(exc, LLMNotConnectedError):
         return Failure(
-            "Chưa kết nối CLIProxy — vào /settings bấm “Kết nối CLIProxy (OAuth)” rồi chạy lại.",
+            "Chưa kết nối CLIProxy — vào /settings bấm “Kết nối AI” rồi chạy lại.",
             abort_job=True,
         )
     if isinstance(exc, LLMInvalidModelError):
