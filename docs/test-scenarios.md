@@ -103,7 +103,7 @@ nghiệp* = 0 (ngoài các hồ sơ của bộ seed).
 
 ### TS-07 — Tạo hồ sơ hàng loạt (A5, A5b)
 
-1. `/companies` → tích *Sữa Việt Nam*, *Hòa Phát*, *Coteccons* → *Tạo hồ sơ doanh nghiệp*.
+1. `/companies` → tích *Sữa Việt Nam*, *Hòa Phát*, *Coteccons* → *Lập hồ sơ*.
 2. Giữa chừng bấm **F5**.
 3. Khi xong, mở từng hồ sơ.
 
@@ -151,7 +151,7 @@ nghiệp* = 0 (ngoài các hồ sơ của bộ seed).
    thì hồ sơ đó có thật trong KB, trợ lý trả lời đúng là hành vi đúng, và câu X3 không còn kiểm được chống bịa.
 2. Hỏi thêm *"Coteccons có mã số thuế là gì?"* (hồ sơ tạo ở TS-07).
 3. Tải `/api/export/cards.csv` và `/api/export/companies.csv`, mở bằng Excel.
-4. Mở `/dashboard`, bấm từng ô số liệu.
+4. Mở `/` (trang chủ), bấm từng ô số liệu.
 
 **Đạt:**
 1. ≥ 8/10 câu đạt, 3/3 câu ngoài phạm vi từ chối trả lời (A6).

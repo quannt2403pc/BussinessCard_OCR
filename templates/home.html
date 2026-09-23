@@ -32,18 +32,43 @@
     ('total-companies',   'Công ty',     '/companies',                 'text-brand-ink'),
     ('total-profiles',    'Hồ sơ đã lập','/companies?has_profile=true','text-brand-700')
   ] %}
-  <a href="{{ href }}" class="link rounded-lg border border-line bg-white p-5 transition hover:border-brand-600 hover:shadow-sm">
+  <a href="{{ href }}" class="link rounded-lg border border-line bg-white p-4 transition hover:border-brand-600 hover:shadow-sm">
     <div class="text-xs uppercase tracking-wide text-muted">{{ label }}</div>
     {# `tabular-nums`: không có nó thì con số nhảy ngang mỗi lần đổi chữ số. #}
     <div id="{{ key }}" class="mt-1 h-9 w-16 animate-pulse rounded bg-slate-100 text-3xl font-semibold tabular-nums {{ tone }}"></div>
+    <div id="{{ key }}-note" class="mt-1 text-xs text-muted"></div>
   </a>
   {% endfor %}
 </section>
+
+{# Hai số cuối của `dashboard.html` cũ, gộp về đây theo QĐ-2. Tỉ lệ cần review đứng riêng vì nó là
+   **tỉ lệ**, không phải số đếm: nhét chung hàng với 4 ô trên là bắt người đọc so hai đơn vị khác nhau. #}
+<section class="mt-4 rounded-lg border border-line bg-white p-4" aria-label="Tỉ lệ cần duyệt">
+  <div class="flex items-baseline gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Tỉ lệ cần duyệt</h2>
+    <span id="review-rate" class="ml-auto text-2xl font-semibold tabular-nums text-brand-ink">—</span>
+  </div>
+  <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+    <div id="review-bar" class="h-full w-0 bg-amber-400 transition-all"></div>
+  </div>
+  <p class="mt-1 text-xs text-muted">Danh thiếp còn chờ duyệt trên tổng số đã quét.</p>
+</section>
+
+<p id="empty" class="mt-4 hidden rounded-lg border border-dashed border-line bg-white px-6 py-8 text-center text-sm text-muted"></p>
 
 <section class="mt-8 grid gap-3 sm:grid-cols-3" aria-label="Hành động chính">
   <a href="/cards/upload" class="btn-primary justify-start px-5 py-3">{{ icon("scan") }} Quét danh thiếp</a>
   <a href="/companies" class="btn justify-start px-5 py-3">{{ icon("building") }} Lập hồ sơ</a>
   <a href="/assistant" class="btn justify-start px-5 py-3">{{ icon("sparkles") }} Hỏi trợ lý</a>
+</section>
+
+{# Hàng chờ duyệt: ẩn hẳn khi không còn gì phải duyệt. Một khối rỗng nằm lại chỉ tổ nhiễu. #}
+<section id="queue-section" class="mt-8 hidden" aria-label="Chờ bạn duyệt">
+  <div class="flex items-baseline gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Chờ bạn duyệt</h2>
+    <a href="/cards?status=needs_review" class="link ml-auto text-sm text-brand-700 hover:text-brand-600">Xem tất cả</a>
+  </div>
+  <div id="queue" class="mt-3 divide-y divide-line overflow-hidden rounded-lg border border-line bg-white"></div>
 </section>
 
 <section class="mt-8" aria-label="Danh thiếp gần đây">
@@ -64,75 +89,113 @@
   (() => {
     "use strict";
 
-    const STATUS_LABEL = {
+    const $ = (id) => document.getElementById(id);
+    const ICON = (name) => '<svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="/static/img/icons.svg?v={{ asset_v }}#i-' + name + '"/></svg>';
+
+    // Badge phải có **icon + chữ**, không chỉ màu: người mù màu đỏ–lục không tách được lỗi với xong.
+    const STATUS = {
       confirmed: ["Đã xác nhận", "bg-emerald-50 text-emerald-800", "check-circle"],
       needs_review: ["Chờ duyệt", "bg-amber-50 text-amber-900", "warn"],
       pending: ["Đang quét", "bg-brand-50 text-brand-700", "clock"],
     };
 
+    function fail(text, retry) {
+      toastShow($("home-message"), text, "error", retry);
+    }
+
     function fill(id, value) {
-      const box = document.getElementById(id);
+      const box = $(id);
       box.classList.remove("animate-pulse", "bg-slate-100", "h-9", "w-16");
       box.textContent = value;
     }
 
-    function note(text) {
-      const box = document.getElementById("home-message");
-      box.className = "mt-4 rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-800";
-      box.textContent = text;
+    function cardRow(card) {
+      const [label, tone, name] = STATUS[card.status] || [card.status, "bg-slate-100 text-slate-700", "info"];
+      const row = document.createElement("a");
+      row.href = "/cards/" + card.id;
+      row.className = "link flex items-center gap-3 px-4 py-3 text-sm hover:bg-surface";
+
+      const person = document.createElement("span");
+      person.className = "min-w-0 flex-1 truncate font-medium text-brand-ink";
+      person.textContent = card.full_name_vi || card.full_name || "(chưa có tên)";
+
+      const company = document.createElement("span");
+      company.className = "hidden min-w-0 flex-1 truncate text-muted sm:block";
+      company.textContent = card.company_name_vi || card.company_name_raw || "";
+
+      const badge = document.createElement("span");
+      badge.className = "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs " + tone;
+      badge.innerHTML = ICON(name);
+      badge.append(document.createTextNode(label));
+
+      row.append(person, company, badge);
+      return row;
     }
 
-    fetch("/api/stats")
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Lỗi HTTP " + res.status))))
+    function emptyRow(text) {
+      const box = document.createElement("div");
+      box.className = "px-4 py-6 text-sm text-muted";
+      box.textContent = text;
+      return box;
+    }
+
+    async function read(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error("Lỗi HTTP " + res.status);
+      return res.json();
+    }
+
+    async function loadStats() {
+      let stats;
+      try {
+        stats = await read("/api/stats");
+      } catch (err) {
+        fail("Không đọc được số liệu. Tải lại trang.", loadStats);
+        return;
+      }
+      fill("total-cards", stats.total_cards);
+      fill("needs-review-cards", stats.needs_review_cards);
+      fill("total-companies", stats.total_companies);
+      fill("total-profiles", stats.total_profiles);
+
+      const percent = Math.round(stats.review_rate * 100);
+      $("review-rate").textContent = percent + "%";
+      $("review-bar").style.width = percent + "%";
+
+      $("total-cards-note").textContent = stats.confirmed_cards + " đã xác nhận";
+      const missing = stats.total_companies - stats.total_profiles;
+      $("total-profiles-note").textContent = missing > 0 ? missing + " công ty chưa có hồ sơ" : "";
+
+      if (!stats.total_cards && !stats.total_companies) {
+        $("empty").textContent = "Chưa có dữ liệu. Quét một danh thiếp để bắt đầu.";
+        $("empty").classList.remove("hidden");
+      }
+    }
+
+    async function loadList(path, box, empty, section) {
+      let data;
+      try {
+        data = await read(path);
+      } catch (err) {
+        if (!section) box.replaceChildren(emptyRow("Không đọc được danh sách."));
+        return;
+      }
+      if (!data.items.length) {
+        if (section) return;
+        box.replaceChildren(emptyRow(empty));
+        return;
+      }
+      box.replaceChildren(...data.items.map(cardRow));
+      if (section) section.classList.remove("hidden");
+    }
+
+    loadStats();
+    loadList("/api/cards?size=5", $("recent"), "Chưa có danh thiếp nào. Bấm Quét danh thiếp để bắt đầu.");
+    loadList("/api/cards?status=needs_review&size=5", $("queue"), "", $("queue-section"));
+
+    read("/api/integration/status")
       .then((data) => {
-        fill("total-cards", data.total_cards);
-        fill("needs-review-cards", data.needs_review_cards);
-        fill("total-companies", data.total_companies);
-        fill("total-profiles", data.total_profiles);
-      })
-      .catch(() => note("Không đọc được số liệu. Tải lại trang."));
-
-    fetch("/api/cards?size=5")
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Lỗi HTTP " + res.status))))
-      .then((data) => {
-        const box = document.getElementById("recent");
-        box.replaceChildren();
-        if (!data.items.length) {
-          const empty = document.createElement("div");
-          empty.className = "px-4 py-6 text-sm text-muted";
-          empty.textContent = "Chưa có danh thiếp nào. Bấm “Quét danh thiếp” để bắt đầu.";
-          box.appendChild(empty);
-          return;
-        }
-        data.items.forEach((card) => {
-          const [label, tone] = STATUS_LABEL[card.status] || [card.status, "bg-slate-100 text-slate-700"];
-          const row = document.createElement("a");
-          row.href = "/cards/" + card.id;
-          row.className = "link flex items-center gap-3 px-4 py-3 text-sm hover:bg-surface";
-
-          const name = document.createElement("span");
-          name.className = "min-w-0 flex-1 truncate font-medium text-brand-ink";
-          name.textContent = card.full_name_vi || card.full_name || "(chưa có tên)";
-
-          const company = document.createElement("span");
-          company.className = "hidden min-w-0 flex-1 truncate text-muted sm:block";
-          company.textContent = card.company_name_vi || card.company_name_raw || "";
-
-          // Badge có **chữ**, không chỉ màu: người mù màu đỏ–lục không tách được lỗi với xong.
-          const badge = document.createElement("span");
-          badge.className = "shrink-0 rounded-full px-2 py-0.5 text-xs " + tone;
-          badge.textContent = label;
-
-          row.append(name, company, badge);
-          box.appendChild(row);
-        });
-      })
-      .catch(() => note("Không đọc được danh sách danh thiếp. Tải lại trang."));
-
-    fetch("/api/integration/status")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && !data.connected) document.getElementById("oauth-banner").classList.remove("hidden");
+        if (!data.connected) $("oauth-banner").classList.remove("hidden");
       })
       .catch(() => { /* không đọc được trạng thái ≠ chưa kết nối — im lặng là đúng */ });
   })();
