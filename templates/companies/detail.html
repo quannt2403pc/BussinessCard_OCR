@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 
 {% block title %}Hồ sơ doanh nghiệp{% endblock %}
 
 {% block content %}
 <div class="flex flex-wrap items-start gap-3">
   <div>
-    <a href="/companies" class="text-sm text-sky-700 hover:underline">← Danh sách doanh nghiệp</a>
+    <a href="/companies" class="link inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">{{ icon("arrow-left") }} Doanh nghiệp</a>
     <h1 id="company-name" class="mt-1 text-2xl font-semibold text-slate-900">Đang tải…</h1>
     <p id="company-meta" class="mt-1 text-sm text-slate-500"></p>
     <div id="aliases" class="mt-2 flex flex-wrap gap-1"></div>
@@ -25,13 +26,13 @@
       Sửa hồ sơ
     </button>
     <button id="btn-enrich" type="button" disabled
-            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+            class="btn-primary">
       Tạo hồ sơ
     </button>
   </div>
 </div>
 
-<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm" role="status" aria-live="polite"></div>
 
 <div id="archived" class="mt-4 hidden flex flex-wrap items-center gap-3 rounded-md border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
   <span>Hồ sơ này đang <strong>ẩn</strong>: không hiện trong danh sách Doanh nghiệp, ô tìm kiếm và câu trả lời của trợ lý AI.</span>
@@ -74,7 +75,7 @@
       Huỷ
     </button>
     <button id="btn-save" type="button"
-            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:bg-slate-300">
+            class="btn-primary">
       Lưu
     </button>
   </div>
@@ -109,7 +110,7 @@
     <ul id="block-sources" class="mt-3 space-y-3"></ul>
   </section>
 
-  <p id="generated-note" class="text-xs text-slate-400"></p>
+  <p id="generated-note" class="text-xs text-muted"></p>
 </div>
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5">
   <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Người liên hệ</h2>
@@ -143,10 +144,10 @@
   const POLL_MS = 3000;
 
   const BADGES = {
-    generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
-    verified:  ["Đã kiểm", "bg-sky-50 text-sky-700 ring-sky-200"],
-    draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
-    archived:  ["Đã ẩn", "bg-slate-100 text-slate-500 ring-slate-200"],
+    generated: ["Đã tạo", "bg-emerald-50 text-emerald-800 ring-emerald-200", "check-circle"],
+    verified:  ["Đã kiểm", "bg-brand-50 text-brand-700 ring-brand-100", "check"],
+    draft:     ["Đang tạo…", "bg-amber-50 text-amber-900 ring-amber-200", "spinner"],
+    archived:  ["Đã ẩn", "bg-slate-100 text-slate-700 ring-slate-200", "file"],
   };
 
   const IDENTITY_FIELDS = [
@@ -203,20 +204,25 @@
     return node;
   }
 
-  function message(text, kind) {
-    const box = $("message");
-    box.textContent = text;
-    const tone = {
-      error: "bg-rose-50 text-rose-800",
-      ok: "bg-emerald-50 text-emerald-800",
-      info: "bg-sky-50 text-sky-800",
-    }[kind] || "bg-slate-50 text-slate-700";
-    box.className = `mt-4 rounded-md px-4 py-3 text-sm ${tone}`;
+  // Thân hàm ở static/js/toast.js (14.8): tin vui tự tắt sau 4s, tin xấu ở lại.
+  function message(text, kind, retry) {
+    toastShow($("message"), text, kind, retry);
   }
 
   function clearMessage() {
-    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+    toastClear($("message"));
   }
+
+  // Badge = màu **+ icon + chữ** (14.9): chỉ-màu thì người mù màu đỏ–lục không tách được
+  // "Lỗi" với "Xong". Dùng chung cho badge hồ sơ và badge danh thiếp bên dưới.
+  function statusBadge(entry, fallback) {
+    const [label, tone, name] = entry || [fallback, "bg-slate-50 text-slate-700 ring-slate-200", "info"];
+    const box = el("span", `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`);
+    box.innerHTML = `<svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="/static/img/icons.svg?v={{ asset_v }}#i-${name}"/></svg>`;
+    box.append(document.createTextNode(label));
+    return box;
+  }
+
 
   function formatDate(value) {
     if (!value) return "—";
@@ -244,7 +250,7 @@
   function sourceLinks(refs) {
     const wrap = el("span", "ml-2 inline-flex flex-wrap gap-1");
     (refs || []).forEach((ref) => {
-      const link = el("a", "text-xs text-sky-700 underline decoration-dotted hover:text-sky-900", hostOf(ref.url));
+      const link = el("a", "link text-xs text-brand-700 underline decoration-dotted hover:text-brand-600", hostOf(ref.url));
       link.href = ref.url;
       link.target = "_blank";
       link.rel = "noopener";
@@ -258,17 +264,17 @@
     const value = profile[key];
     const filled = value !== null && value !== undefined && value !== "";
     const row = el("div");
-    row.append(el("dt", "text-xs uppercase tracking-wide text-slate-400", label));
+    row.append(el("dt", "text-xs uppercase tracking-wide text-muted", label));
 
     const dd = el("dd", "mt-0.5 flex flex-wrap items-center text-sm text-slate-800");
     if (filled && key === "website") {
-      const link = el("a", "text-sky-700 hover:underline", String(value));
+      const link = el("a", "link text-brand-700 hover:underline", String(value));
       link.href = String(value);
       link.target = "_blank";
       link.rel = "noopener";
       dd.append(link);
     } else {
-      dd.append(el("span", filled ? null : "text-slate-400", filled ? String(value) : "—"));
+      dd.append(el("span", filled ? null : "text-muted", filled ? String(value) : "—"));
     }
 
     const refs = (profile.sources || {})[key];
@@ -283,10 +289,10 @@
   function chipList(profile, key, label) {
     const values = profile[key] || [];
     const block = el("div");
-    block.append(el("div", "text-xs uppercase tracking-wide text-slate-400", label));
+    block.append(el("div", "text-xs uppercase tracking-wide text-muted", label));
     const chips = el("div", "mt-1 flex flex-wrap items-center gap-1");
     if (values.length === 0) {
-      chips.append(el("span", "text-sm text-slate-400", "—"));
+      chips.append(el("span", "text-sm text-muted", "—"));
     } else {
       values.forEach((value) => {
         chips.append(el("span", "rounded-full bg-slate-100 px-2.5 py-0.5 text-sm text-slate-700", value));
@@ -309,18 +315,18 @@
     });
 
     if (byUrl.size === 0) {
-      list.replaceChildren(el("li", "text-sm text-slate-400", "Chưa có nguồn nào."));
+      list.replaceChildren(el("li", "text-sm text-muted", "Chưa có nguồn nào."));
       return;
     }
 
     list.replaceChildren(...[...byUrl.values()].map(({ ref, fields }) => {
       const li = el("li", "text-sm");
-      const link = el("a", "font-medium text-sky-700 hover:underline", ref.title || hostOf(ref.url));
+      const link = el("a", "link font-medium text-brand-700 hover:underline", ref.title || hostOf(ref.url));
       link.href = ref.url;
       link.target = "_blank";
       link.rel = "noopener";
       li.append(link);
-      li.append(el("div", "break-all text-xs text-slate-400", ref.url));
+      li.append(el("div", "break-all text-xs text-muted", ref.url));
       const labels = fields.map((field) => FIELD_LABELS[field] || field);
       li.append(el("div", "text-xs text-slate-500", `Dùng cho: ${labels.join(", ")}`));
       return li;
@@ -345,8 +351,7 @@
     $("drafting").classList.toggle("hidden", !drafting);
 
     if (drafting) {
-      const [label, tone] = BADGES.draft;
-      badge.replaceChildren(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+      badge.replaceChildren(statusBadge(BADGES.draft));
       $("empty").classList.add("hidden");
       $("profile").classList.add("hidden");
       button.textContent = "Tạo hồ sơ";
@@ -360,12 +365,12 @@
       if (profile) {
         message("Hồ sơ đã tạo xong.", "ok");
       } else {
-        message("Lượt tạo hồ sơ đã kết thúc (bị huỷ hoặc lỗi) mà không lưu hồ sơ nào. Bấm Tạo hồ sơ để thử lại.", "error");
+        message("Lượt tạo hồ sơ dừng giữa chừng, chưa lưu hồ sơ nào.", "error");
       }
     }
 
     if (!profile) {
-      badge.replaceChildren(el("span", "text-xs text-slate-400", "Chưa có hồ sơ"));
+      badge.replaceChildren(el("span", "text-xs text-muted", "Chưa có hồ sơ"));
       $("empty").classList.remove("hidden");
       $("profile").classList.add("hidden");
       button.textContent = "Tạo hồ sơ";
@@ -373,8 +378,7 @@
       return;
     }
 
-    const [label, tone] = BADGES[profile.status] || [profile.status, "bg-slate-50 text-slate-600 ring-slate-200"];
-    badge.replaceChildren(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    badge.replaceChildren(statusBadge(BADGES[profile.status], profile.status));
     $("empty").classList.add("hidden");
     $("profile").classList.remove("hidden");
     button.textContent = "Tạo lại hồ sơ";
@@ -421,7 +425,7 @@
   function companyLinks(companies, withDomains) {
     const wrap = el("span", "inline-flex flex-wrap gap-x-3 gap-y-1");
     companies.forEach((ref) => {
-      const link = el("a", "font-medium text-sky-700 hover:underline", ref.display_name);
+      const link = el("a", "link font-medium text-brand-700 hover:underline", ref.display_name);
       link.href = `/companies/${ref.id}`;
       const item = el("span");
       item.append(link);
@@ -472,7 +476,7 @@
       const cancel = el("button", "rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50", "Thôi");
       cancel.type = "button";
       cancel.addEventListener("click", () => close(false));
-      const ok = el("button", "rounded-md bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700", okLabel);
+      const ok = el("button", "btn-primary px-3 py-1.5 text-sm", okLabel);
       ok.type = "button";
       ok.addEventListener("click", () => close(true));
       buttons.append(cancel, ok);
@@ -622,9 +626,9 @@
   }
 
   const CARD_BADGES = {
-    pending:      ["Chưa quét được", "bg-rose-50 text-rose-700 ring-rose-200"],
-    needs_review: ["Chờ duyệt",      "bg-amber-50 text-amber-700 ring-amber-200"],
-    confirmed:    ["Đã xác nhận",    "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+    pending:      ["Chưa quét được", "bg-rose-50 text-rose-800 ring-rose-200", "error"],
+    needs_review: ["Chờ duyệt",      "bg-amber-50 text-amber-900 ring-amber-200", "warn"],
+    confirmed:    ["Đã xác nhận",    "bg-emerald-50 text-emerald-800 ring-emerald-200", "check-circle"],
   };
 
   function contactRow(card) {
@@ -632,7 +636,7 @@
 
     const who = el("td", "px-4 py-2");
     // Link ngược card ↔ company: từ hồ sơ công ty mở thẳng tấm danh thiếp gốc (task 7.9).
-    const open = el("a", "font-medium text-sky-700 hover:underline", card.full_name || "(chưa có tên)");
+    const open = el("a", "link font-medium text-brand-700 hover:underline", card.full_name || "(chưa có tên)");
     open.href = `/cards/${card.id}`;
     who.append(open);
     who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
@@ -644,8 +648,7 @@
     tr.append(contact);
 
     const state = el("td", "px-4 py-2");
-    const [label, tone] = CARD_BADGES[card.status] || [card.status, "bg-slate-50 text-slate-600 ring-slate-200"];
-    state.append(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    state.append(statusBadge(CARD_BADGES[card.status], card.status));
     tr.append(state);
 
     tr.append(el("td", "px-4 py-2 text-xs text-slate-500", formatDate(card.uploaded_at)));
@@ -677,7 +680,7 @@
       const wrap = el("label", `${wide ? "sm:col-span-2 " : ""}block text-sm`);
       wrap.append(el("span", "text-slate-500", label));
       const input = el(wide ? "textarea" : "input",
-        "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none");
+        "mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none");
       if (!wide) input.type = kind;
       if (wide) input.rows = kind === "textarea" ? 4 : 3;
       input.id = `edit-${key}`;

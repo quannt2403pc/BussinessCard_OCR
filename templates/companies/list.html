@@ -1,40 +1,35 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 
 {% block title %}Doanh nghiệp{% endblock %}
 
 {% block content %}
 <div class="flex flex-wrap items-center gap-3">
   <div>
-    <h1 class="text-2xl font-semibold text-slate-900">Doanh nghiệp đối tác</h1>
+    <h1 class="text-2xl font-semibold text-brand-ink">Doanh nghiệp đối tác</h1>
     <p class="mt-1 text-sm text-slate-600">
       Công ty sinh ra khi bạn xác nhận danh thiếp. Hồ sơ doanh nghiệp
       <strong>chỉ được tạo khi bạn tích chọn và bấm nút</strong> — hệ thống không tự chạy.
     </p>
   </div>
   <div class="ml-auto flex items-center gap-2">
-    <a href="/dashboard"
-       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-      Bảng số liệu
-    </a>
     <a href="/cards"
-       class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-      Danh thiếp
-    </a>
+       class="btn">{{ icon("card") }} Danh thiếp</a>
   </div>
 </div>
 
-<section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+<section class="mt-6 rounded-lg border border-line bg-white p-4">
   <form id="filters" class="flex flex-wrap items-end gap-3">
     <label class="flex-1 min-w-[16rem] text-sm">
-      <span class="text-slate-500">Tìm kiếm</span>
+      <span class="text-muted">Tìm kiếm</span>
       <input id="f-q" type="search" name="q" placeholder="Tên công ty, tên viết khác…"
-             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+             class="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
     </label>
 
     <label class="text-sm">
-      <span class="text-slate-500">Hồ sơ</span>
+      <span class="text-muted">Hồ sơ</span>
       <select id="f-profile" name="has_profile"
-              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none">
+              class="mt-1 block rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
         <option value="">Tất cả</option>
         <option value="false">Chưa có hồ sơ</option>
         <option value="true">Đã có hồ sơ</option>
@@ -42,31 +37,19 @@
       </select>
     </label>
 
-    <button type="reset" id="btn-reset"
-            class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50">
-      Xoá bộ lọc
-    </button>
-    <span id="summary" class="ml-auto text-sm text-slate-500">Đang tải…</span>
+    <button type="reset" id="btn-reset" class="btn">{{ icon("close") }} Xoá lọc</button>
+    <span id="summary" class="ml-auto text-sm text-muted">Đang tải…</span>
   </form>
 </section>
 
-<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
+<div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm" role="status" aria-live="polite"></div>
 
-<section class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+<section class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
   <span id="selected-label" class="text-sm text-slate-600">Chưa chọn công ty nào</span>
-  <button id="btn-clear" type="button"
-          class="hidden rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-white">
-    Bỏ chọn
-  </button>
+  <button id="btn-clear" type="button" class="btn hidden px-3 py-1.5 text-xs">Bỏ chọn</button>
   <span class="ml-auto"></span>
-  <button id="btn-cancel-all" type="button"
-          class="hidden rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-50">
-    Huỷ các lượt đang chạy
-  </button>
-  <button id="btn-enrich" type="button" disabled
-          class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
-    Tạo hồ sơ doanh nghiệp
-  </button>
+  <button id="btn-cancel-all" type="button" class="btn hidden border-rose-200 text-rose-700 hover:bg-rose-50">{{ icon("close") }} Huỷ tất cả</button>
+  <button id="btn-enrich" type="button" disabled class="btn-primary">{{ icon("sparkles") }} Lập hồ sơ</button>
 </section>
 
 <section class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -113,19 +96,21 @@
   const POLL_MS = 3000;
   const STORAGE_KEY = "enrich-jobs";
 
+  // Badge = màu **+ icon + chữ**. Chỉ-màu thì người mù màu đỏ–lục không tách được "Lỗi" với
+  // "Xong"; emoji thì lại là bộ icon thứ hai trên cùng một trang (ui-kit mục 7).
   const BADGES = {
-    generated: ["Đã tạo", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
-    verified:  ["Đã kiểm", "bg-sky-50 text-sky-700 ring-sky-200"],
-    draft:     ["Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
-    archived:  ["Đã ẩn", "bg-slate-100 text-slate-500 ring-slate-200"],
+    generated: ["Đã tạo", "bg-emerald-50 text-emerald-800 ring-emerald-200", "check-circle"],
+    verified:  ["Đã kiểm", "bg-brand-50 text-brand-700 ring-brand-100", "check"],
+    draft:     ["Đang tạo…", "bg-amber-50 text-amber-900 ring-amber-200", "spinner"],
+    archived:  ["Đã ẩn", "bg-slate-100 text-slate-700 ring-slate-200", "file"],
   };
 
   const JOB_BADGES = {
-    pending: ["⏳ Đang chờ", "bg-slate-50 text-slate-600 ring-slate-200"],
-    running: ["⏳ Đang tạo…", "bg-amber-50 text-amber-700 ring-amber-200"],
-    done:    ["✅ Xong", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
-    error:   ["❌ Lỗi", "bg-rose-50 text-rose-700 ring-rose-200"],
-    cancelled: ["⊘ Đã huỷ", "bg-slate-50 text-slate-500 ring-slate-200"],
+    pending:   ["Đang chờ", "bg-slate-50 text-slate-700 ring-slate-200", "clock"],
+    running:   ["Đang tạo…", "bg-amber-50 text-amber-900 ring-amber-200", "spinner"],
+    done:      ["Xong", "bg-emerald-50 text-emerald-800 ring-emerald-200", "check-circle"],
+    error:     ["Lỗi", "bg-rose-50 text-rose-800 ring-rose-200", "error"],
+    cancelled: ["Đã huỷ", "bg-slate-50 text-slate-700 ring-slate-200", "close"],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -163,19 +148,21 @@
     return node;
   }
 
-  function message(text, kind) {
-    const box = $("message");
-    box.textContent = text;
-    const tone = {
-      error: "bg-rose-50 text-rose-800",
-      ok: "bg-emerald-50 text-emerald-800",
-      info: "bg-sky-50 text-sky-800",
-    }[kind] || "bg-slate-50 text-slate-700";
-    box.className = `mt-4 rounded-md px-4 py-3 text-sm ${tone}`;
+  // Thân hàm ở static/js/toast.js (14.8): tin vui tự tắt sau 4s, tin xấu ở lại.
+  function message(text, kind, retry) {
+    toastShow($("message"), text, kind, retry);
   }
 
   function clearMessage() {
-    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+    toastClear($("message"));
+  }
+
+  function badge(entry, fallback) {
+    const [label, tone, name] = entry || [fallback, "bg-slate-50 text-slate-700 ring-slate-200", "info"];
+    const box = el("span", `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`);
+    box.innerHTML = `<svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="/static/img/icons.svg?v={{ asset_v }}#i-${name}"/></svg>`;
+    box.append(document.createTextNode(label));
+    return box;
   }
 
   function formatDate(value) {
@@ -194,9 +181,8 @@
   }
 
   function profileBadge(status) {
-    if (!status) return el("span", "text-xs text-slate-400", "Chưa có hồ sơ");
-    const [label, tone] = BADGES[status] || [status, "bg-slate-50 text-slate-600 ring-slate-200"];
-    return el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label);
+    if (!status) return el("span", "text-xs text-muted", "Chưa có hồ sơ");
+    return badge(BADGES[status], status);
   }
 
   function updateSelection() {
@@ -228,7 +214,7 @@
   function cancelButton(company) {
     const button = el(
       "button",
-      "mt-1 block rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 transition hover:bg-slate-100",
+      "mt-1 block rounded-md border border-line px-2 py-0.5 text-xs text-slate-700 transition hover:bg-surface",
       "Huỷ",
     );
     button.type = "button";
@@ -245,12 +231,11 @@
       return cell;
     }
 
-    const [label, tone] = JOB_BADGES[item.status] || [item.status, "bg-slate-50 text-slate-600 ring-slate-200"];
-    cell.append(el("span", `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    cell.append(badge(JOB_BADGES[item.status], item.status));
 
     if (item.status === "pending" || item.status === "running") cell.append(cancelButton(company));
     if (item.status === "done" && item.sourced_fields !== null && item.sourced_fields !== undefined) {
-      cell.append(el("div", "mt-1 text-xs text-slate-500", `${item.sourced_fields} trường có nguồn`));
+      cell.append(el("div", "mt-1 text-xs text-muted", `${item.sourced_fields} trường có nguồn`));
     }
     if (item.status === "error") {
       // Cắt ngắn cho vừa dòng, `title` giữ nguyên văn để rê chuột đọc đủ.
@@ -293,10 +278,10 @@
     tr.append(pick);
 
     const name = el("td", "px-4 py-3");
-    const open = el("a", "font-medium text-sky-700 hover:underline", company.display_name);
+    const open = el("a", "link font-medium text-brand-700 hover:underline", company.display_name);
     open.href = `/companies/${company.id}`;
     name.append(open);
-    name.append(el("div", "text-xs text-slate-400", company.name_normalized));
+    name.append(el("div", "text-xs text-muted", company.name_normalized));
     tr.append(name);
 
     const contacts = el("td", "px-4 py-3 text-slate-800");

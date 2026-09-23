@@ -142,7 +142,7 @@ async def test_list_page_renders(client: httpx.AsyncClient) -> None:
     response = await client.get("/companies")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "Tạo hồ sơ doanh nghiệp" in response.text
+    assert "Lập hồ sơ" in response.text
 
 
 async def test_detail_page_renders_with_company_id(client: httpx.AsyncClient) -> None:
