@@ -69,91 +69,128 @@
             class="rounded-md border border-rose-200 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">
       Ngắt kết nối
     </button>
-    <button id="btn-cancel" type="button"
-            class="hidden rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
-      Huỷ phiên đăng nhập
-    </button>
   </div>
 
-  {# Lối hoàn tất kết nối khi callback không tự về (task 13.7, gỡ I-29).
-     Google luôn chuyển trình duyệt về `http://localhost:51121/oauth-callback` — giá trị ghi
-     cứng trong mã nguồn CLIProxy, không đổi được. Chạy trên máy mình thì đó đúng là máy chạy
-     CLIProxy nên callback tự về; mở từ `ocrximi.io.vn` thì `localhost` là máy của **người
-     dùng**, trang sẽ báo không kết nối được. Khi đó chép nguyên thanh địa chỉ vào ô này là
-     xong — phần đổi `code` lấy token vẫn chạy trên máy chủ. #}
-  <div id="paste-box" class="mt-4 hidden rounded-lg border border-sky-200 bg-sky-50 p-4">
-    <div class="flex flex-wrap items-baseline justify-between gap-2">
-      <p class="text-sm font-semibold text-slate-900">Còn một bước nữa</p>
-      <p id="paste-countdown" class="font-mono text-xs text-slate-500"></p>
+  {# ---------------------------------------------------------------------------------
+     Hộp thoại kết nối OAuth (task 13.7).
+
+     Gom TẤT CẢ vào một modal thay vì rải trên trang, vì luồng này có một khúc người dùng
+     buộc phải tự làm — chép địa chỉ từ một trang báo lỗi của trình duyệt. Khúc đó chỉ trôi
+     được nếu họ đọc hết các bước TRƯỚC khi bắt đầu, và còn nhìn thấy các bước trong suốt
+     quá trình. Rải ra trang thì bước 1 bị đẩy khỏi tầm mắt đúng lúc cần nhất.
+
+     Vì sao có khúc thủ công: Google luôn trả trình duyệt về
+     `http://localhost:51121/oauth-callback` — client OAuth của Antigravity là loại
+     "Desktop app", mà loại đó Google chỉ nhận redirect loopback (đo 2026-09-22: tên miền,
+     tên miền con, cả IP công khai đều `redirect_uri_mismatch`). Mở từ `ocrximi.io.vn` thì
+     `localhost` là máy của NGƯỜI DÙNG, nên `code` không bao giờ tự tới máy chủ.
+  --------------------------------------------------------------------------------- #}
+  <dialog id="oauth-dialog"
+          class="w-[min(42rem,calc(100vw-2rem))] rounded-xl border border-slate-200 p-0 text-slate-800 shadow-2xl backdrop:bg-slate-900/60">
+
+    <div class="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-4">
+      <div>
+        <h2 class="text-base font-semibold text-slate-900">Kết nối tài khoản Google</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Ba bước, chỉ làm một lần.</p>
+      </div>
+      <p id="paste-countdown" class="shrink-0 font-mono text-xs text-slate-500"></p>
     </div>
 
-    <ol class="mt-3 space-y-2 text-sm text-slate-700">
-      <li class="flex gap-2">
-        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">1</span>
-        <span>Ở tab vừa mở: đăng nhập Google rồi bấm <strong>Cho phép</strong>.</span>
-      </li>
-      <li class="flex gap-2">
-        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">2</span>
-        <span>
-          Cửa sổ đó sẽ dừng ở <strong>một trang báo lỗi</strong> — <strong>đúng như vậy</strong>,
-          đừng đóng. Nhấn
-          <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">L</kbd>
-          rồi
-          <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">C</kbd>
-          để chép địa chỉ trên thanh URL.
-        </span>
-      </li>
-      <li class="flex gap-2">
-        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">3</span>
-        <span>
-          Quay lại trang này. <strong>Hết — trang tự nhận địa chỉ và tự kết nối.</strong>
-        </span>
-      </li>
-    </ol>
+    <div class="max-h-[70vh] overflow-y-auto px-6 py-5">
+      <ol class="space-y-5">
 
-    {# Cho người dùng thấy TRƯỚC cái trang lỗi họ sắp gặp. Không xoá được trang đó — chỉ thứ
-       nghe ở `localhost:51121` trên máy họ mới làm nổi, mà không có gì nghe ở đấy cả. Nhưng
-       biết trước thì nó thôi là sự cố, thành một bước trong quy trình.
-       Cố ý KHÔNG hứa một thông báo cụ thể: máy nào tình cờ có thứ nghe ở 51121 (ví dụ máy dev
-       đang chạy chính bộ Docker này) sẽ thấy `ERR_EMPTY_RESPONSE`, máy sạch thấy
-       "đã từ chối kết nối". Viết cứng một câu là sai với một nửa số máy. #}
-    <div class="mt-3 rounded-md border border-slate-300 bg-white p-3">
-      <p class="text-xs font-medium text-slate-500">Cửa sổ vừa mở sẽ dừng ở một trang đại loại thế này:</p>
-      <div class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-600">
-        <p class="font-medium text-slate-700">Trang này hiện không hoạt động</p>
-        <p class="mt-1">localhost không gửi bất kỳ dữ liệu nào — <code>ERR_EMPTY_RESPONSE</code></p>
-        <p class="mt-1 text-slate-400">…hoặc “localhost đã từ chối kết nối”, tuỳ máy</p>
-      </div>
-      <p class="mt-2 text-xs text-emerald-700">
-        ✓ Đúng như vậy, không phải hỏng. Thứ cần nằm ở <strong>thanh địa chỉ</strong> của trang đó.
-      </p>
+        <li id="step-1" class="flex gap-3">
+          <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">1</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-900">Đăng nhập Google và bấm <em>Cho phép</em></p>
+            <p class="mt-1 text-sm text-slate-600">
+              Một cửa sổ nhỏ sẽ mở ra bên cạnh. Hộp thoại này vẫn ở đây để bạn nhìn theo.
+            </p>
+            <button id="btn-start-oauth" type="button"
+                    class="mt-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50">
+              Mở cửa sổ đăng nhập Google
+            </button>
+            <p id="oauth-link-fallback" class="mt-2 hidden break-all text-xs text-slate-500"></p>
+          </div>
+        </li>
+
+        <li id="step-2" class="flex gap-3 opacity-50">
+          <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-white">2</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-900">Chép địa chỉ ở cửa sổ đó</p>
+            <p class="mt-1 text-sm text-slate-600">
+              Bấm <em>Cho phép</em> xong, cửa sổ sẽ dừng ở <strong>một trang báo lỗi</strong>.
+              Đừng đóng. Nhấn
+              <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">L</kbd>
+              rồi
+              <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">C</kbd>.
+            </p>
+
+            {# Cho thấy TRƯỚC cái trang lỗi sắp gặp. Không xoá được nó — chỉ thứ nghe ở
+               `localhost:51121` trên máy người dùng mới làm nổi, mà chẳng có gì nghe ở đấy.
+               Biết trước thì nó thôi là sự cố, thành một bước trong quy trình.
+               Cố ý KHÔNG hứa một thông báo cụ thể: máy nào tình cờ có thứ chiếm cổng 51121
+               (ví dụ máy dev đang chạy chính bộ Docker này) sẽ ra `ERR_EMPTY_RESPONSE`, máy
+               sạch ra "đã từ chối kết nối". Viết cứng một câu là sai với một nửa số máy. #}
+            <div class="mt-2 rounded-md border border-slate-200 bg-white p-3">
+              <p class="text-xs font-medium text-slate-500">Trang đó trông đại loại thế này:</p>
+              <div class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-600">
+                <p class="font-medium text-slate-700">Trang này hiện không hoạt động</p>
+                <p class="mt-1">localhost không gửi bất kỳ dữ liệu nào — <code>ERR_EMPTY_RESPONSE</code></p>
+                <p class="mt-1 text-slate-400">…hoặc “localhost đã từ chối kết nối”, tuỳ máy</p>
+              </div>
+              <p class="mt-2 text-xs text-emerald-700">
+                ✓ Đúng như vậy, không phải hỏng. Thứ cần nằm ở <strong>thanh địa chỉ</strong>.
+              </p>
+            </div>
+          </div>
+        </li>
+
+        <li id="step-3" class="flex gap-3 opacity-50">
+          <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-white">3</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-900">Quay lại hộp thoại này</p>
+            <p id="paste-hint" class="mt-1 text-sm text-slate-600">
+              Trang tự nhận địa chỉ trong clipboard rồi tự kết nối — không phải dán tay.
+            </p>
+
+            {# Lối thủ công: chỉ mở ra khi đường tự động không chạy được. #}
+            <details id="paste-manual" class="mt-2">
+              <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+                Không tự nhận? Dán tay ở đây
+              </summary>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="Nhấn Ctrl+V vào đây…"
+                       class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
+                <button id="btn-clip" type="button"
+                        class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                  Lấy từ clipboard
+                </button>
+                <button id="btn-paste" type="button"
+                        class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
+                  Hoàn tất kết nối
+                </button>
+              </div>
+              <p class="mt-2 text-xs text-slate-500">
+                Chép hụt cũng không sao: dán nguyên URL hay chỉ đoạn <code>code</code> đều nhận.
+              </p>
+            </details>
+          </div>
+        </li>
+      </ol>
+
+      <div id="dlg-message" class="mt-5 hidden rounded-md px-4 py-3 text-sm"></div>
     </div>
 
-    <p id="paste-hint" class="mt-3 text-sm text-slate-600"></p>
-
-    {# Lối thủ công — ẩn đi cho gọn, chỉ mở ra khi đường tự động không chạy được. #}
-    <details id="paste-manual" class="mt-3">
-      <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-        Không tự nhận? Dán tay ở đây
-      </summary>
-      <div class="mt-2 flex flex-wrap gap-2">
-        <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
-               placeholder="Nhấn Ctrl+V vào đây…"
-               class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
-        <button id="btn-clip" type="button"
-                class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-          Lấy từ clipboard
-        </button>
-        <button id="btn-paste" type="button"
-                class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
-          Hoàn tất
-        </button>
-      </div>
-      <p class="mt-2 text-xs text-slate-500">
-        Chép hụt cũng không sao: dán nguyên URL hay chỉ đoạn <code>code</code> đều nhận.
-      </p>
-    </details>
-  </div>
+    <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-6 py-3">
+      <p class="text-xs text-slate-500">Phiên đăng nhập chỉ sống 5 phút.</p>
+      <button id="btn-cancel" type="button"
+              class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+        Đóng
+      </button>
+    </div>
+  </dialog>
 
   <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
 </section>
@@ -204,7 +241,10 @@
   const btnDisconnect = el("btn-disconnect");
   const btnCancel = el("btn-cancel");
   const btnRefresh = el("btn-refresh");
-  const pasteBox = el("paste-box");
+  const dlg = el("oauth-dialog");
+  const dlgMessage = el("dlg-message");
+  const btnStartOauth = el("btn-start-oauth");
+  const oauthLinkFallback = el("oauth-link-fallback");
   const pasteCountdown = el("paste-countdown");
   const pasteHint = el("paste-hint");
   const pasteManual = el("paste-manual");
@@ -245,14 +285,20 @@
       error: "bg-rose-50 text-rose-800",
       info:  "bg-slate-100 text-slate-700",
     };
-    message.className = "mt-4 rounded-md px-4 py-3 text-sm " + palette[kind || "info"];
-    message.textContent = text;
-    message.classList.remove("hidden");
+    // Hộp thoại đang mở thì báo NGAY TRONG nó. Ghi ra vùng thông báo của trang lúc đó là
+    // ghi vào chỗ bị lớp phủ che mất — người dùng không thấy gì và tưởng nút chết.
+    const target = dlg.open ? dlgMessage : message;
+    target.className = (dlg.open ? "mt-5 " : "mt-4 ") +
+      "rounded-md px-4 py-3 text-sm " + palette[kind || "info"];
+    target.textContent = text;
+    target.classList.remove("hidden");
   }
 
   function clearMessage() {
-    message.classList.add("hidden");
-    message.textContent = "";
+    for (const node of [message, dlgMessage]) {
+      node.classList.add("hidden");
+      node.textContent = "";
+    }
   }
 
   function setDetail(text) {
@@ -346,11 +392,39 @@
       countdownTimer = null;
     }
     pendingState = null;
-    btnCancel.classList.add("hidden");
-    pasteBox.classList.add("hidden");
     callbackUrl.value = "";
     btnConnect.disabled = false;
+    btnStartOauth.disabled = false;
+    pasteCountdown.textContent = "";
     closeOAuthWindow();
+  }
+
+  /** Đánh dấu tiến trình trên 3 bước của hộp thoại: trước `n` là xong, `n` là đang làm. */
+  function setStep(n) {
+    for (let i = 1; i <= 3; i++) {
+      const li = el("step-" + i);
+      const dot = li.querySelector("[data-dot]");
+      li.classList.toggle("opacity-50", i > n);
+      if (i < n) {
+        dot.className = "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-semibold text-white";
+        dot.textContent = "✓";
+      } else {
+        dot.className = "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white " +
+          (i === n ? "bg-sky-600" : "bg-slate-300");
+        dot.textContent = String(i);
+      }
+    }
+  }
+
+  function openDialog() {
+    clearMessage();
+    setStep(1);
+    pasteManual.open = false;
+    callbackUrl.value = "";
+    oauthLinkFallback.classList.add("hidden");
+    pasteHint.textContent = "Trang tự nhận địa chỉ trong clipboard rồi tự kết nối — không phải dán tay.";
+    btnStartOauth.disabled = false;
+    if (!dlg.open) dlg.showModal();
   }
 
   /** Dọn hộ cửa sổ OAuth. Trang lỗi không tự đóng, để lại thì người dùng phải tự dẹp. */
@@ -409,7 +483,14 @@
       // Poll báo xong mới được hỏi auth-files để vẽ badge (Plan.md mục 2.5 bước 3).
       const status = await refreshStatus();
       if (status && status.connected) {
+        setStep(4); // cả ba bước đều tick xanh
         showMessage("Kết nối thành công: " + status.accounts.join(", "), "ok");
+        // Để người dùng kịp đọc dòng xanh rồi mới dọn hộp thoại đi. `pendingState` đã bị
+        // `stopPolling()` xoá nên handler `close` không huỷ nhầm phiên vừa thành công.
+        setTimeout(() => {
+          if (dlg.open) dlg.close();
+          showMessage("Kết nối thành công: " + status.accounts.join(", "), "ok");
+        }, 1600);
       } else {
         showMessage("CLIProxy báo xong nhưng chưa thấy credential nào. Thử bấm Làm mới.", "error");
       }
@@ -429,8 +510,8 @@
     pendingState = state;
     const deadline = Date.now() + OAUTH_TIMEOUT_MS;
     btnConnect.disabled = true;
-    btnCancel.classList.remove("hidden");
-    pasteBox.classList.remove("hidden");
+    btnStartOauth.disabled = true;
+    setStep(2);
     setBadge("waiting");
 
     // Đồng hồ đếm ngược. Phiên bên CLIProxy chết cứng sau 5 phút và ta không kéo dài được
@@ -449,14 +530,17 @@
 
     clipboardFailures = 0;
     pasteManual.open = false;
-    pasteHint.textContent = "Đang chờ bạn đồng ý ở tab Google…";
+    pasteHint.textContent = "Đang chờ bạn đồng ý ở cửa sổ Google…";
 
     pollTimer = setInterval(async () => {
       if (Date.now() > deadline) {
         const expired = pendingState;
         stopPolling();
         await cancelSession(expired);
-        showMessage("Hết thời gian chờ đăng nhập. Bấm lại nút kết nối để thử lần nữa.", "error");
+        // Quay về bước 1: hộp thoại vẫn mở, nút mở cửa sổ Google đã bật lại, làm lại ngay
+        // được mà không phải đóng rồi bấm lại từ trang.
+        setStep(1);
+        showMessage("Hết 5 phút. Bấm “Mở cửa sổ đăng nhập Google” để thử lại.", "error");
         await refreshStatus();
         return;
       }
@@ -483,15 +567,22 @@
     }
   }
 
-  btnConnect.addEventListener("click", async () => {
-    clearMessage();
+  // Nút trên trang chỉ MỞ hộp thoại, chưa gọi mạng. Cố ý tách đôi: người dùng cần đọc hết
+  // ba bước trước khi đồng hồ 5 phút bắt đầu chạy, chứ không phải vừa bấm đã bị đẩy vào
+  // luồng rồi mới ngồi đọc.
+  btnConnect.addEventListener("click", () => {
     resetDisconnectButton();
-    btnConnect.disabled = true;
+    openDialog();
+  });
+
+  btnStartOauth.addEventListener("click", async () => {
+    clearMessage();
+    btnStartOauth.disabled = true;
     let data;
     try {
       data = await api("/api/integration/connect", { method: "POST" });
     } catch (err) {
-      btnConnect.disabled = false;
+      btnStartOauth.disabled = false;
       showMessage("Không mở được phiên đăng nhập: " + err.message, "error");
       return;
     }
@@ -512,8 +603,17 @@
       `width=${w},height=${h},left=${left},top=60`
     );
     if (!oauthWindow) {
-      // Bị chặn popup — vẫn còn đường đi, đưa thẳng link cho người dùng tự mở.
-      showMessage("Trình duyệt chặn cửa sổ mới. Mở thủ công: " + data.url, "info");
+      // Bị chặn popup — vẫn còn đường đi: đưa link ra để người dùng tự mở.
+      oauthLinkFallback.innerHTML = "";
+      oauthLinkFallback.append("Trình duyệt chặn cửa sổ mới. ");
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "text-sky-700 underline";
+      a.textContent = "Mở trang đăng nhập Google";
+      oauthLinkFallback.append(a);
+      oauthLinkFallback.classList.remove("hidden");
     }
     startPolling(data.state);
   });
@@ -627,8 +727,13 @@
   document.addEventListener("visibilitychange", onBackToTab);
   window.addEventListener("focus", onBackToTab);
 
-  btnCancel.addEventListener("click", async () => {
+  btnCancel.addEventListener("click", () => dlg.close());
+
+  // Đóng hộp thoại = huỷ phiên đang chờ. Bắt ở `close` chứ không ở nút, vì Esc và bấm ra
+  // ngoài cũng đóng được — ba lối cùng phải dọn, nếu không `state` treo lại trong CLIProxy.
+  dlg.addEventListener("close", async () => {
     const state = pendingState;
+    if (!state) return;
     stopPolling();
     await cancelSession(state);
     showMessage("Đã huỷ phiên đăng nhập.", "info");
