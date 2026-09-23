@@ -106,29 +106,35 @@
       <li class="flex gap-2">
         <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-semibold text-white">3</span>
         <span>
-          Quay lại trang này và nhấn
-          <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">V</kbd>.
-          <strong>Xong — không phải bấm gì thêm.</strong>
+          Quay lại trang này. <strong>Hết — trang tự nhận địa chỉ và tự kết nối.</strong>
         </span>
       </li>
     </ol>
 
-    <div class="mt-3 flex flex-wrap gap-2">
-      <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
-             placeholder="Nhấn Ctrl+V vào đây…"
-             class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
-      <button id="btn-clip" type="button"
-              class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-        Dán từ clipboard
-      </button>
-      <button id="btn-paste" type="button"
-              class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
-        Hoàn tất
-      </button>
-    </div>
-    <p class="mt-2 text-xs text-slate-500">
-      Chép hụt cũng không sao: dán nguyên URL hay chỉ đoạn <code>code</code> đều nhận.
-    </p>
+    <p id="paste-hint" class="mt-3 text-sm text-slate-600"></p>
+
+    {# Lối thủ công — ẩn đi cho gọn, chỉ mở ra khi đường tự động không chạy được. #}
+    <details id="paste-manual" class="mt-3">
+      <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+        Không tự nhận? Dán tay ở đây
+      </summary>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <input id="callback-url" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Nhấn Ctrl+V vào đây…"
+               class="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 focus:border-sky-500 focus:outline-none">
+        <button id="btn-clip" type="button"
+                class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+          Lấy từ clipboard
+        </button>
+        <button id="btn-paste" type="button"
+                class="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50">
+          Hoàn tất
+        </button>
+      </div>
+      <p class="mt-2 text-xs text-slate-500">
+        Chép hụt cũng không sao: dán nguyên URL hay chỉ đoạn <code>code</code> đều nhận.
+      </p>
+    </details>
   </div>
 
   <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"></div>
@@ -182,6 +188,8 @@
   const btnRefresh = el("btn-refresh");
   const pasteBox = el("paste-box");
   const pasteCountdown = el("paste-countdown");
+  const pasteHint = el("paste-hint");
+  const pasteManual = el("paste-manual");
   const callbackUrl = el("callback-url");
   const btnPaste = el("btn-paste");
   const btnClip = el("btn-clip");
@@ -407,6 +415,10 @@
     tick();
     countdownTimer = setInterval(tick, 1000);
 
+    clipboardFailures = 0;
+    pasteManual.open = false;
+    pasteHint.textContent = "Đang chờ bạn đồng ý ở tab Google…";
+
     pollTimer = setInterval(async () => {
       if (Date.now() > deadline) {
         const expired = pendingState;
@@ -498,13 +510,77 @@
     }
   });
 
-  // Quay lại tab là con trỏ đã nằm sẵn trong ô — người dùng chỉ việc Ctrl+V, không phải
-  // ngắm rồi bấm chuột vào đúng ô trước.
-  const focusPasteBox = () => {
-    if (pendingState && document.visibilityState === "visible") callbackUrl.focus();
-  };
-  document.addEventListener("visibilitychange", focusPasteBox);
-  window.addEventListener("focus", focusPasteBox);
+  // ---- Tự kết nối khi quay lại tab -------------------------------------------------
+  //
+  // Vì sao không thể tự động HOÀN TOÀN: `client_id` CLIProxy dùng là client "Desktop app"
+  // của chính Google (`antigravity/constants.go:6`), mà loại client đó Google chỉ nhận
+  // `redirect_uri` **loopback**. Nên `code` luôn được giao về máy của người dùng, không
+  // bao giờ tới máy chủ. Thao tác **chép** vì thế là sàn cứng — clipboard là phương tiện
+  // duy nhất chuyển nó từ máy họ sang đây.
+  //
+  // Thao tác **dán** thì bỏ được: quay lại tab là trang tự đọc clipboard và tự nộp.
+  // Ba tầng, tầng dưới đỡ cho tầng trên hỏng:
+  //   1. đã cấp quyền clipboard  -> đọc im lặng ngay khi tab hiện lại
+  //   2. chưa cấp / cần cử chỉ   -> bấm một cái BẤT KỲ trên trang là đọc (cú bấm = gesture)
+  //   3. trình duyệt không cho   -> mở khối "Dán tay" như cũ
+  let clipboardFailures = 0;
+  let clickArmed = false;
+
+  /** Chỉ nhận đúng thứ trông như URL callback. */
+  function looksLikeCallback(text) {
+    const t = (text || "").trim();
+    return t.length > 20 && t.length <= 4096 && /[?&]code=/.test(t) && t.includes("oauth-callback");
+  }
+
+  /** Đọc clipboard rồi tự nộp. Trả true nếu đã nộp. */
+  async function tryClipboard() {
+    if (!pendingState || submitting) return false;
+    if (!navigator.clipboard || !navigator.clipboard.readText) return false;
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      clipboardFailures += 1;
+      if (clipboardFailures >= 2) {
+        // Đọc hai lần đều không được = trình duyệt chặn hẳn, đừng dụ người dùng bấm nữa.
+        pasteHint.textContent = "Trình duyệt không cho đọc clipboard. Mở “Dán tay” bên dưới.";
+        pasteManual.open = true;
+        callbackUrl.focus();
+      } else {
+        armClickToRead();
+      }
+      return false;
+    }
+    // ⚠️ Không có bước kiểm này thì một lần đọc clipboard hụt sẽ gửi thẳng nội dung riêng
+    // tư của người dùng lên máy chủ. Chỉ gửi khi nó đúng là URL callback.
+    if (!looksLikeCallback(text)) return false;
+    callbackUrl.value = text.trim();
+    await submitPasted(text);
+    return true;
+  }
+
+  /** Chờ một cú bấm bất kỳ để mượn "user gesture" mà đọc clipboard. */
+  function armClickToRead() {
+    if (clickArmed) return;
+    clickArmed = true;
+    pasteHint.textContent = "Chép xong rồi? Bấm một cái vào trang này là tự kết nối.";
+    const once = () => {
+      document.removeEventListener("click", once, true);
+      clickArmed = false;
+      tryClipboard();
+    };
+    document.addEventListener("click", once, true);
+  }
+
+  async function onBackToTab() {
+    if (!pendingState || document.visibilityState !== "visible") return;
+    if (await tryClipboard()) return;
+    if (!clickArmed && clipboardFailures < 2) {
+      pasteHint.textContent = "Chưa thấy địa chỉ trong clipboard — chép xong quay lại đây là xong.";
+    }
+  }
+  document.addEventListener("visibilitychange", onBackToTab);
+  window.addEventListener("focus", onBackToTab);
 
   btnCancel.addEventListener("click", async () => {
     const state = pendingState;
