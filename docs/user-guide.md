@@ -67,13 +67,13 @@ Trang *Danh thiếp* liệt kê mọi thẻ, tìm theo tên / công ty / email, 
 
 Xác nhận danh thiếp **không** tự tạo hồ sơ. Bạn chủ động chọn công ty cần tra cứu:
 
-1. Tích chọn một hoặc nhiều công ty (tối đa 50 mỗi lượt) → **Tạo hồ sơ doanh nghiệp**.
+1. Tích chọn một hoặc nhiều công ty (tối đa 50 mỗi lượt) → **Lập hồ sơ**.
 2. Cột *Hồ sơ* của từng dòng hiện tiến trình: *⏳ Đang chờ* → *⏳ Đang tạo…* → *✅ Xong · N trường có nguồn*.
    Mỗi công ty mất khoảng 30–60 giây; tối đa 2 công ty chạy cùng lúc. Tải lại trang giữa chừng vẫn theo dõi tiếp.
-3. **Bấm nhầm hoặc chờ quá lâu?** Bấm **Huỷ** trên dòng đó, hoặc **Huỷ các lượt đang chạy** cho cả lượt.
+3. **Bấm nhầm hoặc chờ quá lâu?** Bấm **Huỷ** trên dòng đó, hoặc **Huỷ tất cả** cho cả lượt.
 4. Dòng *❌ Lỗi* ghi lý do ngay tại chỗ (chưa kết nối, hết lượt gọi…). Sửa nguyên nhân rồi bấm **Chạy lại**.
 
-Bộ lọc *Hồ sơ*: *Chưa có hồ sơ* / *Đã có hồ sơ* / *Đã ẩn*. Nút **Bảng số liệu** mở trang tổng quan (mục 7).
+Bộ lọc *Hồ sơ*: *Chưa có hồ sơ* / *Đã có hồ sơ* / *Đã ẩn*. Nút **Xoá lọc** trả bộ lọc về mặc định.
 
 ## 5. Đọc và quản lý một hồ sơ
 
@@ -104,8 +104,9 @@ Các nút trên đầu trang:
 
 ![Trợ lý AI trả lời kèm nguồn](images/07-assistant.png)
 
-> ⚠️ Ảnh trên chụp **màn hình trợ lý riêng đã gỡ** — chụp lại theo bong bóng là việc còn lại của
-> task `14.11`. Chữ dưới đây đã đúng với bản hiện tại.
+> ⚠️ Ảnh trên chụp **màn hình trợ lý riêng**, tức bản trước `EX-09` — nó được chụp lại ở `14.11`
+> nhưng từ nhánh mà trang đó còn tồn tại. `scripts/make_doc_screenshots.py` **đã sửa** để chụp
+> bong bóng, nên chạy lại một lệnh là ảnh khớp trở lại. Chữ dưới đây đã đúng với bản hiện tại.
 
 - Bấm **bong bóng tròn góc phải dưới** — có trên mọi trang, không phải đi tới trang riêng nào. Đóng bằng phím
   `Esc` hoặc dấu `×`; hội thoại **không mất** khi bạn chuyển sang trang khác.
@@ -119,11 +120,11 @@ Các nút trên đầu trang:
 - Hỏi điều không có trong dữ liệu (*"Giá vàng hôm nay?"*) thì trợ lý trả lời **không có thông tin**, không đoán.
 - Hồ sơ đã **ẩn** không được dùng để trả lời.
 
-## 7. Bảng số liệu và xuất dữ liệu
+## 7. Trang chủ và xuất dữ liệu
 
-![Bảng số liệu](images/08-dashboard.png)
+![Trang chủ](images/08-home.png)
 
-- **Bảng số liệu** (nút trên trang *Doanh nghiệp*): tổng danh thiếp, đã xác nhận, chờ duyệt, số công ty, số hồ sơ,
+- **Trang chủ** (biểu tượng OCR Xì Mi trên thanh trên cùng): tổng danh thiếp, đã xác nhận, chờ duyệt, số công ty, số hồ sơ,
   tỉ lệ cần review. Bấm một ô để mở danh sách tương ứng.
 - **Xuất dữ liệu** — mở các địa chỉ sau, trình duyệt tải file về:
 

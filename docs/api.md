@@ -272,11 +272,11 @@ CSV encode UTF-8 **có BOM** để Excel tiếng Việt/CJK không vỡ chữ.
 
 | Đường dẫn | Template | Chủ | Task |
 |-----------|----------|-----|------|
-| `/` | `base.html` | Q | 1.3 |
+| `/` | `home.html` | Q *(khung)* + T *(nội dung)* | 1.3, 14.6, 14.7 |
 | `/cards`, `/cards/upload`, `/cards/{id}`, `/cards/batch` | `templates/cards/` | Q | 4.4, 4.5, 5.1, 5.3 |
 | `/companies`, `/companies/{id}` | `templates/companies/` | T | 6.5, 6.6 |
 | `/assistant` | *(đã gỡ ở EX-09)* — `301` về `/`; `?session=<uuid>` thành `/?chat=<uuid>` | Q | 8.4, EX-09 |
-| `/dashboard` | `dashboard.html` | T | 7.7 |
+| `/dashboard` | *(đã gỡ ở 14.6 theo **QĐ-2**)* — `301` về `/`, `dashboard.html` đã xoá | T | 7.7, 14.6 |
 | `/settings` | `settings.html` | Q | 2.5 |
 
 ---

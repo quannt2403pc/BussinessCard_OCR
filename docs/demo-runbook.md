@@ -31,12 +31,12 @@ Thời gian dự kiến ghi trước; số đo thật của từng bước ở m
 
 | Phút | Màn hình | Thao tác | Lời nói (ý chính) | Dự phòng nếu lỗi |
 |------|----------|----------|-------------------|------------------|
-| 0:00–0:40 | `/dashboard` | Mở bảng số liệu | *"Sau mỗi hội thảo có cả xấp danh thiếp; nhập tay mất cả buổi, tra cứu từng công ty mất cả ngày."* | — |
+| 0:00–0:40 | `/` | Mở trang chủ | *"Sau mỗi hội thảo có cả xấp danh thiếp; nhập tay mất cả buổi, tra cứu từng công ty mất cả ngày."* | — |
 | 0:40–2:10 | `/cards/upload` → review | Kéo `vi-01-clear.png` vào → mở review → chỉ SĐT đã chuẩn hoá `+84…`, website thêm `https://` → **Xác nhận** | *"Mô hình đọc ảnh, rồi hệ thống chuẩn hoá. Người dùng luôn kiểm trước khi xác nhận."* | OCR chậm > 20 s: nói tiếp phần kiến trúc trong lúc chờ |
 | 2:10–3:10 | `/cards/batch` | Kéo 6 ảnh còn lại → chờ xong → mở nhanh thẻ `ja-01`, `ko-01` | *"Tiếng Nhật, tiếng Hàn đọc được như tiếng Việt."* | Chỉ xác nhận `ja-01`, `ko-01`, `vi-02`, `en-03`, `en-02`; bỏ qua thẻ còn lại |
 | 3:10–3:40 | `/cards` | Xác nhận các thẻ vừa quét (nút *Xác nhận* trong từng review) | — | — |
 | 3:40–4:20 | `/companies` | Tìm *hoa phat* → **một** công ty, 2 danh thiếp (tên hiển thị là tên in trên thẻ **xác nhận trước**, ví dụ *HOA PHAT GROUP JSC*; tên kia nằm trong *tên khác*). Chỉ cột *Hồ sơ*: tất cả *Chưa có hồ sơ* | *"Hai thẻ in tên khác nhau vẫn về một công ty. Và xác nhận thẻ không tự sinh hồ sơ: người dùng chủ động chọn."* | — |
-| 4:20–6:50 | `/companies` | Tích *Sữa Việt Nam*, *Hòa Phát*, *Coteccons* → **Tạo hồ sơ doanh nghiệp**. Trong lúc chờ: tích *日立製作所* → tạo → bấm **Huỷ** ngay | *"Mỗi công ty: tra cứu Internet, rồi chỉ giữ trường có trang nguồn chứng minh. Bấm nhầm thì huỷ được."* | Quá 3 phút: mở hồ sơ đã *✅ Xong* đầu tiên, để các công ty kia chạy tiếp |
+| 4:20–6:50 | `/companies` | Tích *Sữa Việt Nam*, *Hòa Phát*, *Coteccons* → **Lập hồ sơ**. Trong lúc chờ: tích *日立製作所* → tạo → bấm **Huỷ** ngay | *"Mỗi công ty: tra cứu Internet, rồi chỉ giữ trường có trang nguồn chứng minh. Bấm nhầm thì huỷ được."* | Quá 3 phút: mở hồ sơ đã *✅ Xong* đầu tiên, để các công ty kia chạy tiếp |
 | 6:50–7:50 | Hồ sơ *Sữa Việt Nam* | Cuộn tới **Nguồn tham khảo** → bấm một nguồn MST → trang gốc mở ra, có đúng mã số thuế | *"Mỗi con số đều bấm ra được trang gốc. Trường không có nguồn thì để trống."* | — |
 | 7:50–8:10 | Hồ sơ *Samsung Electronics Vietnam* | Chỉ khối *"Cùng tên miền với: 삼성전자 (samsung.com)"* | *"Hai pháp nhân khác nhau cùng tập đoàn: hệ thống gợi ý, không tự gộp."* | Bỏ qua nếu thiếu giờ |
 | 8:10–9:30 | Bong bóng trợ lý (bấm góc phải dưới, nút **phóng to** nếu câu trả lời dài) | Hỏi 3 câu: (1) *"Mã số thuế của Vinamilk là gì?"* → bấm thẻ nguồn; (2) *"Ai là giám đốc mua hàng ở Hòa Phát?"*; (3) *"Giá vàng hôm nay bao nhiêu?"* | *"Trả lời từ đúng hồ sơ vừa tạo, có nguồn. Câu ngoài dữ liệu thì nói không có."* | Câu (1) trượt: hỏi *"Công ty nào làm về logistics?"* (dữ liệu seed) |
