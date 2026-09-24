@@ -195,7 +195,11 @@ def _report_select(user_id: uuid.UUID) -> Select[tuple[uuid.UUID | None, int, in
             )
         )
         .label("in_progress"),
-    ).where(BusinessCard.user_id == user_id)
+    ).where(
+        BusinessCard.user_id == user_id,
+        # Đếm cả bản trùng đã gộp là thổi phồng đúng con số mà `NEXT-04` sinh ra để dọn.
+        BusinessCard.merged_into_id.is_(None),
+    )
 
 
 async def list_with_report(

@@ -114,6 +114,27 @@ async def test_cards_csv_exports_card_without_company(
     assert rows[1][rows[0].index("company_name_raw")] == "Cty chưa gắn"
 
 
+async def test_merged_cards_are_left_out(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    """Bản trùng đã gộp không nằm trong bản xuất (task NEXT-04).
+
+    Xuất ra thì công cụ nhận file lại dựng lại đúng cặp trùng mà người dùng vừa gộp xong —
+    và nó phải đúng ở **cả** câu đếm lẫn câu lấy dòng, lệch nhau thì `total` nói một đằng,
+    `items` một nẻo.
+    """
+    primary = card(full_name="Giữ lại")
+    db_session.add(primary)
+    await db_session.flush()
+    db_session.add(card(full_name="Đã gộp", merged_into_id=primary.id))
+    await db_session.flush()
+
+    payload = json.loads((await client.get("/api/export/cards.json")).text)
+
+    assert payload["total"] == 1
+    assert [row["full_name"] for row in payload["items"]] == ["Giữ lại"]
+
+
 async def test_cards_filter_by_relationship(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:

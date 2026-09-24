@@ -255,7 +255,12 @@ def _list_conditions(
     `user_id` là điều kiện **đầu tiên và không thể tắt** — nó không đến từ tham số URL nào, nên
     không có ô nhập nào của người dùng gỡ được nó ra.
     """
-    conditions: list[ColumnElement[bool]] = [BusinessCard.user_id == user_id]
+    conditions: list[ColumnElement[bool]] = [
+        BusinessCard.user_id == user_id,
+        # Thẻ đã gộp vào thẻ khác biến khỏi danh sách (task NEXT-04 của T; T sửa file của Q, Q
+        # review PR). Bản ghi vẫn còn và mở ra đọc được, nó chỉ không bị đếm hai lần nữa.
+        BusinessCard.merged_into_id.is_(None),
+    ]
 
     if q and (term := q.strip()):
         pattern = f"%{_escape_like(term)}%"

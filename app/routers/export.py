@@ -82,7 +82,9 @@ def _cards_select(
         )
         .outerjoin(Company, Company.id == BusinessCard.company_id)
         .outerjoin(Event, Event.id == BusinessCard.event_id)
-        .where(BusinessCard.user_id == user_id)
+        # Bản trùng đã gộp không nằm trong bản xuất (task NEXT-04) — xuất ra thì công cụ nhận
+        # file lại dựng lại đúng cặp trùng mà người dùng vừa gộp xong.
+        .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None))
         .order_by(BusinessCard.uploaded_at, BusinessCard.id)
     )
     if card_status is not None:
@@ -131,7 +133,9 @@ async def count_cards(
     relationship: str | None = None,
     event_id: uuid.UUID | None = None,
 ) -> int:
-    stmt = select(func.count(BusinessCard.id)).where(BusinessCard.user_id == user_id)
+    stmt = select(func.count(BusinessCard.id)).where(
+        BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None)
+    )
     if card_status is not None:
         stmt = stmt.where(BusinessCard.status == card_status)
     if relationship is not None:
