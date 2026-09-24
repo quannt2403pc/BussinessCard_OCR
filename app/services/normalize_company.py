@@ -163,3 +163,18 @@ def _drop_suffix(tokens: list[str]) -> list[str]:
         if len(tokens) >= len(form) and tuple(tokens[len(tokens) - len(form) :]) == form:
             return tokens[: len(tokens) - len(form)]
     return tokens
+
+
+def normalize_label(text: str) -> str:
+    """Khoá chuẩn hoá cho một nhãn tự do — hiện dùng cho tên sự kiện (task `NEXT-03`).
+
+    Khác `normalize_company_name()` ở đúng một chỗ: **không gỡ hình thức pháp lý**. "Co., Ltd"
+    trong tên công ty là nhiễu, nhưng trong tên sự kiện thì mọi chữ đều là tên riêng — gỡ đi là
+    hai sự kiện khác nhau đụng nhau ở ràng buộc unique.
+
+    Ném `ValueError` khi nhãn không còn ký tự nào có nghĩa.
+    """
+    key = _normalize_text(text)
+    if not key:
+        raise ValueError(f"Nhãn rỗng sau khi chuẩn hoá: {text!r}")
+    return key

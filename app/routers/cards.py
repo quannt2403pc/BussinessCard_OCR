@@ -367,6 +367,8 @@ async def list_cards(
     language: Annotated[
         str | None, Query(description="Mã ISO 639-1: en | vi | ko | ja | zh")
     ] = None,
+    # Lọc theo sự kiện thu thập (task NEXT-03 của T; T sửa file của Q, Q review PR).
+    event_id: Annotated[uuid.UUID | None, Query(description="Sự kiện thu thập")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=card_repo.MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
 ) -> CardListOut:
@@ -388,6 +390,7 @@ async def list_cards(
         status=card_status,
         company_id=company_id,
         language=language,
+        event_id=event_id,
         page=page,
         size=size,
     )

@@ -14,7 +14,11 @@ from typing import cast
 from sqlalchemy import ColumnElement, Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.card import BusinessCard, RelationshipStatus
+from app.models.card import (
+    TERMINAL_RELATIONSHIP_STATUSES,
+    BusinessCard,
+    RelationshipStatus,
+)
 from app.models.company import Company
 from app.models.contact_note import ContactNote
 
@@ -76,14 +80,14 @@ async def due_cards(
     """Thẻ có hẹn **đến hạn hoặc quá hạn** tính tới ngày `on`, cũ nhất trước.
 
     Quá hạn đứng trước là có chủ đích: thứ trượt lịch từ tuần trước mới là thứ dễ rơi mất.
-    Thẻ đã `closed` không bao giờ vào đây — quan hệ đã dừng thì lời nhắc chỉ là nhiễu.
+    Thẻ **đã ngã ngũ** không bao giờ vào đây — quan hệ đã dừng thì lời nhắc chỉ là nhiễu.
     """
     rows = await db.execute(
         _owned(user_id)
         .where(
             BusinessCard.follow_up_at.is_not(None),
             BusinessCard.follow_up_at <= on,
-            BusinessCard.relationship_status != RelationshipStatus.CLOSED.value,
+            BusinessCard.relationship_status.not_in(TERMINAL_RELATIONSHIP_STATUSES),
         )
         .order_by(BusinessCard.follow_up_at, BusinessCard.id)
         .limit(limit)
@@ -99,7 +103,7 @@ async def due_count(db: AsyncSession, *, user_id: uuid.UUID, on: date) -> int:
             BusinessCard.user_id == user_id,
             BusinessCard.follow_up_at.is_not(None),
             BusinessCard.follow_up_at <= on,
-            BusinessCard.relationship_status != RelationshipStatus.CLOSED.value,
+            BusinessCard.relationship_status.not_in(TERMINAL_RELATIONSHIP_STATUSES),
         )
     )
     return int(total or 0)

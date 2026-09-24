@@ -29,17 +29,31 @@ class CardStatus(StrEnum):
 
 
 class RelationshipStatus(StrEnum):
-    """Vòng đời **quan hệ** với người trên thẻ (task NEXT-01).
+    """Vòng đời **quan hệ** với người trên thẻ (task NEXT-01, tách đôi kết cục ở NEXT-03).
 
-    Đúng bốn giá trị, và đây là ranh giới cố ý: thêm "cơ hội", "giá trị hợp đồng", "giai đoạn
-    phễu" là biến sản phẩm thành CRM nửa vời, thua mọi CRM thật. `closed` gộp cả *chốt* lẫn *bỏ*
-    — phân biệt hai cái đó chỉ có nghĩa khi có báo cáo chuyển đổi, tức là `NEXT-03`.
+    Ranh giới vẫn giữ: không có "cơ hội", "giá trị hợp đồng", "giai đoạn phễu" — thêm chúng là
+    biến sản phẩm thành CRM nửa vời, thua mọi CRM thật. Thứ duy nhất `NEXT-03` thêm vào là
+    **tách kết cục thành thắng và thua**, vì báo cáo theo sự kiện phải trả lời được "hội chợ này
+    có đáng tiền không", mà một trạng thái `closed` gộp cả hai thì không tính ra tỉ lệ nào cả.
+    Chuyện này đã hẹn trước ngay trong `NEXT-01`.
+
+    `CLOSED` **không bị xoá và không bị chuyển đổi**: nó giữ đúng nghĩa cũ — *đã dừng, không rõ
+    thắng hay thua*. Gán bừa những dòng ấy sang `lost` là bịa ra dữ liệu chưa ai nhập, và bịa
+    ngay vào con số mà cả báo cáo dựa lên. Giao diện không mời chọn nó nữa; báo cáo đếm riêng.
     """
 
     NEW = "new"  # vừa quét, chưa liên hệ lần nào
     CONTACTED = "contacted"  # đã gọi hoặc gửi thư, chưa có hồi âm đáng kể
     TALKING = "talking"  # đang trao đổi qua lại
-    CLOSED = "closed"  # đã chốt hoặc đã bỏ — dừng theo dõi
+    WON = "won"  # đã chốt được
+    LOST = "lost"  # không thành
+    CLOSED = "closed"  # giá trị cũ trước NEXT-03: đã dừng, không rõ kết cục
+
+
+#: Các trạng thái **đã ngã ngũ** — quan hệ dừng ở đây, không còn nhắc liên hệ lại nữa.
+TERMINAL_RELATIONSHIP_STATUSES: frozenset[str] = frozenset(
+    {RelationshipStatus.WON, RelationshipStatus.LOST, RelationshipStatus.CLOSED}
+)
 
 
 class BusinessCard(Base):
@@ -67,6 +81,10 @@ class BusinessCard(Base):
             "follow_up_at",
             postgresql_where=text("follow_up_at IS NOT NULL"),
         ),
+        # Báo cáo theo sự kiện (`NEXT-03`) hỏi đúng `WHERE user_id = ? AND event_id = ?`, và
+        # trang danh sách lọc y hệt. Không partial như index trên: thẻ **có** nhãn sự kiện mới
+        # là số đông một khi người dùng bật một sự kiện đang diễn ra.
+        Index("ix_business_cards_user_id_event_id", "user_id", "event_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -139,6 +157,15 @@ class BusinessCard(Base):
         index=True,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # --- Sự kiện thu thập (task NEXT-03 của T; T sửa file của Q, Q review PR) ---
+    #
+    # `SET NULL` chứ không `CASCADE`: xoá nhãn một hội chợ **không được** kéo theo mấy trăm tấm
+    # danh thiếp thu về từ hội chợ đó. Mất nhãn còn gắn lại được, mất thẻ thì không.
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("events.id", ondelete="SET NULL"),
+    )
 
     # --- Theo dõi quan hệ (task NEXT-01 của T; T sửa file của Q, Q review PR) ---
     #

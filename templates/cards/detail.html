@@ -658,8 +658,14 @@
     ["new", "Mới"],
     ["contacted", "Đã liên hệ"],
     ["talking", "Đang trao đổi"],
-    ["closed", "Đã chốt hoặc bỏ"],
+    ["won", "Đã chốt"],
+    ["lost", "Không thành"],
   ];
+
+  // Giá trị cũ trước NEXT-03, nghĩa là "đã dừng, không rõ kết cục". Không mời chọn nữa, nhưng
+  // thẻ nào đang mang nó thì vẫn phải hiện đúng — bỏ hẳn khỏi danh sách thì ô chọn rơi về "Mới"
+  // và lần bấm Lưu tiếp theo âm thầm ghi đè mất trạng thái người dùng đã đặt.
+  const LEGACY_STAGE = ["closed", "Đã dừng (không rõ kết cục)"];
 
   function noteRow(note) {
     const row = el("li", "rounded-md border border-slate-200 px-3 py-2 text-sm");
@@ -684,7 +690,14 @@
   }
 
   function fillFollowUp(data) {
-    $("fu-status").value = data.relationship_status;
+    const select = $("fu-status");
+    const legacy = data.relationship_status === LEGACY_STAGE[0];
+    if (legacy && !select.querySelector('option[value="closed"]')) {
+      const option = el("option", null, LEGACY_STAGE[1]);
+      option.value = LEGACY_STAGE[0];
+      select.append(option);
+    }
+    select.value = data.relationship_status;
     $("fu-date").value = data.follow_up_at || "";
     $("fu-clear").classList.toggle("hidden", !data.follow_up_at);
     $("fu-notes").replaceChildren(...data.notes.map(noteRow));
