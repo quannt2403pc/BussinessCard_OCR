@@ -250,7 +250,20 @@ business_cards
   full_name_vi, job_title_vi, company_name_vi, address_vi,   -- Việt hoá, thêm ở EX (revision 0006)
   translation_meta (jsonb),                                  -- nguồn bản dịch, ngôn ngữ/hệ chữ, cờ stale
   status (pending | needs_review | confirmed),
-  company_id (fk -> companies.id, nullable), notes, created_at, updated_at
+  company_id (fk -> companies.id, nullable), notes, created_at, updated_at,
+  relationship_status (new | contacted | talking | won | lost | closed),   -- NEXT-01, tách kết cục ở NEXT-03 (revision 0008 + 0009)
+  follow_up_at (date, nullable),                             -- ngày cần liên hệ lại; NULL = không hẹn
+  event_id (fk -> events.id, nullable, ON DELETE SET NULL)   -- sự kiện thu thập, NEXT-03 (revision 0009)
+
+contact_notes                  -- NEXT-01, thêm 2026-09-24 (revision 0008)
+  id (uuid, pk), user_id (fk -> users.id, on delete cascade),
+  card_id (fk -> business_cards.id, on delete cascade),
+  body (text), created_at (default clock_timestamp())        -- KHÔNG now(): now() là giờ bắt đầu transaction, nhiều ghi chú cùng transaction sẽ trùng mốc và mất thứ tự
+
+events                         -- NEXT-03, thêm 2026-09-24 (revision 0009)
+  id (uuid, pk), user_id (fk -> users.id, on delete cascade),
+  name, name_normalized, starts_on, ends_on (date, nullable),
+  is_active (bool), created_at
 
 companies
   user_id (fk -> users.id, NOT NULL)                       -- thêm ở D12
@@ -285,6 +298,13 @@ integration_status             -- cache trạng thái OAuth CLIProxy
 
 Index: `ivfflat` trên `kb_chunks.embedding` (cosine); GIN trên `company_profiles.industry`.
 
+Hai index **partial** thêm ở đợt `NEXT` (2026-09-24) — chỉ số hoá đúng phần dòng cần đến:
+
+| Index | Mệnh đề | Vì sao partial |
+|-------|---------|----------------|
+| `ix_business_cards_follow_up` (`user_id`, `follow_up_at`) | `WHERE follow_up_at IS NOT NULL` | Phần lớn thẻ không có hẹn; khối *Cần liên hệ hôm nay* chỉ hỏi những dòng có hẹn |
+| `ix_events_one_active` (`user_id`), UNIQUE | `WHERE is_active` | Ràng buộc **nhiều nhất một sự kiện đang diễn ra cho mỗi người**, đặt ở DB chứ không chỉ ở mã: hai dòng cùng bật thì thẻ vừa quét đóng dấu vào đâu trở thành ngẫu nhiên theo thứ tự Postgres trả về |
+
 **Đổi ràng buộc unique ở D12 — đây là chỗ dễ hỏng nhất khi lên đa người dùng.** Hai ràng buộc dưới đây
 đang là **unique toàn cục**; để nguyên thì người dùng B upload đúng tấm danh thiếp mà A đã upload sẽ bị
 hệ thống từ chối và còn **lộ ra rằng A đã có tấm thẻ đó**:
@@ -309,6 +329,8 @@ Migration `0005` phải **gán dữ liệu cũ về một tài khoản khởi t�
 | Companies | `GET /api/companies` · `GET /api/companies/{id}` · `POST /api/companies/{id}/enrich` (1 công ty) · **`POST /api/companies/enrich-batch`** (nhận `company_ids[]`, trả `job_id`) · **`GET /api/companies/enrich-jobs/{job_id}`** (tiến trình từng công ty) · `PATCH /api/companies/{id}/profile` · `GET /api/companies/{id}/contacts` | F2 |
 | Assistant | `POST /api/chat` (câu hỏi → trả lời + citations) · `GET /api/chat/{session_id}` · `POST /api/kb/reindex` | F3. *(Từ EX đợt 2, 2026-09-24: trang `/assistant` bỏ — trợ lý chỉ còn ở bong bóng chat trên mọi trang; `GET /assistant` giữ lại đúng một `301` về `/?chat=<session_id>`)* |
 | Model theo chức năng *(EX đợt 2)* | `GET /api/integration/models` · `PUT /api/integration/models` | Đọc/ghi lựa chọn model của **chính người đang đăng nhập** cho ba chức năng `ocr` / `enrich` / `chat`. `PUT` từ chối model không có trong danh mục thật của channel (I-03) hoặc không đủ năng lực cho chức năng đó (I-33). Bỏ trống = dùng `LLM_MODEL` |
+| **Theo dõi liên hệ** *(NEXT-01, 2026-09-24)* | `GET /api/contacts/due` · `GET\|PATCH /api/contacts/{card_id}` · `POST /api/contacts/{card_id}/notes` · `DELETE /api/contacts/{card_id}/notes/{note_id}` | Trạng thái quan hệ, ngày hẹn liên hệ lại, dòng thời gian ghi chú. `PATCH` phân biệt *không gửi trường* (giữ nguyên) với *gửi `null`* (xoá hẹn) |
+| **Sự kiện thu thập** *(NEXT-03, 2026-09-24)* | `GET\|POST /api/events` · `PATCH\|DELETE /api/events/{id}` · `POST /api/events/{id}/cards` · `POST /api/events/unassign` | Gắn mỗi lô quét vào một sự kiện; `GET` trả kèm báo cáo chuyển đổi từng sự kiện. Tỉ lệ chốt chia cho số **đã ngã ngũ** (`won + lost`), không chia cho tổng số thẻ |
 | Ops | `GET /health` · `GET /api/stats` (số danh thiếp, số hồ sơ, tỉ lệ cần review) | Dashboard. `GET /health` là endpoint **duy nhất không cần đăng nhập** ngoài `/auth/*` và `/static/*` — CD dùng nó làm smoke test |
 
 > **Từ D12, mọi endpoint còn lại đều đòi đăng nhập.** Chưa đăng nhập: request HTML → `303` về `/auth/login`;
