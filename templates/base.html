@@ -5,11 +5,12 @@
       {% extends "base.html" %}
       {% block title %}Danh thiếp{% endblock %}
       {% block content %} ... {% endblock %}
-  Biến `active_nav` (home | cards | companies | assistant | settings) để tô sáng mục nav đang mở.
+  Biến `active_nav` (home | cards | companies | settings) để tô sáng mục nav đang mở.
 
   Ba thay đổi của 14.7 so với bản D1, đều có lý do đo được chứ không phải gu thẩm mỹ:
 
-  1. **Nav còn 4 mục.** Bản cũ có 5 mục nav + 4 liên kết bên phải = 9 mục trên một hàng, tràn ngang
+  1. **Nav còn 4 mục** (EX-09 rút tiếp còn **3**, xem ghi chú ở `nav_items`). Bản cũ có 5 mục nav +
+     4 liên kết bên phải = 9 mục trên một hàng, tràn ngang
      ở 375px. `Trạng thái kết nối` / `API` / tên người dùng / `Đăng xuất` gom vào **một** menu
      người dùng; `Bảng số liệu` gộp vào trang chủ theo **QĐ-2** (`/dashboard` → 301 về `/`).
   2. **Tên sản phẩm là `OCR Xì Mi`**, không phải `BusinessCard OCR`. `BusinessCard_OCR` từ nay chỉ
@@ -84,10 +85,11 @@
    trượt, nên trang luôn thừa ra một dải cuộn không có gì. #}
 <body class="flex min-h-dvh flex-col bg-surface font-sans text-slate-800 antialiased">
 
+  {# Nav 3 mục từ EX-09: `Trợ lý AI` rời khỏi đây vì trang riêng đã gỡ — hỏi trợ lý nay là bong
+     bóng nổi góc phải dưới, có mặt trên **mọi** trang chứ không phải một chỗ phải đi tới. #}
   {% set nav_items = [
     ('cards',     'Danh thiếp',   '/cards',     'card'),
     ('companies', 'Doanh nghiệp', '/companies', 'building'),
-    ('assistant', 'Trợ lý AI',    '/assistant', 'sparkles'),
     ('settings',  'Cài đặt',      '/settings',  'settings')
   ] %}
 
@@ -217,9 +219,10 @@
     </div>
   </footer>
 
-  {# Bong bóng chat (14.5) — mọi trang **trừ** chính `/assistant`: hai thể hiện trợ lý trên cùng
-     một màn hình tranh nhau `sessionStorage`, mà trang riêng đã là bản đầy đủ. #}
-  {% if current_user and active_nav != 'assistant' %}
+  {# Bong bóng chat (14.5, EX-09) — **mọi** trang đã đăng nhập, không trừ trang nào: từ EX-09 đây
+     là nơi duy nhất hỏi được trợ lý. Vẫn giữ điều kiện `current_user`: bong bóng gọi `/api/chat`,
+     hiện nó cho khách là mời bấm vào một đường chắc chắn 401. #}
+  {% if current_user %}
     {% include "_assistant_widget.html" %}
   {% endif %}
 

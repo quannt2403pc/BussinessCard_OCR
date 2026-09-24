@@ -140,3 +140,34 @@
  */
 .user-menu > summary { list-style: none; cursor: pointer; }
 .user-menu > summary::-webkit-details-marker { display: none; }
+
+/* --- bong bóng chat: chế độ phóng to tại chỗ (EX-08) ---------------------
+ * Panel mặc định 380×560 đủ để hỏi nhanh, **không** đủ để đọc một câu trả lời dài kèm danh sách
+ * trích dẫn — trước EX-09 việc đó do trang `/assistant` riêng lo. Bỏ trang mà không có chế độ
+ * này là người dùng mất một tính năng chứ không phải đổi cách vào nó.
+ *
+ * `!important` ở đây là bắt buộc, cùng lý do với `[hidden]` bên trên: các lớp `sm:w-[380px]`,
+ * `sm:h-[560px]`… của Tailwind cùng độ ưu tiên mà bảng CDN nạp **sau** file này, nên không có
+ * `!important` thì lớp `.assistant-wide` thua và nút phóng to không làm gì cả.
+ *
+ * Chỉ áp dụng từ 640px: dưới ngưỡng đó panel vốn đã là tấm phủ toàn màn hình (`inset-0`).
+ */
+@media (min-width: 640px) {
+  .assistant-wide {
+    inset: auto !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    width: min(920px, 92vw) !important;
+    height: 86dvh !important;
+    max-height: 86dvh !important;
+
+    /* Kính mờ tắt hẳn ở chế độ này. `docs/ui-kit.md` cho phép nền mờ **đúng một chỗ**: panel nhỏ
+     * nổi trên nội dung. Phóng lên 920px thì nó không còn là vật nổi mà là **mặt phẳng để đọc** —
+     * nhìn thấy trên máy thật ở EX-08: nút xanh và bảng số liệu phía sau hằn xuyên qua đúng vùng
+     * chữ của câu trả lời. Đây cũng là lý do D14 đã loại phong cách Glassmorphism cho hai bảng
+     * dữ liệu dày. */
+    background-color: #fff !important;
+    backdrop-filter: none !important;
+  }
+}

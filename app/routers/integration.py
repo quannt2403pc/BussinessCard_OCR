@@ -35,7 +35,9 @@ from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.integration import IntegrationStatus
-from app.services import llm, user_credentials
+from app.repositories import model_pref as pref_repo
+from app.schemas.model_pref import FeatureModelsOut, ModelPrefsIn, ModelPrefsOut
+from app.services import llm, model_catalog, user_credentials
 from app.services.cliproxy_client import (
     CliProxyAuthError,
     CliProxyCallbackError,
@@ -257,6 +259,10 @@ async def oauth_status(
             result = await proxy.oauth_status(state)
             if result.is_done:
                 await user_credentials.claim(db, user, proxy, state)
+                # Danh mục model chỉ đọc được sau khi có credential (I-12). Vừa kết nối
+                # xong mà vẫn dùng bản nhớ cũ thì ô chọn model của EX-15 trống thêm 5 phút
+                # nữa, đúng lúc người dùng đang ở trang đó và chờ nó đầy lên.
+                model_catalog.forget_catalogue()
     except user_credentials.CredentialTakenError as exc:
         return OAuthStatusOut(
             status="error",
@@ -316,6 +322,10 @@ async def submit_oauth_callback(
             result = await proxy.oauth_status(state)
             if result.is_done:
                 await user_credentials.claim(db, user, proxy, state)
+                # Danh mục model chỉ đọc được sau khi có credential (I-12). Vừa kết nối
+                # xong mà vẫn dùng bản nhớ cũ thì ô chọn model của EX-15 trống thêm 5 phút
+                # nữa, đúng lúc người dùng đang ở trang đó và chờ nó đầy lên.
+                model_catalog.forget_catalogue()
     except CliProxyCallbackError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
     except user_credentials.CredentialTakenError as exc:
@@ -371,6 +381,7 @@ async def disconnect(
     try:
         async with CliProxyClient() as proxy:
             removed = await user_credentials.release(db, user, proxy)
+            model_catalog.forget_catalogue()
     except CliProxyUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
     except CliProxyError as exc:
@@ -387,11 +398,15 @@ async def test_connection(user: CurrentUser) -> ConnectionTestOut:
     Đây là phép thử **đầu–cuối thật**: đi qua CLIProxy, dùng credential OAuth thật, đúng model
     trong `LLM_MODEL`. Badge xanh mà nút này đỏ nghĩa là token còn nhưng model sai tên (I-03)
     hoặc tài khoản hết quota.
+
+    **Cố ý thử model mặc định, không thử model người dùng đã chọn cho từng chức năng** (`EX-15`):
+    xem `user_credentials.default_model_for()` — nút này chẩn đoán *kết nối*, và kết quả của nó
+    phải có đúng một nghĩa.
     """
     started = time.perf_counter()
     try:
         text = await llm.generate_text(
-            TEST_PROMPT, model=user_credentials.model_for(user), max_output_tokens=128
+            TEST_PROMPT, model=user_credentials.default_model_for(user), max_output_tokens=128
         )
     except llm.LLMError as exc:
         return ConnectionTestOut(
@@ -406,6 +421,97 @@ async def test_connection(user: CurrentUser) -> ConnectionTestOut:
         text=text,
         elapsed_ms=_elapsed_ms(started),
     )
+
+
+# --------------------------------------------------------------------------- model/chức năng
+
+
+#: Vì sao danh sách của mỗi chức năng dài ngắn khác nhau. Chữ hiện thẳng trên `/settings`: người
+#: dùng thấy ô *Lập hồ sơ* chỉ có 7 model trong khi ô *Trợ lý AI* có 12 thì câu hỏi đầu tiên của
+#: họ là "sao thiếu?", và câu trả lời phải nằm ngay đó chứ không nằm trong một file ADR.
+FEATURE_HINTS: dict[str, str] = {
+    "ocr": "Dùng chung cho bước Việt hoá sau khi quét. Chỉ hiện model đọc được ảnh.",
+    "enrich": "Chỉ hiện model tra cứu Internet được — không có nguồn thì hồ sơ trống.",
+    "chat": "Trợ lý chỉ trả lời từ dữ liệu của bạn nên model nào cũng dùng được.",
+}
+
+
+async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
+    """Dựng trạng thái khối chọn model. Dùng chung cho cả `GET` lẫn câu trả lời của `PUT`."""
+    catalogue = await model_catalog.catalogue()
+    choices = await pref_repo.as_dict(db, user_id)
+
+    features: list[FeatureModelsOut] = []
+    for feature in model_catalog.FEATURES:
+        available = model_catalog.allowed_for(feature, catalogue)
+        selected = choices.get(feature)
+        features.append(
+            FeatureModelsOut(
+                key=feature,
+                label=model_catalog.FEATURE_LABELS[feature],
+                hint=FEATURE_HINTS[feature],
+                selected=selected,
+                # Danh mục rỗng = không hỏi được CLIProxy, **không** phải "model đã bị gỡ". Báo
+                # đỏ lúc đó là vu oan cho lựa chọn của người dùng vì ta đang mất mạng.
+                selected_available=not selected or not available or selected in available,
+                available=available,
+            )
+        )
+    return ModelPrefsOut(
+        default_model=settings.llm_model, reachable=bool(catalogue), features=features
+    )
+
+
+@router.get("/api/integration/models", response_model=ModelPrefsOut, tags=["integration"])
+async def get_model_prefs(
+    db: Annotated[AsyncSession, Depends(get_db)], user: CurrentUser
+) -> ModelPrefsOut:
+    """Model **của chính người đang đăng nhập** cho từng chức năng, kèm danh sách chọn được."""
+    return await _model_prefs(db, user.id)
+
+
+@router.put("/api/integration/models", response_model=ModelPrefsOut, tags=["integration"])
+async def put_model_prefs(
+    payload: ModelPrefsIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
+) -> ModelPrefsOut:
+    """Đổi model cho một hoặc vài chức năng. Trường không gửi thì giữ nguyên, gửi `null` là về mặc định.
+
+    **Từ chối model không đủ năng lực cho chức năng đó**, thay vì nhận rồi để hỏng sau. Cả hai
+    đường hỏng đều im lặng (ADR mục 1): model không đọc ảnh vẫn trả JSON — chỉ toàn `"none"`; model
+    không tra cứu được vẫn trả lời — chỉ không có nguồn nào. Chỗ duy nhất báo được cho người dùng
+    bằng thứ họ hiểu là ngay lúc họ bấm lưu.
+
+    Không hỏi được danh mục thì trả **503, không lưu**: không có gì để đối chiếu thì lưu gì cũng
+    là lưu mò, mà thứ lưu mò ở đây sẽ âm thầm làm hỏng mọi lượt quét sau đó.
+    """
+    choices: dict[str, str | None] = payload.model_dump(exclude_unset=True)
+    if not choices:
+        return await _model_prefs(db, user.id)
+
+    catalogue = await model_catalog.catalogue()
+    if not catalogue:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chưa lấy được danh mục model từ CLIProxy nên chưa đổi được. Thử lại sau.",
+        )
+
+    for feature, model in choices.items():
+        if model is None:
+            continue
+        allowed = model_catalog.allowed_for(feature, catalogue)  # type: ignore[arg-type]
+        if model not in allowed:
+            label = model_catalog.FEATURE_LABELS[feature]  # type: ignore[index]
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Model “{model}” không dùng được cho {label}. Chọn trong danh sách gợi ý.",
+            )
+
+    await pref_repo.save(db, user.id, choices)
+    await db.commit()
+    logger.info("Người dùng %s đổi model: %s", user.id, choices)
+    return await _model_prefs(db, user.id)
 
 
 # --------------------------------------------------------------------------- nội bộ

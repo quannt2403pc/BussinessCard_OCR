@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.user import User
+from app.services import model_catalog
 from app.services.cliproxy_client import AuthFile, CliProxyClient, CliProxyResponseError
 from app.services.llm import LLMNotConnectedError
+from app.services.model_catalog import Feature
 
 NOT_CONNECTED = (
     "Tài khoản của bạn chưa kết nối AI — vào /settings bấm “Kết nối AI” "
@@ -32,17 +34,44 @@ def credential_prefix(user_id: uuid.UUID) -> str:
     return f"u{user_id.hex[:12]}"
 
 
-def model_for(user: User) -> str:
+def default_model_for(user: User) -> str:
+    """Tiền tố của người dùng + model **mặc định của hệ thống**, không tra lựa chọn của ai.
+
+    Chỉ dùng cho nút *Kiểm tra kết nối* (2.4). Câu hỏi nút đó trả lời là **"credential OAuth của
+    tôi có gọi được model không"**, chứ không phải "model tôi chọn cho chức năng X có chạy không":
+    người dùng có thể đặt ba model khác nhau cho ba chức năng, thử cả ba là ba lời gọi thật cho
+    một cái nút chẩn đoán. Giữ nó ở model mặc định thì kết quả luôn có một nghĩa duy nhất.
+    """
     if not user.cliproxy_auth_file:
         raise LLMNotConnectedError(NOT_CONNECTED)
     return f"{credential_prefix(user.id)}/{settings.llm_model}"
 
 
-async def model_for_user_id(db: AsyncSession, user_id: uuid.UUID) -> str:
+async def model_for(db: AsyncSession, user: User, feature: Feature) -> str:
+    """Tên model gửi cho CLIProxy: `"<tiền tố của người này>/<model của chức năng này>"`.
+
+    Hai nửa, hai nguồn khác nhau và đừng trộn lẫn:
+
+    * **tiền tố** quyết định lời gọi đi bằng *credential OAuth của ai* (12.1, ADR đa người dùng) —
+      thiếu nó thì CLIProxy xoay vòng và người A tiêu quota của người B;
+    * **tên model** quyết định *model nào* trả lời, nay chọn được riêng cho từng chức năng
+      (`EX-14`, `docs/adr-model-per-feature.md`).
+
+    Từ `EX-14` hàm này **bất đồng bộ và cần `db`**: lựa chọn model nằm trong bảng
+    `user_model_prefs`. Trước đó nó chỉ ghép `settings.llm_model` nên không cần gì cả.
+    """
+    if not user.cliproxy_auth_file:
+        raise LLMNotConnectedError(NOT_CONNECTED)
+    model = await model_catalog.resolve(db, user.id, feature)
+    return f"{credential_prefix(user.id)}/{model}"
+
+
+async def model_for_user_id(db: AsyncSession, user_id: uuid.UUID, feature: Feature) -> str:
+    """Như `model_for()` nhưng chỉ có `user_id` — dùng ở luồng nền (chat, enrich job)."""
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise LLMNotConnectedError(NOT_CONNECTED)
-    return model_for(user)
+    return await model_for(db, user, feature)
 
 
 def own_files(files: Sequence[AuthFile], user: User) -> list[AuthFile]:

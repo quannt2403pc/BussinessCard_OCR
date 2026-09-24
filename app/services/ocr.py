@@ -157,7 +157,11 @@ async def extract_card(
             extraction=extraction,
             raw_json=raw_json,
             raw_text=text,
-            model=settings.llm_model,
+            # Model **thật sự đã gọi**, không phải model mặc định của hệ thống: từ EX-14 mỗi
+            # người chọn model riêng cho từng chức năng, nên hai thứ đó khác nhau. `base_model()`
+            # cắt tiền tố credential (`u1a2b3c/…`) — nó nói lời gọi đi bằng tài khoản ai, không
+            # phải model nào, và ghi nó vào sổ là lộ một phần `user_id` ra bản ghi thẻ. (I-34)
+            model=llm.base_model(model or settings.llm_model),
             elapsed_ms=elapsed_ms,
             attempts=attempt,
         )

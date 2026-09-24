@@ -32,7 +32,7 @@ sai mà là **hai người sửa cùng một file rồi mất thời gian gỡ c
 | Hạ tầng & khởi động | `Dockerfile`, `docker-compose.yml`, `.env.example`, `app/main.py`, `app/core/`, `alembic/`, `scripts/seed.py`, `README.md` |
 | Kết nối CLIProxy & LLM | `app/services/cliproxy_client.py`, `app/services/llm.py`, `app/routers/integration.py`, `templates/settings.html`, `docs/oauth-setup.md` |
 | F1 — OCR danh thiếp | `app/services/ocr.py`, `app/services/image.py`, `app/services/normalize.py`, `app/prompts/ocr.py`, `app/routers/cards.py`, `app/repositories/card.py`, `app/models/card.py`, `app/schemas/card.py`, `templates/cards/`, `docs/accuracy.md` |
-| F3 — RAG & trợ lý AI | `app/services/embeddings.py`, `app/services/kb.py`, `app/services/retriever.py`, `app/prompts/assistant.py`, `app/routers/chat.py`, `app/routers/kb.py`, `app/repositories/kb.py`, `app/models/kb.py`, `app/models/chat.py`, `app/models/integration.py`, `templates/assistant.html` |
+| F3 — RAG & trợ lý AI | `app/services/embeddings.py`, `app/services/kb.py`, `app/services/retriever.py`, `app/prompts/assistant.py`, `app/routers/chat.py`, `app/routers/kb.py`, `app/repositories/kb.py`, `app/models/kb.py`, `app/models/chat.py`, `app/models/integration.py`, `templates/_assistant_widget.html` *(trang `assistant.html` gỡ ở EX-09)* |
 | Khung giao diện dùng chung | `templates/base.html`, `static/` |
 | Test hạ tầng & F1/F3 | `tests/conftest.py`, `tests/test_ocr*.py`, `tests/test_card*.py`, `tests/test_normalize.py`, `tests/test_rag*.py` |
 | Nhật ký bug F1/F3 | `docs/bugs-f1-f3.md` |

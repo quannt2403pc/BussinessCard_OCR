@@ -264,7 +264,9 @@ async def translate_card(
             }
             filled = {key: value for key, value in model_values.items() if value}
             meta["source"] = "llm" if len(filled) >= len(values) else "mixed"
-            meta["model"] = settings.llm_model
+            # Model thật đã gọi, không phải mặc định của hệ thống (I-34, EX-14). Cắt tiền tố
+            # credential vì `translation_meta` là dữ liệu đọc được trên giao diện.
+            meta["model"] = llm.base_model(model or settings.llm_model)
             values.update(filled)
             for key in ("source_language", "script", "name_method", "note"):
                 if cleaned := _clean(raw.get(key)):

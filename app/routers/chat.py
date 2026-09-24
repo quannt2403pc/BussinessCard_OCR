@@ -1,7 +1,7 @@
 """F3 — `POST /api/chat`, trả answer + citations.
 
 Chủ sở hữu: Q | Task: 8.2, 8.3 (lịch sử), 8.4 (trang `/assistant`), 8.5 (bộ lọc), 12.5 (tách
-theo người dùng) | xem Task.md
+theo người dùng), EX-09 (gỡ trang, chỉ còn bong bóng) | xem Task.md
 
 Router là lớp HTTP mỏng: nghiệp vụ nằm ở `services/assistant.py`, câu SQL ở
 `repositories/chat.py`. Cùng lối `cards.py` → `services/ocr.py`, và nhờ thế phần đáng test nhất
@@ -24,13 +24,12 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
-from app.core.templates import templates
 from app.models.chat import ChatRole
 from app.repositories import chat as chat_repo
 from app.schemas.chat import (
@@ -48,37 +47,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: Câu hỏi gợi ý trên trang `/assistant` (task 8.4, mục COULD của Plan.md 6).
-#:
-#: Cố ý chọn câu **không nêu tên riêng nào**: tên công ty trong KB thay đổi theo dữ liệu người
-#: dùng nhập, nên gợi ý cứng một cái tên là mời người ta bấm vào một câu chắc chắn không có đáp
-#: án. Ba câu này phủ ba kiểu truy hồi khác nhau (ngữ nghĩa, danh thiếp theo người, định danh).
-SAMPLE_QUESTIONS: tuple[str, ...] = (
-    "Công ty nào làm về logistics?",
-    "Có những ai làm ở vị trí giám đốc kinh doanh?",
-    "Danh sách công ty đã có hồ sơ và mã số thuế của họ?",
-)
-
-
 # --------------------------------------------------------------------------- trang HTML
 
 
-@router.get("/assistant", response_class=HTMLResponse, tags=["ui"])
-async def assistant_page(request: Request) -> HTMLResponse:
-    """Màn hình chat với trợ lý AI (task 8.4).
+@router.get("/assistant", tags=["ui"])
+async def assistant_page(session: Annotated[uuid.UUID | None, Query()] = None) -> RedirectResponse:
+    """`/assistant` đã gỡ — trợ lý chỉ còn ở bong bóng chat (EX-09). Chuyển **301** về trang chủ.
 
-    Trang render rỗng rồi để JavaScript gọi `POST /api/chat` — cùng lối với `/cards` (4.4) và
-    `/settings` (2.5). Ở đây lý do còn rõ hơn: hội thoại là trạng thái tích luỹ trong trình
-    duyệt, render từ server thì mỗi câu hỏi là một lần tải lại trang và mất chỗ cuộn.
+    Giữ lại đúng route này thay vì xoá thẳng, theo **QĐ-3**: `?session=<uuid>` là đường **chia sẻ
+    hội thoại** dựng ở 14.5, và `/assistant` còn nằm trong `docs/demo-runbook.md`,
+    `docs/test-scenarios.md`, `docs/api.md` cùng hai dòng gợi ý của `scripts/seed.py`. Xoá là để
+    người trình bày bấm vào một link `404` ngay giữa buổi demo.
+
+    `?session=` đổi tên thành `?chat=` vì bên nhận nay là bong bóng chứ không phải trang: tham số
+    của `base.html` đọc, không phải của route này. `_assistant_widget.html` mở panel đúng hội thoại
+    rồi **dọn tham số** — để nguyên thì mỗi lần tải lại trang chủ là một lần panel tự bật lên.
+
+    301 chứ không 302: chuyển nhà vĩnh viễn, để trình duyệt và trang đánh dấu của người dùng cập
+    nhật luôn — cùng lối `/dashboard` → `/` ở 14.6.
     """
-    return templates.TemplateResponse(
-        request,
-        "assistant.html",
-        {
-            "active_nav": "assistant",
-            "sample_questions": SAMPLE_QUESTIONS,
-        },
-    )
+    target = f"/?chat={session}" if session else "/"
+    return RedirectResponse(target, status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 # --------------------------------------------------------------------------- API

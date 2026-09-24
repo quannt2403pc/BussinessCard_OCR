@@ -145,7 +145,8 @@ nghiệp* = 0 (ngoài các hồ sơ của bộ seed).
 
 ### TS-10 — Trợ lý AI, export, dashboard (A6)
 
-1. `/assistant` → chạy **10 câu tính điểm + 3 câu ngoài phạm vi** trong `docs/qa-testset.md`, ghi kết quả theo mẫu ở
+1. Bấm **bong bóng trợ lý** (góc phải dưới, mọi trang — trang `/assistant` đã gỡ ở EX-09) → chạy **10 câu tính
+   điểm + 3 câu ngoài phạm vi** trong `docs/qa-testset.md`, ghi kết quả theo mẫu ở
    mục 8 của file đó. ⚠️ **Chạy bước này trước TS-07**, hoặc sau khi chạy `samples/demo/reset_demo.sql`: câu chặn
    **X3** (*"Mã số thuế của Vinamilk là gì?"*) chỉ là câu ngoài phạm vi khi KB **chưa** có hồ sơ Vinamilk. Sau TS-07
    thì hồ sơ đó có thật trong KB, trợ lý trả lời đúng là hành vi đúng, và câu X3 không còn kiểm được chống bịa.

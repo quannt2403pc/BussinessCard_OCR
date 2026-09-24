@@ -43,6 +43,13 @@ Xây dựng hệ thống giúp doanh nghiệp chuyển hoá danh thiếp thu th�
 - **Nút bấm kết nối OAuth với CLIProxy** trên giao diện + hiển thị trạng thái kết nối.
 - Quản lý mã nguồn bằng Git, đóng gói toàn bộ bằng Docker.
 - *(Bổ sung 2026-09-21)* **Đăng ký/đăng nhập nhiều người dùng + tách dữ liệu theo người dùng** (F4).
+- *(Bổ sung 2026-09-24, mục `EX — Đợt 2` của `Task.md`)* **Trợ lý AI chỉ còn ở dạng bong bóng chat**, hỏi được
+  từ mọi trang; ~~màn hình `/assistant` riêng~~ **bỏ** — URL cũ giữ lại một `301` để link `?session=` đã chia sẻ
+  vẫn mở đúng hội thoại.
+- *(Bổ sung 2026-09-24)* **Mỗi người dùng tự chọn model cho từng chức năng**: quét danh thiếp (kèm bước Việt hoá),
+  lập hồ sơ doanh nghiệp, trợ lý AI — ba chức năng **được dùng ba model khác nhau**, chọn ngay trên `/settings`,
+  lưu theo từng tài khoản. `LLM_MODEL` trong `.env` **hạ xuống thành giá trị mặc định** cho ai chưa chọn gì.
+  Danh sách model chọn được **lọc theo năng lực đo thật** (nhận ảnh / tra cứu Internet), không thả cả danh mục.
 - *(Bổ sung 2026-09-21)* **Triển khai công khai**: **một máy ảo Google Compute Engine** chạy đúng bộ Docker Compose hiện có,
   Caddy làm reverse proxy + HTTPS Let's Encrypt, tên miền **`ocrximi.io.vn`** (đã mua, tự quản lý DNS),
   và **CD bằng GitHub Actions**: `main` xanh CI → tự deploy → smoke test → hỏng thì quay về bản trước.
@@ -266,6 +273,11 @@ chat_sessions / chat_messages
   user_id (fk -> users.id, NOT NULL) trên chat_sessions    -- thêm ở D12
   session_id, role (user | assistant), content, citations (jsonb), created_at
 
+user_model_prefs               -- EX đợt 2, thêm 2026-09-24 (revision 0007)
+  user_id (uuid, pk, fk -> users.id, on delete cascade),
+  ocr_model, enrich_model, chat_model (text, nullable),   -- NULL = dùng LLM_MODEL của hệ thống
+  updated_at
+
 integration_status             -- cache trạng thái OAuth CLIProxy
   user_id (fk -> users.id)                                 -- thêm ở D12: trạng thái theo từng người
   provider, connected (bool), account_label, last_checked_at
@@ -295,7 +307,8 @@ Migration `0005` phải **gán dữ liệu cũ về một tài khoản khởi t�
 | Integration | `GET /api/integration/status` · `POST /api/integration/connect` · `POST /api/integration/disconnect` · `POST /api/integration/test` | Nút OAuth CLIProxy. **Từ D13: mọi endpoint chỉ thao tác trên credential của chính người đang đăng nhập** |
 | Cards | `POST /api/cards/upload` · `POST /api/cards/batch-upload` · `GET /api/cards` (filter/search/paging) · `GET /api/cards/{id}` · `PATCH /api/cards/{id}` · `POST /api/cards/{id}/confirm` · `DELETE /api/cards/{id}` · `GET /api/cards/export.csv` | F1 |
 | Companies | `GET /api/companies` · `GET /api/companies/{id}` · `POST /api/companies/{id}/enrich` (1 công ty) · **`POST /api/companies/enrich-batch`** (nhận `company_ids[]`, trả `job_id`) · **`GET /api/companies/enrich-jobs/{job_id}`** (tiến trình từng công ty) · `PATCH /api/companies/{id}/profile` · `GET /api/companies/{id}/contacts` | F2 |
-| Assistant | `POST /api/chat` (câu hỏi → trả lời + citations) · `GET /api/chat/{session_id}` · `POST /api/kb/reindex` | F3 |
+| Assistant | `POST /api/chat` (câu hỏi → trả lời + citations) · `GET /api/chat/{session_id}` · `POST /api/kb/reindex` | F3. *(Từ EX đợt 2, 2026-09-24: trang `/assistant` bỏ — trợ lý chỉ còn ở bong bóng chat trên mọi trang; `GET /assistant` giữ lại đúng một `301` về `/?chat=<session_id>`)* |
+| Model theo chức năng *(EX đợt 2)* | `GET /api/integration/models` · `PUT /api/integration/models` | Đọc/ghi lựa chọn model của **chính người đang đăng nhập** cho ba chức năng `ocr` / `enrich` / `chat`. `PUT` từ chối model không có trong danh mục thật của channel (I-03) hoặc không đủ năng lực cho chức năng đó (I-33). Bỏ trống = dùng `LLM_MODEL` |
 | Ops | `GET /health` · `GET /api/stats` (số danh thiếp, số hồ sơ, tỉ lệ cần review) | Dashboard. `GET /health` là endpoint **duy nhất không cần đăng nhập** ngoài `/auth/*` và `/static/*` — CD dùng nó làm smoke test |
 
 > **Từ D12, mọi endpoint còn lại đều đòi đăng nhập.** Chưa đăng nhập: request HTML → `303` về `/auth/login`;
@@ -439,6 +452,7 @@ Chi tiết công việc từng ngày: xem **[Task.md](./Task.md)**.
 - **Database:** PostgreSQL 16 + pgvector.
 - **AI (sinh nội dung):** Gemini Flash (vision + text) **qua CLIProxyAPI bằng OAuth** — không nhúng API key trong ứng dụng.
 - **AI (embedding):** `sentence-transformers` chạy cục bộ trong service `embedder` — CLIProxy không có endpoint embedding (mục 2.6).
+- **Chọn model (EX đợt 2, 2026-09-24):** mỗi người dùng chọn model riêng cho **quét danh thiếp** / **lập hồ sơ** / **trợ lý AI**; `LLM_MODEL` hạ xuống thành mặc định. Danh sách chọn được lọc theo **năng lực đo thật** của từng model (nhận ảnh / tra cứu Internet) — đo ở `scripts/spike_model_matrix.py`, chốt ở `docs/adr-model-per-feature.md`. Channel `antigravity` ngày 2026-09-24: **12 model**, **11** đọc được ảnh, **7** tra cứu Internet được.
 - **Frontend:** Jinja2 + HTMX + TailwindCSS (CDN) — đủ cho demo, không cần build step.
 - **Hạ tầng:** Docker, Docker Compose; **Caddy 2** làm reverse proxy + tự xin/gia hạn chứng chỉ Let's Encrypt (D13).
 - **Máy chủ (D13):** **Google Cloud Compute Engine** — 1 VM `e2-medium` (2 vCPU / 4GB), pd-balanced 50GB, region `asia-southeast1`, static external IP. Chi tiết và lý do không chọn Cloud Run: mục 10.

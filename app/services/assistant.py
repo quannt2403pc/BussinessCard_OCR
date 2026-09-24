@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.chat import ChatRole
 from app.models.kb import KBSourceType
 from app.prompts import assistant as prompt
@@ -155,9 +154,12 @@ async def answer(
         )
 
     context = prompt.build_context([context_block(hit) for hit in hits])
+    # Giữ lại tên model để **khai đúng thứ đã gọi** ở `Answer.model` bên dưới: trước EX-14 chỗ đó
+    # đọc thẳng `settings.llm_model`, mà từ EX-14 thì người dùng chọn model riêng cho trợ lý (I-34).
+    model = await user_credentials.model_for_user_id(db, user_id, "chat")
     raw = await llm.generate_text(
         prompt.build_prompt(text, context, history=history_text(history)),
-        model=await user_credentials.model_for_user_id(db, user_id),
+        model=model,
         system=prompt.SYSTEM_PROMPT,
         temperature=TEMPERATURE,
         max_output_tokens=MAX_OUTPUT_TOKENS,
@@ -176,7 +178,7 @@ async def answer(
         text=answer_text,
         citations=citations,
         context_chunks=len(hits),
-        model=settings.llm_model,
+        model=llm.base_model(model),
         elapsed_ms=_ms_since(started),
     )
 

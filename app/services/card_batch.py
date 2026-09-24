@@ -269,7 +269,7 @@ async def _scan(item: BatchItem) -> None:
         raise BatchItemError("Mục này không biết thuộc về ai.")
 
     async with SessionLocal() as db:
-        model = await user_credentials.model_for_user_id(db, item.user_id)
+        model = await user_credentials.model_for_user_id(db, item.user_id, "ocr")
     # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
     # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
     result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME, model=model)

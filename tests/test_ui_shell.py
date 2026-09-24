@@ -1,6 +1,6 @@
 """Khung giao diện dùng chung: header, bộ nhận diện, bong bóng chat, sprite icon.
 
-Chủ sở hữu: Q | Task: 14.5, 14.7, 14.10 (D14) | xem Task.md
+Chủ sở hữu: Q | Task: 14.5, 14.7, 14.10 (D14), EX-08/EX-09/EX-11 (EX đợt 2) | xem Task.md
 
 Vì sao có file này: ba thứ của D14 đều **không** có test nào chạm tới nếu không viết riêng —
 chúng nằm trong `base.html`, tức là thứ mọi test khác đi qua mà không ai khẳng định gì về nó.
@@ -8,13 +8,15 @@ Ba lỗi cụ thể mà bộ test dưới đây bắt được:
 
 1. Xoá nhầm `logo-mark-64.webp` / `favicon.ico` khi dọn `static/` → tab trình duyệt trống trơn,
    không một test nào đỏ.
-2. Gắn bong bóng chat lên **chính** trang `/assistant` → hai thể hiện trợ lý tranh nhau
-   `sessionStorage`, và lỗi chỉ lộ ra khi có người mở đúng trang đó rồi gõ câu hỏi.
+2. Gỡ trang `/assistant` (EX-09) mà quên `301`, hoặc quên kéo bộ lọc phạm vi và chế độ phóng
+   to sang bong bóng → link hội thoại đã chia sẻ hoá 404, và người dùng mất hai tính năng mà
+   không có gì thay thế. Cả ba thứ đó không một test nào khác chạm tới.
 3. Gõ sai tên icon (`icon("trashh")`) → `<use>` trỏ vào một `#id` không tồn tại, trình duyệt vẽ
    ô trống **không báo lỗi console**. Đây là lỗi im lặng đúng nghĩa.
 """
 
 import re
+import uuid
 from pathlib import Path
 
 import pytest
@@ -32,7 +34,6 @@ Q_TEMPLATES: tuple[Path, ...] = (
     TEMPLATES_DIR / "base.html",
     TEMPLATES_DIR / "_macros.html",
     TEMPLATES_DIR / "_assistant_widget.html",
-    TEMPLATES_DIR / "assistant.html",
     TEMPLATES_DIR / "settings.html",
     TEMPLATES_DIR / "error.html",
     *sorted((TEMPLATES_DIR / "cards").glob("*.html")),
@@ -84,16 +85,21 @@ async def test_ten_san_pham_khong_con_la_ten_repo(app_client, user_a: User) -> N
 # --------------------------------------------------------------------------- nav & trang chủ
 
 
-async def test_nav_con_4_muc(app_client, user_a: User) -> None:
-    """QĐ-2 của D14: `Bảng số liệu` gộp vào trang chủ, nav còn 4 mục.
+async def test_nav_con_3_muc(app_client, user_a: User) -> None:
+    """QĐ-2 của D14 gộp `Bảng số liệu` vào trang chủ; EX-09 rút tiếp `Trợ lý AI` khỏi nav.
 
-    Trước D14 nav có 5 mục + 4 liên kết bên phải = 9 mục một hàng, tràn ngang ở 375px.
+    Trước D14 nav có 5 mục + 4 liên kết bên phải = 9 mục một hàng, tràn ngang ở 375px. Trợ lý
+    rời nav vì nó không còn là một trang phải đi tới — bong bóng có mặt sẵn trên mọi trang.
+
+    Khẳng định bằng `href` chứ không bằng nhãn: chữ "Trợ lý AI" vẫn còn trên trang, nằm ở tiêu
+    đề panel bong bóng. Tìm theo nhãn là test xanh trong khi nav vẫn còn nguyên mục cũ.
     """
     async with app_client(user_a) as http:
         html = (await http.get("/cards")).text
 
-    for label in ("Danh thiếp", "Doanh nghiệp", "Trợ lý AI", "Cài đặt"):
+    for label in ("Danh thiếp", "Doanh nghiệp", "Cài đặt"):
         assert label in html
+    assert 'href="/assistant"' not in html
     assert "Bảng số liệu" not in html
     # Bốn thứ từng nằm rời trên nav nay gom vào một menu người dùng.
     assert 'aria-label="Menu tài khoản' in html
@@ -122,14 +128,48 @@ async def test_bong_bong_chat_co_tren_moi_trang(app_client, user_a: User) -> Non
             assert 'role="dialog"' in html, path
 
 
-async def test_bong_bong_chat_vang_mat_o_trang_assistant(app_client, user_a: User) -> None:
-    """Hai thể hiện trợ lý trên cùng một màn hình sẽ tranh nhau `sessionStorage` (task 14.5)."""
-    async with app_client(user_a) as http:
-        html = (await http.get("/assistant")).text
+async def test_bong_bong_giu_du_hai_thu_keo_tu_trang_cu(app_client, user_a: User) -> None:
+    """EX-08/EX-09: gỡ trang riêng mà bỏ quên hai thứ này là **cắt tính năng**, không phải dọn.
 
-    assert 'id="assistant-widget"' not in html
-    # …nhưng trang riêng vẫn phải còn nguyên: docs/demo-runbook.md và link `?session=` trỏ vào nó.
-    assert 'id="assistant-root"' in html
+    1. Bộ lọc phạm vi — trang cũ có, panel thì chưa; thiếu nó thì không còn đường hỏi "chỉ trong
+       danh thiếp".
+    2. Nút phóng to — panel 380×560 không đủ để đọc câu trả lời dài kèm danh sách trích dẫn.
+    """
+    async with app_client(user_a) as http:
+        html = (await http.get("/")).text
+
+    assert 'data-a="scope"' in html
+    assert 'value="company_profile"' in html
+    assert 'data-w="wide"' in html
+    assert 'aria-label="Phóng to"' in html
+
+
+async def test_duong_dan_assistant_cu_chuyen_huong_ve_trang_chu(app_client, user_a: User) -> None:
+    """EX-09 + QĐ-3: trang riêng đã gỡ, nhưng URL cũ **không được** thành 404.
+
+    `docs/demo-runbook.md`, `docs/test-scenarios.md`, `docs/api.md` và hai dòng gợi ý của
+    `scripts/seed.py` đều trỏ vào `/assistant` — bấm vào một link chết ngay giữa buổi demo là
+    cái giá không đáng trả cho việc xoá sạch một route.
+    """
+    async with app_client(user_a) as http:
+        response = await http.get("/assistant")
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/"
+
+
+async def test_link_chia_se_hoi_thoai_van_mo_dung_hoi_thoai(app_client, user_a: User) -> None:
+    """`?session=` là đường chia sẻ hội thoại dựng ở 14.5 — nó phải sống sót qua EX-09.
+
+    Bong bóng đọc `?chat=` rồi mở đúng phiên đó (`_assistant_widget.html`), nên chuỗi tham số
+    phải đi trọn từ URL cũ sang URL mới chứ không rơi mất ở bước chuyển hướng.
+    """
+    session_id = uuid.uuid4()
+    async with app_client(user_a) as http:
+        response = await http.get(f"/assistant?session={session_id}")
+
+    assert response.status_code == 301
+    assert response.headers["location"] == f"/?chat={session_id}"
 
 
 async def test_khach_chua_dang_nhap_khong_thay_bong_bong(app_client) -> None:
@@ -155,6 +195,17 @@ def test_moi_icon_duoc_goi_deu_co_trong_sprite() -> None:
 
     assert used, "không template nào gọi icon() — macro 14.2 chưa được dùng?"
     assert used <= available, f"icon không có trong sprite: {sorted(used - available)}"
+
+
+def test_sprite_co_du_cap_icon_cua_nut_phong_to() -> None:
+    """Nút phóng to đổi icon **bằng JS**, nên test icon ở trên không nhìn thấy hai tên này.
+
+    `_assistant_widget.html` dựng `<use href="…#i-" + name>` từ một biến, không qua macro
+    `icon()` — gõ sai tên ở đó vẫn là lỗi im lặng y hệt, chỉ khác là không regex nào bắt được.
+    """
+    sprite = (STATIC_DIR / "img" / "icons.svg").read_text(encoding="utf-8")
+    for name in ("i-expand", "i-collapse"):
+        assert f'<symbol id="{name}"' in sprite, name
 
 
 def test_file_cua_q_khong_con_mau_sky() -> None:

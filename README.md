@@ -23,7 +23,15 @@ Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác. Bản demo
    hệ thống tìm kiếm Internet + LLM tổng hợp, **mọi trường phải kèm URL nguồn**, trường không có
    nguồn thì để trống chứ không bịa.
 3. **Trợ lý AI hỏi–đáp (RAG)** (F3) — hỏi đáp trên danh thiếp + hồ sơ đã tạo, trả lời kèm trích
-   dẫn bấm được; hỏi ngoài dữ liệu thì nói không có thông tin.
+   dẫn bấm được; hỏi ngoài dữ liệu thì nói không có thông tin. Hỏi từ **bong bóng chat** ở góc
+   phải dưới, có mặt trên mọi trang.
+
+**Mỗi người tự chọn model cho từng chức năng** *(`/settings`)*: ba ô riêng cho quét danh thiếp,
+lập hồ sơ và trợ lý AI — ba chức năng chạy được bằng ba model khác nhau cùng lúc, lưu theo tài
+khoản. Để trống là dùng `LLM_MODEL` của hệ thống. Danh sách chỉ hiện model **đã đo là làm được
+việc đó**: model không đọc được ảnh và model không tra cứu được Internet đều hỏng **trong im
+lặng**, nên chúng bị chặn ngay lúc chọn. Bảng năng lực từng model:
+[`docs/adr-model-per-feature.md`](docs/adr-model-per-feature.md).
 
 ## Kiến trúc
 
@@ -151,18 +159,20 @@ quét lại được đúng những tấm ảnh đó** (hệ thống chặn trù
 |-------------|-------------|------------|
 | `/settings` báo **Chưa kết nối** dù vừa bấm OAuth xong | Cổng `51121` không được publish → Google gọi callback về hư không, token không bao giờ được lưu (I-04) | Kiểm `docker compose ps` thấy `51121` trong danh sách cổng của `cliproxy`; bấm kết nối lại |
 | Gọi model trả `403 remote management disabled` | `allow-remote: false` — CLIProxy hiểu "localhost" đúng nghĩa `127.0.0.1`, còn `api` gọi qua mạng bridge của Docker (I-01) | Đặt `allow-remote: true` trong `cliproxy/config.yaml` |
-| Gọi model trả `400 unknown provider for model …` | **Hai nguyên nhân trùng câu chữ**: chưa kết nối OAuth, hoặc `LLM_MODEL` không có trong channel | Xem badge ở `/settings`; danh sách model thật nằm ngay trên trang đó |
+| Gọi model trả `400 unknown provider for model …` | **Ba nguyên nhân trùng câu chữ**: chưa kết nối OAuth, `LLM_MODEL` không có trong channel, hoặc tiền tố credential không ai nhận (12.1) | Xem badge ở `/settings`; danh mục model thật nằm ngay trong ba ô chọn model trên trang đó |
 | Badge lúc nào cũng xanh kể cả khi chưa đăng nhập bao giờ | Dùng `get-auth-status` không kèm `state` để vẽ badge (I-02) | Nguồn sự thật cho badge là `auth-files`, không phải `get-auth-status` |
 | `cliproxy` khởi động lỗi, `config.yaml` là một **thư mục** | Bind mount kiểu file: Docker dựng đường dẫn lúc *create*, trước khi `cliproxy-init` kịp chạy | Đã sửa từ 9.1 (mount cả thư mục `./cliproxy`). Gặp lại thì xoá thư mục rỗng đó rồi `up -d` |
 | Upload lại đúng tấm ảnh cũ → **200** kèm `duplicate: true`, không quét lại | Chống trùng theo `image_hash`, cố ý không gọi lại model | Muốn quét lại thì xoá bản ghi cũ, hoặc dùng `reset_demo.sql` với bộ ảnh demo |
 | Xác nhận thẻ xong nhưng trợ lý AI không thấy | `embedder` còn đang nạp model lúc bấm Xác nhận — F3 hỏng cố ý **không** chặn F1 | Chờ `embedder` healthy rồi bấm **Index lại** ở trang Trợ lý AI (`POST /api/kb/reindex`) |
 | Trợ lý trả "không có thông tin" dù dữ liệu có trong DB | Index `ivfflat` học phân cụm từ dữ liệu *lúc tạo index*; nạp dữ liệu sau khi tạo index thì centroid vô nghĩa (I-22) | `scripts/seed.py` đã tự `REINDEX`; nạp tay thì gọi `POST /api/kb/reindex` |
 | Câu hỏi tiếng Việt **gõ không dấu** không ra gì | Hạn chế đã biết (I-23 / B-10), chưa xử lý | Gõ có dấu |
-| Model trả `429 cooldown` | Tài khoản Google bị giới hạn tạm thời | Đổi `LLM_MODEL` sang model khác ở `/settings`, hoặc chờ |
+| Model trả `429 cooldown` | Tài khoản Google bị giới hạn tạm thời | Đổi sang model khác ở khối **Model cho từng chức năng** trên `/settings` — không cần sửa `.env` (EX-15) |
 | `alembic` báo nhiều head | Hai người cùng sinh revision | **Chỉ Q sinh Alembic revision**; CI có job bắt lỗi này |
 | Mọi trang đều nhảy về `/auth/login`, API trả `401` | Đúng như thiết kế từ D12: chưa đăng nhập thì chỉ `/auth/*` và `/health` mở | Đăng ký một tài khoản (xem *Tạo tài khoản*). Cả `/docs` cũng cần đăng nhập |
 | Container `api` chết ngay khi khởi động, log báo `No module named 'argon2'` | Image cũ, dựng trước khi D12 thêm `argon2-cffi` + `itsdangerous` vào `requirements.txt` | `docker compose build api && docker compose up -d api` |
 | Mọi lệnh ghi báo `null value in column "user_id" … violates not-null constraint` | DB đã lên revision `0005` nhưng mã ứng dụng còn cũ hơn nó | `git pull` rồi `docker compose up -d api`; phần ORM khớp `0005` có từ task 12.5 |
+| Ô chọn model trống, báo *"Chưa lấy được danh mục model"* | Danh mục chỉ đọc được **sau khi** có credential OAuth (I-12) | Kết nối AI trước, rồi bấm **Làm mới** |
+| Model đã chọn hiện *"(không dùng được)"* | Channel đã gỡ model đó khỏi danh mục, hoặc một lượt đo mới loại nó | Hệ thống **tự dùng model mặc định**, không hỏng gì; chọn lại một model trong danh sách khi tiện |
 | Đăng nhập được nhưng không thấy dữ liệu đã quét trước D12 | Dữ liệu cũ thuộc tài khoản khởi tạo `owner@bizcard.local` (migration `0005`), không phải tài khoản mới của bạn | Xem *Tạo tài khoản* ở trên |
 | Script Python chết ngay dòng in đầu tiên trên Windows | stdout về `cp1252` khi không phải console, chữ Việt/Nhật không mã hoá được (B-01) | Đặt `PYTHONIOENCODING=utf-8`, hoặc chạy trong container |
 | Sau `docker compose down -v` mọi thứ trống trơn | `-v` xoá cả `pgdata`, `uploads` **và** `cliproxy_auths` | Kết nối lại OAuth rồi `python -m scripts.seed` |
