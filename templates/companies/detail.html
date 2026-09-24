@@ -645,6 +645,11 @@
     const contact = el("td", "px-4 py-2");
     contact.append(el("div", "text-slate-800", card.email || "—"));
     contact.append(el("div", "text-xs text-slate-500", card.phone || "—"));
+    // NEXT-02: lấy đúng một liên hệ về danh bạ, không phải tải cả lô rồi tự lọc.
+    const vcard = el("a", "link text-xs text-brand-700 hover:underline", "Lưu vào danh bạ");
+    vcard.href = `/api/export/cards/${card.id}.vcf`;
+    vcard.setAttribute("download", "");
+    contact.append(vcard);
     tr.append(contact);
 
     const state = el("td", "px-4 py-2");

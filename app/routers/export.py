@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from app.repositories import company as company_repo
 from app.schemas.export import (
     CSV_BOM,
     EXPORT_BATCH_SIZE,
+    VCARD_MEDIA_TYPE,
     CardExportRow,
     CardsExportOut,
     CompaniesExportOut,
@@ -42,14 +43,18 @@ def _cards_select(user_id: uuid.UUID, card_status: str | None) -> Select[Any]:
         select(
             BusinessCard.id,
             BusinessCard.full_name,
+            BusinessCard.full_name_vi,
             BusinessCard.job_title,
+            BusinessCard.job_title_vi,
             BusinessCard.company_name_raw,
+            BusinessCard.company_name_vi,
             Company.display_name.label("company_name"),
             BusinessCard.company_id,
             BusinessCard.email,
             BusinessCard.phone,
             BusinessCard.phone_alt,
             BusinessCard.address,
+            BusinessCard.address_vi,
             BusinessCard.website,
             BusinessCard.language_detected,
             BusinessCard.status,
@@ -124,6 +129,19 @@ async def iter_cards(
         cursor = (rows[-1].uploaded_at, rows[-1].id)
 
 
+async def one_card(db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID) -> CardExportRow:
+    """Một danh thiếp **của đúng người này**, dựng qua cùng câu `SELECT` với bản xuất cả lô.
+
+    Dùng lại `_cards_select()` chứ không `card_repo.get()`: chỉ câu này mới `JOIN` sẵn tên công ty,
+    và đi chung một đường thì bản xuất một liên hệ không bao giờ lệch nội dung với bản xuất cả lô.
+    """
+    stmt = _cards_select(user_id, None).where(BusinessCard.id == card_id)
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+    return CardExportRow.model_validate(row)
+
+
 async def iter_companies(db: AsyncSession, user_id: uuid.UUID) -> AsyncIterator[CompanyExportRow]:
     cursor: tuple[str, uuid.UUID] | None = None
     while True:
@@ -136,6 +154,11 @@ async def iter_companies(db: AsyncSession, user_id: uuid.UUID) -> AsyncIterator[
         for row in rows:
             yield CompanyExportRow.model_validate(row)
         cursor = (rows[-1].display_name, rows[-1].company_id)
+
+
+async def _vcard_body(rows: AsyncIterator[CardExportRow]) -> AsyncIterator[str]:
+    async for row in rows:
+        yield row.vcard()
 
 
 def _drain(buffer: io.StringIO) -> str:
@@ -214,6 +237,40 @@ async def export_cards_json(
 
     return StreamingResponse(
         body(), media_type="application/json", headers=_headers("cards", "json")
+    )
+
+
+@router.get("/cards.vcf")
+async def export_cards_vcf(
+    user: CurrentUser, card_status: CardStatusQuery = None
+) -> StreamingResponse:
+    """Cả lô danh thiếp dưới dạng vCard 3.0 — thả thẳng vào danh bạ điện thoại hoặc Outlook.
+
+    Không BOM, khác `cards.csv`: BOM là mẹo cho Excel đọc UTF-8, còn trình đọc vCard thì coi nó
+    là rác ngay ở dòng `BEGIN:VCARD` đầu tiên.
+    """
+    selected = _validated_status(card_status)
+    user_id = user.id
+
+    async def body() -> AsyncIterator[str]:
+        async with SessionLocal() as db:
+            async for chunk in _vcard_body(iter_cards(db, user_id, selected)):
+                yield chunk
+
+    return StreamingResponse(
+        body(), media_type=VCARD_MEDIA_TYPE, headers=_headers("danh-thiep", "vcf")
+    )
+
+
+@router.get("/cards/{card_id}.vcf")
+async def export_card_vcf(card_id: uuid.UUID, user: CurrentUser) -> Response:
+    """Một danh thiếp dưới dạng vCard. Thẻ của người khác trả **404**, không phải 403."""
+    async with SessionLocal() as db:
+        row = await one_card(db, user.id, card_id)
+    return Response(
+        row.vcard(),
+        media_type=VCARD_MEDIA_TYPE,
+        headers=_headers(f"danh-thiep-{card_id.hex[:8]}", "vcf"),
     )
 
 
