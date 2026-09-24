@@ -133,7 +133,7 @@ async def test_patch_rejects_unknown_stage(
     app_client: ClientFactory, user_a: User, card: BusinessCard
 ) -> None:
     async with app_client(user_a) as http:
-        res = await http.patch(f"/api/contacts/{card.id}", json={"relationship_status": "won"})
+        res = await http.patch(f"/api/contacts/{card.id}", json={"relationship_status": "co-le"})
     assert res.status_code == 422
 
 

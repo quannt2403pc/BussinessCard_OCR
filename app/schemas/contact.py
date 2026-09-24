@@ -16,7 +16,11 @@ RELATIONSHIP_LABELS: dict[RelationshipStatus, str] = {
     RelationshipStatus.NEW: "Mới",
     RelationshipStatus.CONTACTED: "Đã liên hệ",
     RelationshipStatus.TALKING: "Đang trao đổi",
-    RelationshipStatus.CLOSED: "Đã chốt hoặc bỏ",
+    RelationshipStatus.WON: "Đã chốt",
+    RelationshipStatus.LOST: "Không thành",
+    # Giá trị cũ trước `NEXT-03`. Giao diện không mời chọn nó nữa, nhưng vẫn phải có nhãn: thẻ
+    # đánh dấu từ hôm qua mà hiện ra chuỗi `closed` trần thì người dùng tưởng hỏng.
+    RelationshipStatus.CLOSED: "Đã dừng (không rõ kết cục)",
 }
 
 

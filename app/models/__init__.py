@@ -16,6 +16,7 @@ from app.models import company  # noqa: F401  — model của T, nạp `companie
 from app.models.card import BusinessCard, CardStatus
 from app.models.chat import ChatMessage, ChatRole, ChatSession
 from app.models.contact_note import ContactNote
+from app.models.event import Event
 from app.models.integration import IntegrationStatus
 from app.models.kb import KBChunk, KBSourceType
 from app.models.model_pref import UserModelPref
@@ -28,6 +29,7 @@ __all__ = [
     "ChatRole",
     "ChatSession",
     "ContactNote",
+    "Event",
     "IntegrationStatus",
     "KBChunk",
     "KBSourceType",

@@ -57,6 +57,7 @@ class CardExportRow(ExportRow):
     status: CardStatus
     relationship_status: RelationshipStatus = RelationshipStatus.NEW
     follow_up_at: date | None = None
+    event_name: str | None = None
     notes: str | None = None
     uploaded_at: datetime
     updated_at: datetime

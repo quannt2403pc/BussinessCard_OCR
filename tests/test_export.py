@@ -137,7 +137,7 @@ async def test_cards_filter_by_relationship(
 
 
 async def test_cards_reject_unknown_relationship(owner: User, client: httpx.AsyncClient) -> None:
-    response = await client.get("/api/export/cards.csv?relationship=won")
+    response = await client.get("/api/export/cards.csv?relationship=co-le")
 
     assert response.status_code == 400
 
