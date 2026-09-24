@@ -186,14 +186,22 @@
      role="status" aria-live="polite"></div>
 </section>
 
+{# Khối chọn model theo từng chức năng (EX-15). Thay cho danh sách "Model khả dụng của channel"
+   chỉ đọc trước đây: danh mục vẫn hiện đầy đủ, nhưng nay hiện **trong đúng ô người dùng chọn**,
+   và đã lọc theo năng lực đo được ở EX-12 — xem `docs/adr-model-per-feature.md`. #}
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-  <h2 class="text-base font-semibold text-slate-900">Model khả dụng của channel</h2>
+  <h2 class="text-base font-semibold text-slate-900">Model cho từng chức năng</h2>
   <p class="mt-1 text-sm text-slate-500">
-    Danh mục lấy trực tiếp từ CLIProxy. Nếu <code class="rounded bg-slate-100 px-1">LLM_MODEL</code>
-    không nằm trong danh sách này thì mọi lời gọi sẽ trượt — sửa trong
-    <code class="rounded bg-slate-100 px-1">.env</code>.
+    Mỗi chức năng dùng một model riêng, lưu theo tài khoản của bạn. Để trống là dùng mặc định
+    của hệ thống (<code id="default-model" class="rounded bg-slate-100 px-1">{{ model }}</code>).
+    Danh sách chỉ hiện model <strong>đã đo là làm được việc đó</strong>.
   </p>
-  <ul id="model-list" class="mt-3 flex flex-wrap gap-2 text-xs text-slate-600"></ul>
+
+  <div id="model-fields" class="mt-4 grid gap-4 sm:grid-cols-3">
+    <p class="text-sm text-muted">Đang tải…</p>
+  </div>
+
+  <div id="model-message" class="hidden" role="status" aria-live="polite"></div>
 </section>
 
 <details class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
@@ -225,7 +233,8 @@
   const accountBox = el("account-box");
   const accountLabel = el("account-label");
   const statusDetail = el("status-detail");
-  const modelList = el("model-list");
+  const modelFields = el("model-fields");
+  const modelMessage = el("model-message");
   const message = el("message");
   const btnConnect = el("btn-connect");
   const btnTest = el("btn-test");
@@ -312,26 +321,107 @@
     return body;
   }
 
-  function renderModels(models, model, available) {
-    modelList.innerHTML = "";
-    if (!models || models.length === 0) {
-      const li = document.createElement("li");
-      li.className = "text-muted";
-      li.textContent = "Chưa lấy được danh mục (CLIProxy chưa chạy?).";
-      modelList.appendChild(li);
+  // --- model theo từng chức năng (EX-15) -----------------------------------
+
+  /** Một ô chọn. Lưu **ngay khi đổi**, không có nút Lưu: ba ô, mỗi ô một lời gọi PUT rẻ, mà thêm
+   *  nút Lưu là thêm một trạng thái "đã chọn nhưng chưa lưu" để người dùng tự bỏ quên. */
+  function modelField(feature) {
+    const wrap = document.createElement("div");
+
+    const label = document.createElement("label");
+    label.className = "block text-sm font-medium text-slate-700";
+    label.htmlFor = "model-" + feature.key;
+    label.textContent = feature.label;
+    wrap.appendChild(label);
+
+    const select = document.createElement("select");
+    select.id = "model-" + feature.key;
+    select.dataset.feature = feature.key;
+    select.className = "mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm " +
+      "text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 " +
+      "focus-visible:outline-brand-600 disabled:bg-slate-50 disabled:text-slate-400";
+
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = "Mặc định của hệ thống";
+    select.appendChild(fallback);
+
+    for (const id of feature.available) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      select.appendChild(option);
+    }
+
+    // Model đã lưu nay không còn trong danh sách: vẫn phải hiện ra, nếu không thì ô nhảy về
+    // "Mặc định" và người dùng tưởng mình chưa từng chọn gì.
+    if (feature.selected && !feature.available.includes(feature.selected)) {
+      const orphan = document.createElement("option");
+      orphan.value = feature.selected;
+      orphan.textContent = feature.selected + " (không dùng được)";
+      select.appendChild(orphan);
+    }
+    select.value = feature.selected || "";
+    select.addEventListener("change", () => saveModel(select));
+    wrap.appendChild(select);
+
+    const hint = document.createElement("p");
+    hint.className = "mt-1 text-xs text-muted";
+    hint.textContent = feature.hint;
+    wrap.appendChild(hint);
+
+    if (feature.selected && !feature.selected_available) {
+      const warn = document.createElement("p");
+      warn.className = "mt-1 text-xs text-amber-700";
+      warn.textContent = "Model này không còn dùng được — hệ thống đang dùng mặc định.";
+      wrap.appendChild(warn);
+    }
+    return wrap;
+  }
+
+  function renderModelPrefs(data) {
+    modelFields.replaceChildren();
+    el("default-model").textContent = data.default_model;
+
+    if (!data.reachable) {
+      const note = document.createElement("p");
+      note.className = "text-sm text-muted sm:col-span-3";
+      note.textContent = "Chưa lấy được danh mục model (CLIProxy chưa chạy?). Kết nối lại rồi tải lại trang.";
+      modelFields.appendChild(note);
       return;
     }
-    for (const id of models) {
-      const li = document.createElement("li");
-      const current = id === model;
-      li.className = "rounded-full px-2 py-1 " +
-        (current ? "bg-brand-100 font-medium text-brand-700" : "bg-slate-100");
-      li.textContent = current ? id + " (đang dùng)" : id;
-      modelList.appendChild(li);
+    for (const feature of data.features) modelFields.appendChild(modelField(feature));
+  }
+
+  async function saveModel(select) {
+    const feature = select.dataset.feature;
+    const chosen = select.value || null;
+    // Nhãn người đọc được, không phải khoá `ocr`/`enrich`/`chat` — luật thông báo của 14.1.
+    const label = select.previousElementSibling.textContent;
+    select.disabled = true;
+    try {
+      const data = await api("/api/integration/models", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ [feature]: chosen }),
+      });
+      renderModelPrefs(data);
+      // Hai câu khác nhau vì hai việc khác nhau: bỏ chọn **không phải** là lưu một model.
+      // Và không `toLowerCase()` cái nhãn — "Trợ lý AI" hoá "trợ lý ai" là sai chính tả tên riêng.
+      toastShow(modelMessage,
+        chosen ? "Đã lưu model cho " + label + "." : label + " dùng lại model mặc định.",
+        "success");
+    } catch (err) {
+      select.disabled = false;
+      toastShow(modelMessage, err.message, "error", () => saveModel(select));
     }
-    if (available === false) {
-      setDetail("LLM_MODEL = " + model + " không có trong danh mục của channel này. " +
-                "Sửa LLM_MODEL trong .env rồi khởi động lại `api`.");
+  }
+
+  async function refreshModelPrefs() {
+    try {
+      renderModelPrefs(await api("/api/integration/models"));
+    } catch (err) {
+      toastShow(modelMessage, err.message, "error", refreshModelPrefs);
     }
   }
 
@@ -339,7 +429,6 @@
   async function refreshStatus() {
     try {
       const data = await api("/api/integration/status");
-      renderModels(data.models, data.model, data.model_available);
 
       if (!data.reachable) {
         setBadge("unknown");
@@ -771,6 +860,9 @@
     resetDisconnectButton();
     setBadge("checking");
     refreshStatus();
+    // Vừa kết nối/ngắt xong là danh mục model đổi theo — vẽ lại luôn, đừng để người dùng phải
+    // tự đoán rằng ô chọn model cũng cần bấm gì đó.
+    refreshModelPrefs();
   });
 
   // Đóng tab giữa chừng thì phiên OAuth bên CLIProxy còn treo, nhưng nó tự hết hạn và lần bấm
@@ -778,6 +870,7 @@
   // trong khi endpoint huỷ là DELETE).
 
   refreshStatus();
+  refreshModelPrefs();
 })();
 </script>
 {% endblock %}

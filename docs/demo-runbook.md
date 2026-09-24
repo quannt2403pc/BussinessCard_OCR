@@ -14,13 +14,13 @@
 | # | Việc | Lệnh / thao tác | Kiểm |
 |---|------|-----------------|------|
 | 1 | Khởi động | `docker compose up -d` trong thư mục dự án | `http://localhost:8000/health` → `ok` |
-| 2 | Model | `.env` đặt `LLM_MODEL=gemini-3.6-flash-high` (model đã tổng duyệt, xem mục 5); đổi `.env` thì chạy `docker compose up -d api` | `/settings` hiện đúng model |
+| 2 | Model | `/settings` → khối **Model cho từng chức năng** → chọn `gemini-3.6-flash-high` cho *Quét danh thiếp* (model đã tổng duyệt, xem mục 5). **Không còn phải sửa `.env` hay khởi động lại `api`** (EX-15) | Ba ô hiện đúng model vừa chọn |
 | 3 | OAuth | `/settings` → **Kiểm tra kết nối** bằng **Gmail cá nhân** | Có câu trả lời của model |
 | 4 | Dữ liệu cho trợ lý | `docker compose exec api python -m scripts.seed` (bỏ qua nếu báo đã có) | `/companies` có *Logistics Đại Việt* |
 | 5 | Dọn lượt demo trước | `docker compose exec -T db psql -U bizcard -d bizcard < samples/demo/reset_demo.sql` | Không còn *Sữa Việt Nam*, *Hòa Phát*… trong `/companies` |
-| 6 | Mở sẵn tab | `/`, `/cards/upload`, `/companies`, `/assistant` | |
+| 6 | Mở sẵn tab | `/`, `/cards/upload`, `/companies` — trợ lý là **bong bóng góc phải dưới**, không còn tab riêng (EX-09) | |
 | 7 | Mở sẵn thư mục ảnh | `samples/demo/` trong File Explorer, cạnh trình duyệt | |
-| 8 | Chạy thử một câu | `/assistant` hỏi *"Công ty nào làm về logistics?"* | Có câu trả lời + nguồn |
+| 8 | Chạy thử một câu | Bấm **bong bóng trợ lý** góc phải dưới, hỏi *"Công ty nào làm về logistics?"* | Có câu trả lời + nguồn |
 
 ⚠️ Bước 5 bắt buộc từ lượt thứ hai trở đi: hệ thống chặn upload trùng ảnh, nên không dọn thì bước quét danh thiếp
 sẽ **không chạy lại**.
@@ -39,7 +39,7 @@ Thời gian dự kiến ghi trước; số đo thật của từng bước ở m
 | 4:20–6:50 | `/companies` | Tích *Sữa Việt Nam*, *Hòa Phát*, *Coteccons* → **Lập hồ sơ**. Trong lúc chờ: tích *日立製作所* → tạo → bấm **Huỷ** ngay | *"Mỗi công ty: tra cứu Internet, rồi chỉ giữ trường có trang nguồn chứng minh. Bấm nhầm thì huỷ được."* | Quá 3 phút: mở hồ sơ đã *✅ Xong* đầu tiên, để các công ty kia chạy tiếp |
 | 6:50–7:50 | Hồ sơ *Sữa Việt Nam* | Cuộn tới **Nguồn tham khảo** → bấm một nguồn MST → trang gốc mở ra, có đúng mã số thuế | *"Mỗi con số đều bấm ra được trang gốc. Trường không có nguồn thì để trống."* | — |
 | 7:50–8:10 | Hồ sơ *Samsung Electronics Vietnam* | Chỉ khối *"Cùng tên miền với: 삼성전자 (samsung.com)"* | *"Hai pháp nhân khác nhau cùng tập đoàn: hệ thống gợi ý, không tự gộp."* | Bỏ qua nếu thiếu giờ |
-| 8:10–9:30 | `/assistant` | Hỏi 3 câu: (1) *"Mã số thuế của Vinamilk là gì?"* → bấm thẻ nguồn; (2) *"Ai là giám đốc mua hàng ở Hòa Phát?"*; (3) *"Giá vàng hôm nay bao nhiêu?"* | *"Trả lời từ đúng hồ sơ vừa tạo, có nguồn. Câu ngoài dữ liệu thì nói không có."* | Câu (1) trượt: hỏi *"Công ty nào làm về logistics?"* (dữ liệu seed) |
+| 8:10–9:30 | Bong bóng trợ lý (bấm góc phải dưới, nút **phóng to** nếu câu trả lời dài) | Hỏi 3 câu: (1) *"Mã số thuế của Vinamilk là gì?"* → bấm thẻ nguồn; (2) *"Ai là giám đốc mua hàng ở Hòa Phát?"*; (3) *"Giá vàng hôm nay bao nhiêu?"* | *"Trả lời từ đúng hồ sơ vừa tạo, có nguồn. Câu ngoài dữ liệu thì nói không có."* | Câu (1) trượt: hỏi *"Công ty nào làm về logistics?"* (dữ liệu seed) |
 | 9:30–10:00 | `/api/export/companies.csv` | Tải file, mở Excel | *"Xuất CSV/JSON để đưa sang CRM."* | — |
 
 ## 4. Câu hỏi cho trợ lý AI

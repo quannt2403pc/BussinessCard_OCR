@@ -1,13 +1,17 @@
 /**
- * Trợ lý AI — một khối dùng lại được cho cả trang `/assistant` lẫn bong bóng chat.
+ * Trợ lý AI — logic hỏi đáp của bong bóng chat.
  *
- * Chủ sở hữu: Q | Task: 14.4 (tách module), 14.5 (chế độ compact) | xem Task.md
+ * Chủ sở hữu: Q | Task: 14.4 (tách module), 14.5 (bong bóng), EX-10 (dọn sau khi gỡ trang riêng)
+ * | xem Task.md
  *
  * Vì sao có file này: trước D14, 260 dòng JS nằm thẳng trong `templates/assistant.html` và bám
  * cứng vào `id` của trang (`$("thread")`, `$("send")`…). Bong bóng chat ở `14.5` cần đúng logic
- * đó trên **mọi trang** → giữ nguyên cách cũ là đẻ ra bản copy thứ hai của 260 dòng, và từ đó trở
- * đi mỗi lần sửa phải nhớ sửa hai chỗ. Ở đây mọi phần tử tìm theo `data-a=…` **bên trong `root`**,
- * nên nhiều thể hiện sống chung một trang được.
+ * đó trên **mọi trang** → giữ nguyên cách cũ là đẻ ra bản copy thứ hai của 260 dòng. Ở đây mọi
+ * phần tử tìm theo `data-a=…` **bên trong `root`**, nên nhiều thể hiện sống chung một trang được.
+ *
+ * `EX-10` gỡ ba tuỳ chọn chỉ trang `/assistant` mới dùng (`compact`, `syncUrl`, `onSession`):
+ * trang đã bị gỡ ở `EX-09`, giữ lại là để một nhánh mã không ai chạy qua nằm chờ hỏng trong im
+ * lặng. Panel nổi luôn cuộn **trong lòng** khung hội thoại, không còn nhánh cuộn cả cửa sổ.
  *
  * Hợp đồng với template (mọi thuộc tính đều nằm trong `root`):
  *   [data-a="form"]      <form> gửi câu hỏi            (bắt buộc)
@@ -21,11 +25,8 @@
  *   [data-sample]        nút câu hỏi gợi ý             (tuỳ, nhiều cái)
  *
  * Tuỳ chọn:
- *   compact      true → cuộn trong lòng `thread` thay vì cuộn cả trang (dùng cho panel nổi).
  *   sessionId    id phiên nạp lại lúc khởi động.
- *   storageKey   khoá `sessionStorage` để nhớ phiên qua các lần chuyển trang (bong bóng chat).
- *   syncUrl      true → *Hội thoại mới* dọn luôn `?session=` trên thanh địa chỉ (chỉ trang riêng).
- *   onSession    gọi lại mỗi khi có `session_id` mới (bong bóng dùng để cập nhật link ↗).
+ *   storageKey   khoá `sessionStorage` để nhớ phiên qua các lần chuyển trang.
  */
 (function (global) {
   "use strict";
@@ -34,7 +35,6 @@
 
   function initAssistant(root, options) {
     const opts = options || {};
-    const compact = Boolean(opts.compact);
     const scopeId = "a" + ++instances;
 
     const pick = (name) => root.querySelector('[data-a="' + name + '"]');
@@ -75,7 +75,6 @@
           /* chế độ riêng tư chặn sessionStorage — mất trí nhớ giữa các trang, không phải lỗi */
         }
       }
-      if (typeof opts.onSession === "function") opts.onSession(id);
     }
 
     /**
@@ -257,13 +256,10 @@
       return row;
     }
 
-    /** Panel nổi cuộn trong lòng nó; trang riêng cuộn cả cửa sổ. */
+    /** Panel nổi cuộn trong lòng khung hội thoại — cuộn cả cửa sổ là việc của trang, mà từ
+     *  `EX-09` thì trợ lý không còn là một trang nữa. */
     function scrollDown() {
-      if (compact) {
-        thread.scrollTop = thread.scrollHeight;
-      } else {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-      }
+      thread.scrollTop = thread.scrollHeight;
     }
 
     // --- gửi câu hỏi ---------------------------------------------------------
@@ -333,7 +329,6 @@
       answerCount = 0;
       message("");
       if (samples) samples.classList.remove("hidden");
-      if (opts.syncUrl) history.replaceState(null, "", "/assistant");
     }
 
     // --- gắn sự kiện ---------------------------------------------------------

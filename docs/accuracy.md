@@ -254,3 +254,72 @@ Ba điều đáng ghi lại:
    pháp nhân, vốn do `LEGAL_FORMS` quyết định và có test riêng trong `tests/test_translate.py`.
 4. **Địa chỉ dài chưa đo ở ca xấu**: thẻ có địa chỉ hai dòng kèm toà nhà/tầng chưa nằm trong bộ
    này. `address_vi` là cột `TEXT` nên không có rủi ro tràn, nhưng cách sắp xếp lại thì chưa đo.
+
+---
+
+# Phần D — Model theo từng chức năng (task `EX-16`)
+
+> Đo ngày **2026-09-24** · trên hệ thật trong Docker, qua đúng các API mà giao diện gọi ·
+> CLIProxy + OAuth thật · bảng năng lực từng model ở [`adr-model-per-feature.md`](./adr-model-per-feature.md)
+
+## 13. Đo cái gì
+
+Từ `EX-14`, tên model không còn là hằng số mà là kết quả của **lựa chọn của người dùng × bảng
+năng lực × danh mục thật lúc chạy**. Phần này trả lời đúng ba câu, tất cả bằng lời gọi thật:
+
+1. Ba chức năng có đi bằng **ba model khác nhau cùng lúc** không?
+2. Mỗi chỗ có **khai đúng model vừa gọi** không — hay vẫn khai model mặc định như trước (**I-34**)?
+3. Model không đủ năng lực có **bị chặn ngay lúc chọn** không?
+
+**Không** đo ở đây: chất lượng tương đối giữa các model. Mỗi phép dưới đây chạy **một lượt**, và
+một lượt thì không xếp hạng được cái gì.
+
+## 14. Kết quả — ba chức năng, ba model, cùng một thời điểm
+
+| Chức năng | Model đã chọn | Chỗ ghi lại | Khai ra | Thời gian |
+|-----------|---------------|-------------|---------|-----------|
+| Quét danh thiếp *(nút **Dịch lại**)* | `gemini-3.1-flash-lite` | `translation_meta.model` | ✅ `gemini-3.1-flash-lite` | 23,8s |
+| Quét danh thiếp *(cùng thẻ, lượt 2)* | `gemini-3.6-flash-high` | `translation_meta.model` | ✅ `gemini-3.6-flash-high` | 9,4s |
+| Lập hồ sơ doanh nghiệp | `gemini-3.7-flash-high` | `company_profiles.llm_model` | ✅ `gemini-3.7-flash-high` | ~3 phút (chạy nền) |
+| Trợ lý AI | `gemini-3.8-flash-high` | `ChatOut.model` | ✅ `gemini-3.8-flash-high` | 4,1s · 2 trích dẫn |
+
+Ba lựa chọn trên **sống cùng lúc trên một tài khoản** — đây chính là yêu cầu của chủ dự án, và là
+thứ không kiểm được bằng một biến `LLM_MODEL` duy nhất.
+
+### Đổi model ra kết quả khác thật, không chỉ khác tên
+
+Cùng một tấm thẻ tiếng Ả Rập (`محمد عبدالله العتيبي` · `أرامكو السعودية`), bấm *Dịch lại* hai lần
+với hai model:
+
+| Model | `company_name_vi` |
+|-------|-------------------|
+| `gemini-3.1-flash-lite` | Công ty Aramco Saudi |
+| `gemini-3.6-flash-high` | Công ty Saudi Aramco ← đúng |
+
+Model nhanh hơn 2,5 lần **đảo thứ tự tên riêng**. Một mẫu không kết luận được gì về chất lượng
+trung bình, nhưng nó cho thấy quyền chọn model là quyền thật, không phải nút trang trí.
+
+## 15. Chặn ở đúng chỗ chặn được
+
+| Thử gì | Kết quả |
+|--------|---------|
+| Ô *Lập hồ sơ* có hiện `claude-*` không | **Không** — 7/12 model, đúng danh sách đo được |
+| Ô *Quét danh thiếp* có hiện `gpt-oss-120b-medium` không | **Không** — 11/12 model |
+| Ô *Trợ lý AI* | **12/12** — chat không cần ảnh cũng không cần tra cứu |
+| `PUT {"enrich": "claude-sonnet-4-6"}` gọi thẳng API | **422** — *“Model `claude-sonnet-4-6` không dùng được cho Lập hồ sơ doanh nghiệp. Chọn trong danh sách gợi ý.”* |
+| Sau lần 422 đó, DB có lưu gì không | **Không** — từ chối là không lưu, không phải lưu rồi báo |
+
+Ba con số 11 / 7 / 12 đọc thẳng từ ô chọn trên `/settings` của trình duyệt thật, tức chúng đi trọn
+đường **danh mục CLIProxy → bảng năng lực → API → giao diện**, không phải đọc từ hằng số trong mã.
+
+## 16. Hạn chế đã biết của phần D
+
+1. **Mỗi phép một lượt.** Bảng ở mục 14 chứng minh *đường dây đúng*, không chứng minh model nào tốt
+   hơn. Muốn xếp hạng thì dùng `scripts/spike_profile_quality.py` và `scripts/eval_assistant.py`.
+2. **Chỉ một tấm thẻ cho phần Việt hoá**, và là thẻ tiếng Ả Rập — chọn nó vì nó nằm sẵn trong dữ
+   liệu thật, không phải vì nó đại diện cho gì.
+3. **Không đo lại A3/A5/A6 cho từng model.** Người dùng nay chọn được 11 model cho quét thẻ, mà độ
+   chính xác OCR ở phần A chỉ đo trên `gemini-3-flash`. Ai đổi model là bước ra ngoài phạm vi số
+   đo đó — mục 16 này là chỗ ghi lại điều ấy, không phải chỗ hứa sẽ đo hết.
+4. **Bảng năng lực là ảnh chụp ngày 2026-09-24.** Danh mục channel tự đổi (11 → 12 model trong 14
+   ngày); thấy tên model lạ trong ô chọn thì chạy lại `scripts/spike_model_matrix.py`.

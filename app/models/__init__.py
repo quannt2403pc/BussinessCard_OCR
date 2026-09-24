@@ -17,6 +17,7 @@ from app.models.card import BusinessCard, CardStatus
 from app.models.chat import ChatMessage, ChatRole, ChatSession
 from app.models.integration import IntegrationStatus
 from app.models.kb import KBChunk, KBSourceType
+from app.models.model_pref import UserModelPref
 from app.models.user import User
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "KBChunk",
     "KBSourceType",
     "User",
+    "UserModelPref",
     "company",
 ]

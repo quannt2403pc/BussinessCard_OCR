@@ -8,7 +8,8 @@
   Phần T bổ sung ở `14.6`: gộp nốt nội dung `dashboard.html` (tỉ lệ cần review + biểu đồ), và
   rà lại chữ theo `docs/ui-kit.md`.
 
-  Theo **QĐ-2**: `/dashboard` chuyển hướng 301 về đây, nav còn 4 mục.
+  Theo **QĐ-2**: `/dashboard` chuyển hướng 301 về đây. Nav còn **3 mục** — `EX-09` rút tiếp
+  `Trợ lý AI` ra khỏi nav vì trang riêng đã gỡ, trợ lý nay là bong bóng trên mọi trang.
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon, banner %}
@@ -59,7 +60,9 @@
 <section class="mt-8 grid gap-3 sm:grid-cols-3" aria-label="Hành động chính">
   <a href="/cards/upload" class="btn-primary justify-start px-5 py-3">{{ icon("scan") }} Quét danh thiếp</a>
   <a href="/companies" class="btn justify-start px-5 py-3">{{ icon("building") }} Lập hồ sơ</a>
-  <a href="/assistant" class="btn justify-start px-5 py-3">{{ icon("sparkles") }} Hỏi trợ lý</a>
+  {# EX-09: trang `/assistant` đã gỡ — nút này mở bong bóng tại chỗ. `<button>` chứ không `<a href>`:
+     nó không dẫn đi đâu cả, mà link giả còn bị trình duyệt prefetch và mở được ở tab mới. #}
+  <button type="button" data-open-assistant class="btn justify-start px-5 py-3">{{ icon("sparkles") }} Hỏi trợ lý</button>
 </section>
 
 {# Hàng chờ duyệt: ẩn hẳn khi không còn gì phải duyệt. Một khối rỗng nằm lại chỉ tổ nhiễu. #}

@@ -9,8 +9,8 @@ BusinessCard OCR biến danh thiếp thu được ở hội thảo thành **hồ
 2. **Tạo hồ sơ doanh nghiệp** cho những công ty bạn chọn → máy tra cứu Internet, chỉ giữ thông tin **có nguồn**.
 3. **Hỏi trợ lý AI** về danh thiếp và hồ sơ đã có → câu trả lời luôn kèm nguồn bấm được.
 
-Mở trình duyệt tại **http://localhost:8000**. Thanh trên cùng có bốn mục: *Danh thiếp*, *Doanh nghiệp*, *Trợ lý AI*,
-*Cài đặt*.
+Mở trình duyệt tại **http://localhost:8000**. Thanh trên cùng có ba mục: *Danh thiếp*, *Doanh nghiệp*, *Cài đặt*.
+Trợ lý AI không nằm trên thanh này mà là **bong bóng tròn ở góc phải dưới**, bấm được từ bất kỳ trang nào.
 
 ---
 
@@ -100,13 +100,21 @@ Các nút trên đầu trang:
 | **Huỷ tạo hồ sơ** | Hiện khi đang tạo; huỷ thì hồ sơ cũ (nếu có) giữ nguyên |
 | **Ẩn hồ sơ** | Giấu hồ sơ khỏi danh sách, ô tìm kiếm và trợ lý AI; dữ liệu vẫn giữ. Bấm **Hiện lại** trên dải thông báo để khôi phục |
 
-## 6. Hỏi trợ lý AI — *Trợ lý AI*
+## 6. Hỏi trợ lý AI — *bong bóng góc phải dưới*
 
 ![Trợ lý AI trả lời kèm nguồn](images/07-assistant.png)
 
+> ⚠️ Ảnh trên chụp **màn hình trợ lý riêng**, tức bản trước `EX-09` — nó được chụp lại ở `14.11`
+> nhưng từ nhánh mà trang đó còn tồn tại. `scripts/make_doc_screenshots.py` **đã sửa** để chụp
+> bong bóng, nên chạy lại một lệnh là ảnh khớp trở lại. Chữ dưới đây đã đúng với bản hiện tại.
+
+- Bấm **bong bóng tròn góc phải dưới** — có trên mọi trang, không phải đi tới trang riêng nào. Đóng bằng phím
+  `Esc` hoặc dấu `×`; hội thoại **không mất** khi bạn chuyển sang trang khác.
+- Bấm nút **phóng to** trên đầu panel để mở rộng ra giữa màn hình khi câu trả lời dài hoặc nhiều nguồn; bấm lần
+  nữa để thu lại. Máy nhớ lựa chọn này cho các lần sau.
 - Gõ câu hỏi tiếng Việt tự nhiên, ví dụ *"Công ty nào làm về logistics?"*, *"Ai là giám đốc mua hàng ở Hòa Phát?"*,
   *"Mã số thuế của Coteccons?"*. Có sẵn vài câu hỏi mẫu để bấm thử.
-- Chọn phạm vi: *Toàn bộ dữ liệu* / *Chỉ danh thiếp* / *Chỉ hồ sơ doanh nghiệp*.
+- Chọn phạm vi ngay dưới tiêu đề panel: *Toàn bộ dữ liệu* / *Chỉ danh thiếp* / *Chỉ hồ sơ doanh nghiệp*.
 - Mỗi câu trả lời kèm **thẻ nguồn**; bấm để mở danh thiếp hoặc hồ sơ gốc. Hỏi tiếp trong cùng hội thoại được
   (*"Số điện thoại của chị ấy?"*); bấm **Hội thoại mới** để bắt đầu lại.
 - Hỏi điều không có trong dữ liệu (*"Giá vàng hôm nay?"*) thì trợ lý trả lời **không có thông tin**, không đoán.

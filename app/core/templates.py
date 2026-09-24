@@ -47,19 +47,30 @@ def _asset_version() -> str:
 ASSET_VERSION = _asset_version()
 
 
+#: Câu hỏi gợi ý hiện trong bong bóng chat khi hội thoại còn trống.
+#:
+#: Cố ý chọn câu **không nêu tên riêng nào**: tên công ty trong KB thay đổi theo dữ liệu người
+#: dùng nhập, nên gợi ý cứng một cái tên là mời người ta bấm vào một câu chắc chắn không có đáp
+#: án. Ba câu này phủ ba kiểu truy hồi khác nhau (ngữ nghĩa, danh thiếp theo người, định danh).
+#:
+#: Nằm ở đây chứ không ở `routers/chat.py` như trước EX-09: bong bóng chat sống trong `base.html`,
+#: tức **mọi** trang render nó, kể cả trang lỗi và trang của T — không route nào truyền nổi biến
+#: cho nó. Trước EX-09 hằng số này ở `routers/chat.py` và `ui_context()` phải `import` trong thân
+#: hàm để né vòng import; gỡ trang `/assistant` xong thì chỗ đúng của nó là đây, và vòng import
+#: biến mất theo.
+SAMPLE_QUESTIONS: tuple[str, ...] = (
+    "Công ty nào làm về logistics?",
+    "Có những ai làm ở vị trí giám đốc kinh doanh?",
+    "Danh sách công ty đã có hồ sơ và mã số thuế của họ?",
+)
+
+
 def ui_context(request: Request) -> dict[str, Any]:
     """Biến dùng chung của khung giao diện: câu gợi ý cho bong bóng chat + năm ở chân trang.
 
     Bong bóng nằm trong `base.html` nên nó hiện trên **mọi** trang — kể cả trang lỗi và các trang
     của T. Không route nào truyền nổi biến cho nó, nên nguồn chữ phải nằm ở một context processor.
-
-    `import` đặt trong thân hàm chứ không ở đầu file là **cố ý**: `routers/chat.py` import ngược
-    lại chính module này, khai ở đầu file là vòng import vỡ ngay lúc khởi động. Giá phải trả là
-    một lần tra `sys.modules` mỗi lượt render — rẻ hơn nhiều so với việc chép ba câu hỏi ra chỗ
-    thứ hai rồi để hai bản lệch nhau.
     """
-    from app.routers.chat import SAMPLE_QUESTIONS
-
     # `year` tính mỗi lượt render chứ không đóng băng lúc import: tiến trình production sống
     # qua giao thừa thì chân trang phải đổi theo, không chờ ai đi restart container.
     return {

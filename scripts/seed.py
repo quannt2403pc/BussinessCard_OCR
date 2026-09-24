@@ -453,7 +453,9 @@ async def run_demo(reset: bool, *, email: str, password: str) -> int:
                 f"Đã nạp {len(seeded_cards)} danh thiếp demo → {company_count} công ty "
                 f"+ {len(profiles)} hồ sơ, đã REINDEX."
             )
-            print("Thử ngay: mở /companies rồi /assistant và hỏi 'Mã số thuế của Vinamilk là gì?'")
+            print(
+                "Thử ngay: mở /companies rồi bấm bong bóng trợ lý, hỏi 'Mã số thuế của Vinamilk là gì?'"
+            )
     finally:
         await engine.dispose()
     return 0
@@ -536,7 +538,9 @@ async def run(reset: bool, *, email: str, password: str) -> int:
                 f"Đã nạp {len(SEED_COMPANY_NAMES)} công ty + {len(SEED_CARD_EMAILS)} danh thiếp "
                 f"→ {len(corpus.documents)} nguồn / {chunks} chunk KB, đã REINDEX."
             )
-            print("Thử ngay: mở /assistant và hỏi 'Công ty nào làm về logistics?'")
+            print(
+                "Thử ngay: bấm bong bóng trợ lý góc phải dưới, hỏi 'Công ty nào làm về logistics?'"
+            )
     finally:
         await engine.dispose()
     return 0

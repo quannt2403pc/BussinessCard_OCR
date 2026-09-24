@@ -221,7 +221,7 @@ async def upload_card(
         ocr_result = await ocr.extract_and_translate(
             processed.data,
             mime_type=processed.mime_type,
-            model=user_credentials.model_for(user),
+            model=await user_credentials.model_for(db, user, "ocr"),
         )
     except (llm.LLMError, ocr.OcrError) as exc:
         ocr_error = str(exc)
@@ -505,7 +505,7 @@ async def translate_card(
         translation = await translate.translate_card(
             source,
             language=card.language_detected,
-            model=user_credentials.model_for(user),
+            model=await user_credentials.model_for(db, user, "ocr"),
             raise_on_error=True,
         )
     except llm.LLMNotConnectedError as exc:

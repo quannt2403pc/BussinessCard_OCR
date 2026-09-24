@@ -487,8 +487,11 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
 
     models: list[str] = []
 
-    async def fake_model(db: Any, user_id: uuid.UUID) -> str:
+    async def fake_model(db: Any, user_id: uuid.UUID, feature: str) -> str:
         assert user_id == OWNER_ID
+        # Luồng enrich phải xin đúng khoá `enrich` — xin nhầm `ocr` thì job chạy bằng model người
+        # dùng chọn để quét ảnh, mà model đó có thể không tra cứu được Internet (ADR mục 3).
+        assert feature == "enrich"
         return "uowner/gemini-3-flash"
 
     async def fake_enrich(name: str, hints: Any, *, model: str) -> Profile:

@@ -50,7 +50,25 @@ tên `config.yaml`, cliproxy khởi động lỗi với thông báo rất khó �
 5. Badge chuyển **“Đã kết nối”** kèm email tài khoản. Token nằm trong volume `cliproxy_auths`
    nên sống qua `docker compose restart`.
 6. Bấm **“Kiểm tra kết nối”** — gọi thật một prompt ngắn tới `LLM_MODEL`. Thành công thì trang
-   hiện nguyên văn câu trả lời của model kèm thời gian gọi.
+   hiện nguyên văn câu trả lời của model kèm thời gian gọi. Nút này **cố ý luôn thử model mặc
+   định**, kể cả khi bạn đã chọn model khác ở mục dưới: nó chẩn đoán *kết nối*, và kết quả của nó
+   phải có đúng một nghĩa.
+
+### Chọn model cho từng chức năng *(EX-15)*
+
+Ngay dưới khối kết nối, trang `/settings` có ba ô: **Quét danh thiếp** · **Lập hồ sơ doanh
+nghiệp** · **Trợ lý AI**. Chọn xong là lưu ngay, **lưu theo tài khoản của bạn** — người khác
+không bị ảnh hưởng. Để trống nghĩa là dùng `LLM_MODEL` của hệ thống.
+
+Ba điều hay bị hỏi:
+
+- **Vì sao ô *Lập hồ sơ* ít model hơn hẳn?** Chỉ 7/12 model tra cứu Internet được. Model không
+  tra cứu được vẫn trả lời trơn tru nhưng **không kèm nguồn nào**, mà hồ sơ chỉ giữ trường có
+  nguồn — chọn nhầm là hồ sơ trống. Số đo từng model ở `docs/adr-model-per-feature.md`.
+- **Việt hoá sau khi quét dùng model nào?** Dùng chung ô *Quét danh thiếp*. Nó là lượt gọi thứ hai
+  bên trong luồng quét, không phải một chức năng riêng.
+- **Model tôi chọn biến mất khỏi danh sách?** Danh mục của channel tự đổi. Hệ thống **tự dùng lại
+  model mặc định** và trang Cài đặt hiện cảnh báo vàng — lượt quét/hỏi của bạn không hỏng.
 
 Chờ quá **5 phút** thì UI tự huỷ phiên (`DELETE /api/integration/oauth-session?state=…`) và mời
 bấm lại — `state` treo vô hạn bên CLIProxy không có lợi gì.

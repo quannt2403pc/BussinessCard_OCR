@@ -1,8 +1,16 @@
 {# Bong bóng chat trợ lý AI, nổi trên mọi trang. #}
-{# Chủ sở hữu: Q | Task: 14.5 (D14) | xem Task.md, docs/ui-kit.md mục 4 (thang z-index) #}
+{# Chủ sở hữu: Q | Task: 14.5 (D14), EX-08 + EX-09 (EX đợt 2) | xem Task.md, docs/ui-kit.md mục 4 #}
 {#
-  `base.html` include file này **trừ** chính trang `/assistant` — hai thể hiện trợ lý trên cùng
-  một màn hình vừa thừa vừa tranh nhau `sessionStorage`, mà trang riêng thì đã là bản đầy đủ rồi.
+  Từ **EX-09 đây là nơi DUY NHẤT hỏi được trợ lý** — trang `/assistant` đã gỡ, `base.html` include
+  file này trên mọi trang đã đăng nhập. Hai thứ phải kéo theo từ trang cũ, nếu không thì bỏ trang
+  là bỏ luôn tính năng chứ không phải đổi chỗ vào:
+
+  1. **Chế độ phóng to tại chỗ** (`EX-08`) — panel 380×560 hỏi nhanh thì đủ, đọc một câu trả lời
+     dài kèm danh sách trích dẫn thì không. Nút `⤢` phóng panel thành `min(920px, 92vw) × 86dvh`
+     neo giữa màn hình (luật CSS ở `static/css/app.css`), nhớ lựa chọn trong `localStorage` để
+     không phải bấm lại sau mỗi lần chuyển trang.
+  2. **Bộ lọc phạm vi** (`[data-a="scope"]`) — trang cũ có sẵn, panel thì chưa. Bỏ nó đi là người
+     dùng mất đường hỏi "chỉ trong danh thiếp" mà không có gì thay thế.
 
   Mỗi lần chuyển trang là **tải lại trang** (Jinja + HTMX, không phải SPA) → panel không giữ được
   DOM. Nó nhớ hội thoại theo đúng cách duy nhất còn lại: cất `session_id` vào `sessionStorage`,
@@ -13,7 +21,8 @@
   1. `Esc` đóng panel **và trả focus về nút tròn** — không trả thì người dùng bàn phím rơi về đầu
      trang, phải Tab lại từ đầu.
   2. `role="dialog"` + `aria-modal="false"`: panel **không** bẫy focus. Tab từ trong panel đi tiếp
-     ra trang là đúng — đây là panel phụ trợ, không phải hộp thoại chặn.
+     ra trang là đúng — đây là panel phụ trợ, không phải hộp thoại chặn. Giữ nguyên cả ở chế độ
+     phóng to: panel to hơn nhưng vai trò không đổi, và bẫy focus là thứ phải tự tay gỡ được.
   3. Hiệu ứng mở/đóng tôn trọng `prefers-reduced-motion` (khai một lần ở `static/css/app.css`).
   4. Nút tròn **không được che ô đang focus** của bàn phím (WCAG 2.2 AA) → `base.html` chừa
      `scroll-padding-bottom` cho `main`.
@@ -30,8 +39,9 @@
   </button>
 
   {# --- panel ---
-     Desktop: 380×560 neo góc phải dưới. Dưới 640px: tấm phủ toàn màn hình — panel 380px trên
-     điện thoại 375px thì vừa tràn ngang vừa không còn chỗ gõ.
+     Desktop: 380×560 neo góc phải dưới, bấm `⤢` thì phóng to giữa màn hình (EX-08). Dưới 640px:
+     tấm phủ toàn màn hình — panel 380px trên điện thoại 375px thì vừa tràn ngang vừa không còn
+     chỗ gõ, và ở cỡ đó thì "phóng to" không còn nghĩa gì nên lớp `.assistant-wide` cũng tắt.
 
      `max-h` trừ 11rem = 96px lề dưới + 64px header + 16px thở. Đo ở 14.10 trên cửa sổ cao
      639px: để 8rem thì panel trèo lên che mất header, nửa cái icon tài khoản thò ra trên
@@ -45,9 +55,12 @@
       <span class="text-brand-600">{{ icon("sparkles") }}</span>
       <span class="text-sm font-semibold text-brand-ink">Trợ lý AI</span>
 
-      <a data-w="expand" href="/assistant" class="btn-icon ml-auto" aria-label="Mở trong trang riêng">
+      {# Nút phóng to: `aria-pressed` chứ không đổi thành hai nút — với trình đọc màn hình đây là
+         một công tắc hai trạng thái, và nhãn phải nói trạng thái **sắp tới** khi bấm. #}
+      <button type="button" data-w="wide" aria-pressed="false"
+              class="btn-icon ml-auto hidden sm:inline-flex" aria-label="Phóng to">
         {{ icon("expand", "sm") }}
-      </a>
+      </button>
       <button type="button" data-a="new" class="btn-icon" aria-label="Hội thoại mới">
         {{ icon("plus", "sm") }}
       </button>
@@ -55,6 +68,18 @@
         {{ icon("close", "sm") }}
       </button>
     </header>
+
+    {# Bộ lọc phạm vi, kéo từ trang `/assistant` cũ sang (EX-09). Một hàng riêng chứ không nhét
+       vào hàng tiêu đề: ở 375px thì tiêu đề + select + 3 nút 44px không đủ chỗ trên một dòng. #}
+    <div class="border-b border-slate-200 px-4 py-2">
+      <label class="sr-only" for="w-scope">Phạm vi dữ liệu</label>
+      <select id="w-scope" data-a="scope"
+              class="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-600">
+        <option value="">Toàn bộ dữ liệu</option>
+        <option value="card">Chỉ danh thiếp</option>
+        <option value="company_profile">Chỉ hồ sơ doanh nghiệp</option>
+      </select>
+    </div>
 
     <div data-a="thread" class="flex-1 space-y-4 overflow-y-auto px-4 py-4"></div>
 
@@ -91,31 +116,69 @@
     const root = document.getElementById("assistant-widget");
     const panel = root.querySelector('[data-w="panel"]');
     const toggle = root.querySelector('[data-w="toggle"]');
-    const expand = root.querySelector('[data-w="expand"]');
+    const wide = root.querySelector('[data-w="wide"]');
     const STORAGE_KEY = "assistant.session";
+    const WIDE_KEY = "assistant.wide";
 
     let api = null;
 
-    function syncExpand(id) {
-      expand.href = id ? "/assistant?session=" + encodeURIComponent(id) : "/assistant";
+    // --- chế độ phóng to (EX-08) --------------------------------------------
+    // `localStorage` chứ không `sessionStorage` như phiên chat: đây là **thói quen xem**, không
+    // phải trạng thái của một lượt hỏi. Người đã chọn panel to thì mai mở lại vẫn muốn panel to.
+    function applyWide(on) {
+      panel.classList.toggle("assistant-wide", on);
+      wide.setAttribute("aria-pressed", on ? "true" : "false");
+      wide.setAttribute("aria-label", on ? "Thu nhỏ" : "Phóng to");
+      wide.replaceChildren(icon(on ? "collapse" : "expand"));
     }
-    try { syncExpand(sessionStorage.getItem(STORAGE_KEY)); } catch (_) { /* chế độ riêng tư */ }
 
-    function open() {
+    // Sprite icon: dựng bằng createElementNS vì <svg> không phải phần tử HTML thường —
+    // createElement("svg") ra một thẻ vô hình không vẽ gì.
+    function icon(name) {
+      const NS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("class", "icon icon-sm");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      const use = document.createElementNS(NS, "use");
+      use.setAttribute("href", "{{ url_for('static', path='img/icons.svg') }}?v={{ asset_v }}#i-" + name);
+      svg.appendChild(use);
+      return svg;
+    }
+
+    function readWide() {
+      try {
+        return localStorage.getItem(WIDE_KEY) === "1";
+      } catch (_) {
+        return false; // chế độ riêng tư chặn localStorage — mất thói quen, không phải lỗi
+      }
+    }
+
+    applyWide(readWide());
+    wide.addEventListener("click", () => {
+      const on = !panel.classList.contains("assistant-wide");
+      applyWide(on);
+      try {
+        localStorage.setItem(WIDE_KEY, on ? "1" : "0");
+      } catch (_) {
+        /* bỏ qua */
+      }
+    });
+
+    // --- mở / đóng -----------------------------------------------------------
+
+    function open(sessionId) {
       panel.hidden = false;
       toggle.setAttribute("aria-expanded", "true");
       toggle.setAttribute("aria-label", "Đóng trợ lý AI");
       // Khởi tạo **lần đầu mở**, không phải lúc tải trang: trang nào cũng có bong bóng, mà phần
       // lớn lượt xem không ai mở nó — nạp lại lịch sử chat cho mọi lượt xem là tốn vô ích.
       if (!api) {
-        let saved = null;
-        try { saved = sessionStorage.getItem(STORAGE_KEY); } catch (_) { /* bỏ qua */ }
-        api = initAssistant(panel, {
-          compact: true,
-          sessionId: saved,
-          storageKey: STORAGE_KEY,
-          onSession: syncExpand,
-        });
+        let saved = sessionId || null;
+        if (!saved) {
+          try { saved = sessionStorage.getItem(STORAGE_KEY); } catch (_) { /* bỏ qua */ }
+        }
+        api = initAssistant(panel, { sessionId: saved, storageKey: STORAGE_KEY });
       }
       api.focus();
     }
@@ -135,6 +198,32 @@
         event.stopPropagation();
         close();
       }
+    });
+
+    // Bất kỳ nút nào trên trang cũng mở được trợ lý — trang chủ dùng cho ô *Hỏi trợ lý* (EX-09).
+    document.querySelectorAll("[data-open-assistant]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (panel.hidden) open();
+      });
+    });
+
+    // `/assistant?session=<id>` cũ nay `301` về `/?chat=<id>` (EX-09, QĐ-3): link hội thoại đã
+    // chia sẻ vẫn mở đúng hội thoại đó. Dọn tham số ngay sau khi dùng — để nguyên thì mỗi lần
+    // tải lại trang chủ là một lần panel tự bật lên, kể cả khi người dùng đã đóng nó.
+    //
+    // ⚠️ Phải chờ `DOMContentLoaded`, **không** chạy thẳng ở đây. `assistant.js` nạp bằng `defer`
+    // nên nó chạy SAU đoạn inline này, còn `DOMContentLoaded` thì bắn sau cả hai. Gọi sớm là
+    // `ReferenceError: initAssistant is not defined` — và lỗi rơi đúng vào giữa `open()`, tức
+    // panel đã hiện ra rồi mới chết, nên người dùng thấy một khung chat **trống** thay vì hội
+    // thoại đã chia sẻ, không kèm một lời báo lỗi nào. Đo được trên Chrome thật ở EX-11.
+    document.addEventListener("DOMContentLoaded", () => {
+      const wanted = new URLSearchParams(location.search).get("chat");
+      if (!wanted) return;
+      const url = new URL(location.href);
+      url.searchParams.delete("chat");
+      history.replaceState(null, "", url.pathname + url.search + url.hash);
+      open(wanted);
     });
   })();
 </script>

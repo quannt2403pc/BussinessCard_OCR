@@ -91,6 +91,29 @@ Gọi thử một prompt ngắn tới model. → `{ "ok": true, "model": "gemini
 ### `POST /api/integration/disconnect`
 → `{ "connected": false }`
 
+### `GET /api/integration/models` *(EX-15)*
+Model của **chính người đang đăng nhập** cho từng chức năng, kèm danh sách chọn được.
+```json
+{ "default_model": "gemini-3-flash", "reachable": true,
+  "features": [
+    { "key": "ocr", "label": "Quét danh thiếp", "hint": "…",
+      "selected": null, "selected_available": true,
+      "available": ["gemini-3-flash", "…"] }
+  ] }
+```
+`selected: null` = **dùng `LLM_MODEL`**, không phải chưa chọn. `available` là danh mục thật của
+channel đã lọc theo năng lực **đo được** của chức năng đó (`docs/adr-model-per-feature.md`):
+`ocr` 11 model · `enrich` 7 · `chat` 12.
+
+### `PUT /api/integration/models` *(EX-15)*
+Body `{"ocr": "gemini-3.6-flash-high"}` — **chức năng không nhắc tới thì giữ nguyên**, gửi `null`
+là về mặc định. Trả về đúng hình dạng của `GET`.
+
+| Mã | Khi nào |
+|----|---------|
+| `422` | Model không đủ năng lực cho chức năng đó (không đọc được ảnh / không tra cứu được Internet) — **không lưu gì cả** |
+| `503` | Chưa lấy được danh mục từ CLIProxy → không có gì để đối chiếu, nên không lưu |
+
 ---
 
 ## 3. Cards — F1 *(Q)*
@@ -249,11 +272,11 @@ CSV encode UTF-8 **có BOM** để Excel tiếng Việt/CJK không vỡ chữ.
 
 | Đường dẫn | Template | Chủ | Task |
 |-----------|----------|-----|------|
-| `/` | `base.html` | Q | 1.3 |
+| `/` | `home.html` | Q *(khung)* + T *(nội dung)* | 1.3, 14.6, 14.7 |
 | `/cards`, `/cards/upload`, `/cards/{id}`, `/cards/batch` | `templates/cards/` | Q | 4.4, 4.5, 5.1, 5.3 |
 | `/companies`, `/companies/{id}` | `templates/companies/` | T | 6.5, 6.6 |
-| `/assistant` | `assistant.html` | Q | 8.4 |
-| `/dashboard` | `dashboard.html` | T | 7.7 |
+| `/assistant` | *(đã gỡ ở EX-09)* — `301` về `/`; `?session=<uuid>` thành `/?chat=<uuid>` | Q | 8.4, EX-09 |
+| `/dashboard` | *(đã gỡ ở 14.6 theo **QĐ-2**)* — `301` về `/`, `dashboard.html` đã xoá | T | 7.7, 14.6 |
 | `/settings` | `settings.html` | Q | 2.5 |
 
 ---

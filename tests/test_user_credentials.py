@@ -128,13 +128,25 @@ def test_prefix_is_stable_and_distinct() -> None:
     assert credential_prefix(first).startswith("u")
 
 
-def test_model_for_requires_own_credential() -> None:
+def test_default_model_for_requires_own_credential() -> None:
+    """Nút *Kiểm tra kết nối* — model mặc định, **không** tra lựa chọn của người dùng (EX-14)."""
     user = User(id=uuid.uuid4(), email="x@example.com", password_hash="!")
     with pytest.raises(llm.LLMNotConnectedError):
-        model_for(user)
+        user_credentials.default_model_for(user)
     user.cliproxy_auth_file = "antigravity-x@example.com.json"
-    assert model_for(user) == f"{credential_prefix(user.id)}/{settings.llm_model}"
-    assert llm.base_model(model_for(user)) == settings.llm_model
+    name = user_credentials.default_model_for(user)
+    assert name == f"{credential_prefix(user.id)}/{settings.llm_model}"
+    assert llm.base_model(name) == settings.llm_model
+
+
+async def test_model_for_requires_own_credential(db_session: AsyncSession) -> None:
+    user = User(id=uuid.uuid4(), email="x@example.com", password_hash="!")
+    with pytest.raises(llm.LLMNotConnectedError):
+        await model_for(db_session, user, "ocr")
+    user.cliproxy_auth_file = "antigravity-x@example.com.json"
+    name = await model_for(db_session, user, "ocr")
+    assert name == f"{credential_prefix(user.id)}/{settings.llm_model}"
+    assert llm.base_model(name) == settings.llm_model
 
 
 def test_pick_new_file_prefers_the_file_this_login_wrote() -> None:
@@ -282,12 +294,13 @@ async def test_background_work_resolves_the_owner_model(
     db_session: AsyncSession, alice: User
 ) -> None:
     with pytest.raises(llm.LLMNotConnectedError):
-        await user_credentials.model_for_user_id(db_session, alice.id)
+        await user_credentials.model_for_user_id(db_session, alice.id, "chat")
     with pytest.raises(llm.LLMNotConnectedError):
-        await user_credentials.model_for_user_id(db_session, uuid.uuid4())
+        await user_credentials.model_for_user_id(db_session, uuid.uuid4(), "chat")
     alice.cliproxy_auth_file = "antigravity-alice@x.json"
     await db_session.flush()
-    assert await user_credentials.model_for_user_id(db_session, alice.id) == model_for(alice)
+    resolved = await user_credentials.model_for_user_id(db_session, alice.id, "chat")
+    assert resolved == await model_for(db_session, alice, "chat")
 
 
 async def test_prefixed_model_missing_credential_is_reported_as_not_connected(

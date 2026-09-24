@@ -1,6 +1,6 @@
 """Chụp lại 8 ảnh minh hoạ của `docs/user-guide.md` (task 14.11).
 
-Chủ sở hữu: T | Task: 14.11 | xem Task.md
+Chủ sở hữu: T | Task: 14.11, sửa ở EX-09 (Q) | xem Task.md
 
     pip install playwright && playwright install chromium     # chỉ máy dev, KHÔNG vào requirements.txt
     docker compose exec api python -m scripts.seed --demo --user anh@bizcard.local --password <mk>
@@ -42,6 +42,10 @@ class Shot:
     name: str
     path: str
     full_page: bool = False
+    #: Mở bong bóng trợ lý trước khi chụp. Từ `EX-09` trợ lý **không còn là một trang**, nên ảnh
+    #: của nó phải chụp một trang bất kỳ đang mở panel. Thiếu cờ này thì `/assistant` chỉ `301`
+    #: về `/` và ta lưu ảnh trang chủ dưới cái tên `07-assistant.png` — hỏng mà không báo gì.
+    open_assistant: bool = False
 
 
 def ids_for(db: Session, user: User) -> dict[str, str]:
@@ -74,7 +78,7 @@ def shots(ids: dict[str, str]) -> list[Shot]:
         Shot("04-cards-list.png", "/cards"),
         Shot("05-companies.png", "/companies"),
         Shot("06-company-detail.png", f"/companies/{ids['company']}", full_page=True),
-        Shot("07-assistant.png", "/assistant"),
+        Shot("07-assistant.png", "/", open_assistant=True),
         Shot("08-home.png", "/"),
     ]
 
@@ -84,6 +88,10 @@ async def capture(page: Page, base_url: str, shot: Shot, out_dir: Path) -> None:
     if response is not None and response.status >= 400:
         raise SystemExit(f"{shot.path} trả {response.status} — phiên đăng nhập hỏng?")
     await page.wait_for_timeout(SETTLE_MS)
+    if shot.open_assistant:
+        await page.click('[data-w="toggle"]')
+        await page.wait_for_selector("#assistant-panel:not([hidden])")
+        await page.wait_for_timeout(SETTLE_MS)
     target = out_dir / shot.name
     await page.screenshot(path=target, full_page=shot.full_page)
     print(f"{shot.name:<24} {shot.path:<46} {target.stat().st_size / 1024:6.1f} KB")
