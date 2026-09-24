@@ -107,7 +107,7 @@ Cập nhật trạng thái vào cuối mỗi ngày, trước buổi daily sync h
 | **EX đợt 2** | Phát sinh ngoài lịch ngày | 🔄 Đang làm — **10/10 task xong mã + kiểm chứng trong Docker (2026-09-24), chưa mở PR** | **Thêm 2026-09-24.** Chủ dự án yêu cầu hai việc: **(1) bỏ màn hình trợ lý riêng, chỉ giữ bong bóng chat**; **(2) cho người dùng tự chọn model cho từng chức năng** (quét danh thiếp / lập hồ sơ / trợ lý AI). Xếp thành **10 task `EX-08`–`EX-17`**, **toàn bộ của Q**, đếm riêng như `EX-01`–`EX-07` và `14.x` nên **mẫu số 124 không đổi**. Cộng **15,5h ≈ 2 ngày công** — nhiều hơn hẳn đợt 1 (10h), mà quỹ dự phòng **chỉ còn D15** và D13 thì chưa đóng → **QĐ-6** chốt: không lấn D15, thiếu giờ thì cắt `EX-17` → `EX-10` → phần đo thật của `EX-16`. Đo trước khi lên kế hoạch: **17 chỗ / 11 file** còn trỏ vào `/assistant`, đường ống `model=` trong mã **đã thông suốt** (chỉ phải đổi chỗ *quyết định* tên model), nhưng có **3 chỗ đang khai sai model** đã dùng và **11 model của channel chưa ai đo xem cái nào nhận ảnh** (I-33). Xem mục **EX — Đợt 2** |
 | D15 | Dự phòng | ⬜ Chưa dùng | **Ngày dự phòng duy nhất còn lại.** Giữ cho chỗ tràn của D13 (rủi ro R10): dựng VM, trỏ DNS, nghiệm thu trên domain |
 
-**Tổng quan:** 105 / 124 task (D1–D13) hoàn thành (85%) · **+10 task `EX-08`–`EX-17` (đợt 2, 2026-09-24) — cả 10 của Q, xong mã + kiểm chứng trong Docker, 🔄 chờ PR** (xem mục *EX — Đợt 2*) · **+7 task `EX-xx` ngoài lịch ngày — xong cả 7** (2026-09-22, đều của Q, PR #37 — xem mục EX) · **+12 task `14.x` của D14 — 2026-09-23: 8 ✅ (7 của Q + `14.3` của T, PR #46), 1 🔄, 1 ❌ cắt, còn `14.9`/`14.11` của T** (xem mục D14) · **7 task đang dở** (11.3, 11.5, 11.8, 13.4b, 13.6, 13.7, 13.8 — cả bảy của **Q**) · 1 task tạm dừng (7.8) · 5 task cắt (8.6, 8.10, 1.11, 3.9, 9.7) · **6 task chưa làm** · Cập nhật lần cuối: 2026-09-23 (cuối lượt D14 phần Q)
+**Tổng quan:** 105 / 124 task (D1–D13) hoàn thành (85%) · **+10 task `EX-08`–`EX-17` (đợt 2, 2026-09-24) — cả 10 của Q, xong mã + kiểm chứng trong Docker, 🔄 chờ PR** (xem mục *EX — Đợt 2*) · **+7 task `EX-xx` ngoài lịch ngày — xong cả 7** (2026-09-22, đều của Q, PR #37 — xem mục EX) · **+12 task `14.x` của D14 — 2026-09-23: 8 ✅ (7 của Q + `14.3` của T, PR #46), 1 🔄, 1 ❌ cắt, còn `14.9`/`14.11` của T** (xem mục D14) · **7 task đang dở** (11.3, 11.5, 11.8, 13.4b, 13.6, 13.7, 13.8 — cả bảy của **Q**) · **+9 đề xuất `NEXT-xx` (T, 2026-09-24) — chủ dự án duyệt làm, không cộng vào con số nào** (xem mục NEXT) · 1 task tạm dừng (7.8) · 5 task cắt (8.6, 8.10, 1.11, 3.9, 9.7) · **6 task chưa làm** · Cập nhật lần cuối: 2026-09-23 (cuối lượt D14 phần Q)
 >
 > Hai con số trên là **đếm thật các dòng task** (`✅` = 105, tổng dòng = 124), không chép tiếp con số cũ — xem ghi chú lỗi sổ sách ngay dưới đây.
 > Cộng lại khớp: 105 ✅ + 7 🔄 + 1 ⏸️ + 5 ❌ + 6 ⬜ = 124. *(Tử số **không đổi** hôm 2026-09-22 chiều dù làm xong 4 task: theo `AGENTS.md` mục 3, ✅ đòi cả ba vế — chạy trong Docker, có test, **đã merge vào `main`**. Bốn task của Q mới đủ hai vế đầu, chưa mở PR, nên để 🔄 chứ không đánh ✅ sớm.)* Bảy dòng `EX-xx` và mười hai dòng `14.x` đếm riêng, **không** cộng vào 124 — cả hai đều là yêu cầu phát sinh sau khi kế hoạch D1–D13 đã chốt, cộng vào thì mẫu số mất nghĩa.
@@ -1089,6 +1089,71 @@ Không phải task bắt buộc, chỉ là việc lấp chỗ trống để gi�
 - Tổng duyệt demo thêm 1 lượt, bấm giờ.
 - Đảm bảo `main` luôn ở trạng thái chạy được: `docker compose up -d` từ volume rỗng.
 - *(Từ D13)* Đảm bảo `https://ocrximi.io.vn` còn sống: `/health` xanh, chứng chỉ chưa hết hạn, `pgdata` có bản backup gần nhất.
+
+---
+
+## NEXT — Mở rộng sau demo (T đề xuất 2026-09-24, **chủ dự án duyệt cùng ngày**)
+
+**Câu hỏi đặt ra:** sản phẩm còn thiếu chức năng nào để thật sự dùng được trong doanh nghiệp, chứ không
+phải thêm cho vui?
+
+**Chẩn đoán, dựa trên chính mã nguồn hiện tại:** hệ thống **dừng ngay sau khi số hoá**. `CardStatus` chỉ có
+`pending / needs_review / confirmed` — đó là vòng đời **quét**, không phải vòng đời **quan hệ**. Không có
+thẻ sự kiện, không có người phụ trách, không có ngày hẹn liên hệ lại. Giá trị của một tấm danh thiếp nằm ở
+**48 giờ đầu sau hội thảo**; quét xong để đấy thì xấp danh thiếp số hoá chết y như xấp giấy, chỉ gọn gàng
+hơn. Thêm một điểm nữa: từ D12 dữ liệu thuộc **cá nhân** (tiêu chí A9), nên nhân viên nghỉ việc là công ty
+mất sạch quan hệ họ mang về.
+
+> **Vì sao đánh số `NEXT-xx`.** Chủ dự án duyệt 2026-09-24, nhưng đây là việc **sau demo**: D1–D13 đã
+> kín, D15 là ngày dự phòng duy nhất còn lại và luật ở mục D14–D15 cấm đặt trước việc vào đó. Đánh số riêng
+> như `EX-xx` thì **tử số 124 task của D1–D13 giữ nguyên ý nghĩa**, và mục này không cộng vào bất kỳ con số
+> tiến độ nào. **Chủ dự án duyệt thì mới xếp ngày và đổi trạng thái.**
+>
+> **Toàn bộ là của T** theo yêu cầu 2026-09-24; T **được Q cho phép tự sinh Alembic revision** cho
+> riêng các dòng này (2026-09-24) — ngoại lệ có ghi ngày, quy ước số 5 vẫn nguyên cho mọi việc khác.
+> `NEXT-01`, `NEXT-03`, `NEXT-04`, `NEXT-09` chạm
+> `models/card.py`, `routers/cards.py`, `templates/cards/` — **vùng của Q** — và **mọi migration vẫn phải do
+> Q sinh** (quy ước số 5, **không được nới**). Luật nới từ D12 cho phép T sửa file của Q với ba điều kiện:
+> báo ở daily trước khi chạm, **Q review PR**, không tự sinh revision.
+
+### ⚠️ Quỹ thời gian còn lại: 2026-09-24 (T5) → 2026-09-28 (T2) = **3 ngày làm việc**
+
+**Đọc kỹ trước khi bắt tay: deploy chưa xong, và deploy mới là tiêu chí nghiệm thu.** `13.4`, `13.5`,
+`13.9` (dựng VM, trỏ DNS, nghiệm thu trên domain), `13.10` (GitHub Pro) và `13.3` (**của T**, cần 2 tài
+khoản Google) đều đang ⬜. `A11` và `A12` nói `https://ocrximi.io.vn` phải sống thật; **không có tiêu chí
+nghiệm thu nào cho chức năng mới**. Tiêu 3 ngày cuối vào tính năng trong khi domain chưa lên là đổi một
+tiêu chí bắt buộc lấy một thứ tuỳ chọn — cùng lập luận đã dùng ở **QĐ-1** của D14.
+
+| Ngày | Ưu tiên 1 (bắt buộc) | Nếu còn giờ |
+|------|----------------------|-------------|
+| **T5 24/9** | `13.3` — rà 2 người dùng × 2 tài khoản Google song song; đây cũng là lần kiểm thật đầu tiên cho luồng OAuth dán URL của `13.7` | `NEXT-02` (vCard, 4h, **không cần migration**) |
+| **T6 25/9** | Bám sát `13.4`/`13.5` của Q; **chốt migration `NEXT-01` với Q ngay sáng** — không có nó thì T không làm tiếp được | `NEXT-01` phần lõi: cột trạng thái quan hệ + ngày hẹn + API |
+| **T7–CN 26–27/9** | *(nghỉ — không xếp việc)* | Nếu làm bù: `NEXT-01` phần giao diện + khối *cần liên hệ hôm nay* |
+| **T2 28/9** | `13.9` nghiệm thu trên domain + chạy lại hồi quy | `NEXT-01` hoàn tất + `NEXT-03` nếu migration đã có sẵn |
+
+**Kết luận thẳng:** trong 3 ngày này chỉ **`NEXT-02` là chắc chắn xong**, `NEXT-01` xong được **nếu Q sinh
+migration trong ngày 25/9**. Mọi dòng `NEXT` còn lại là việc của giai đoạn sau, đừng hứa trước.
+
+| # | Task | Người | Ưu tiên | Ước tính | Trạng thái |
+|---|------|-------|---------|----------|--------|
+| NEXT-01 | **Vòng đời liên hệ + nhắc theo dõi.** Mỗi liên hệ có: trạng thái quan hệ (*mới → đã liên hệ → đang trao đổi → chốt/bỏ*), người phụ trách, **ngày cần liên hệ lại**, dòng thời gian ghi chú. Trang chủ thêm khối **“cần liên hệ hôm nay”** — dùng lại đúng khuôn khối *chờ bạn duyệt* của `14.6`. Lọc + export theo trạng thái quan hệ. ⚠️ **Ranh giới phải giữ**: dừng ở 4 trạng thái + 1 ngày hẹn; thêm cơ hội / giá trị hợp đồng / phễu bán hàng là biến sản phẩm thành CRM nửa vời, thua mọi CRM thật. **Chặn bởi migration của Q** (cột mới trên `business_cards` + bảng ghi chú) | T | M | 12h | ⬜ Chưa làm — **giá trị cao nhất trên mỗi giờ bỏ ra**; xếp được vào 25–28/9 nếu có migration |
+| NEXT-02 | **Xuất vCard `.vcf`** (một liên hệ và cả lô) — thêm vào `routers/export.py` bên cạnh CSV/JSON đã có. Người dùng muốn số điện thoại nằm **trong máy ngay tại hội chợ**; CSV không làm được việc đó. Tên tiếng Việt và tên bản địa (`*_vi` của `EX`) map vào `FN` / `N` / `ORG` / `TITLE` / `EMAIL` / `TEL` / `ADR` / `URL`, UTF-8, vCard 3.0 | T | S | 4h | 🔄 Đang làm — 95%, xong và đã kiểm trong Docker, **chờ merge** (nhánh `feature-vcard-export`). `GET /api/export/cards.vcf` (cả lô, lọc được theo trạng thái) + `GET /api/export/cards/{card_id}.vcf` (một liên hệ, thẻ người khác trả **404**). vCard **3.0** chứ không 4.0 — bản mà danh bạ Android, iOS, Outlook, Google Contacts đều đọc thẳng. Ba chi tiết dễ sai đã xử lý: (1) **gập dòng theo octet** chứ không theo ký tự (RFC 2426 mục 2.6) — chữ Việt có dấu 2–3 octet, đếm theo ký tự là cắt vỡ giữa ký tự; (2) thoát `\`, `;`, `,`, xuống dòng — dấu `,` trong tên công ty không thoát là giá trị bị cắt làm hai trường; (3) **không BOM**, khác `cards.csv`: BOM là mẹo cho Excel, trình đọc vCard coi nó là rác ngay dòng `BEGIN:VCARD`. `FN` lấy **bản Việt hoá** (danh bạ tìm bằng bàn phím Latin, `김민수` không tra được) còn bản in trên thẻ xuống `NOTE` để không mất đường đối chiếu với ảnh. **Sửa kèm một lỗ hổng có sẵn**: `CardExportRow` và `_cards_select` thiếu 4 cột Việt hoá của `EX-03` → CSV/JSON xuất ra từ 2026-09-22 tới nay **mất sạch phần phiên âm**. **Thêm lối vào trên giao diện**: 4 endpoint export có từ `7.6` nhưng **không template nào trỏ tới** — nay trang chủ có khối *Xuất dữ liệu*, mỗi liên hệ trên trang công ty có *Lưu vào danh bạ*. 9 ca test mới; `pytest` **624 xanh**. Kiểm thật trong Docker trên bộ 7 thẻ demo: cả lô ra 7 vCard, một liên hệ ra đúng tệp của người đó|
+| NEXT-03 | **Gắn thẻ sự kiện + báo cáo theo sự kiện.** Mỗi lô quét gắn một thẻ (*VietnamExpo 2026*); lọc và export theo thẻ; trang chủ tách số liệu theo sự kiện. Ghép với `NEXT-01` ra **tỉ lệ chuyển đổi từng sự kiện** — đúng câu hỏi doanh nghiệp phải trả lời khi duyệt ngân sách đi hội chợ | T | S | 8h | ⬜ Chưa làm — rẻ, **demo rất ăn hình**; cần migration của Q |
+| NEXT-04 | **Gộp liên hệ trùng** theo email / số điện thoại đã chuẩn hoá: phát hiện, gợi ý, gộp tay (**không tự gộp**). Hai nhân viên gặp cùng một người là chuyện thường; trùng lặp làm hỏng mọi con số báo cáo. Học theo cách chống trùng công ty ở `3.8` | T | S | 8h | ⬜ Chưa làm — `8.10` (gộp công ty tay) từng bị cắt ở D8; đây là bản cho **liên hệ**, nơi trùng lặp gây đau thật |
+| NEXT-05 | **Dữ liệu thuộc tổ chức, không thuộc cá nhân.** Không gian làm việc + vai trò (quản trị / thành viên / chỉ xem) + người phụ trách + chuyển giao khi nhân viên nghỉ. ⚠️ **Đổi kiến trúc, không phải thêm màn hình**: **đảo ngược tiêu chí A9**, cần migration `user_id` → `workspace_id` + bảng thành viên, và sửa lại toàn bộ bộ lọc. Điểm đỡ: sau D12 bộ lọc đã gom về repository + `current_user`, và **34 ca `tests/test_isolation.py`** canh sẵn mọi đường rò. **Phải sửa `Plan.md` mục 1.4 + tiêu chí A9 và được chủ dự án duyệt TRƯỚC khi gõ dòng nào** | T | M | 20h | ⬜ Chưa làm — **rào cản lớn nhất khi bán cho doanh nghiệp**, cũng là đề xuất đắt nhất. **Không nhét vừa 3 ngày còn lại** |
+| NEXT-06 | **Làm mới hồ sơ doanh nghiệp định kỳ + báo cái gì đã đổi.** Hồ sơ đứng im từ lúc tạo; địa chỉ, người đại diện, quy mô cũ dần. Chạy lại enrichment theo lịch, **so bản mới với bản cũ và chỉ báo phần khác** (MST đổi là tín hiệu đáng chú ý). Dùng lại job nền của `5.6`; file F2 của T | T | S | 10h | ⬜ Chưa làm — hợp đúng nghiệp vụ *quản lý đối tác* |
+| NEXT-07 | **Tuân thủ Nghị định 13/2023 về bảo vệ dữ liệu cá nhân**: nhật ký ai export cái gì lúc nào, hạn lưu trữ cấu hình được, xoá theo yêu cầu của chủ thể dữ liệu, ghi rõ mục đích thu thập trên giao diện. Dữ liệu ở đây **là dữ liệu cá nhân của người khác**; pháp chế doanh nghiệp sẽ hỏi trước khi ký | T | S | 8h | ⬜ Chưa làm — thứ không ai nhớ cho tới lúc bị hỏi |
+| NEXT-08 | **Nhập liên hệ từ chữ ký email** (dán khối chữ ký → trích xuất). Phần lớn liên hệ ngày nay đến qua email chứ không qua thẻ giấy. Dùng lại prompt trích xuất và **toàn bộ luồng review** đã có, chỉ đổi đầu vào từ ảnh sang chữ | T | C | 8h | ⬜ Chưa làm |
+| NEXT-09 | **Quét hàng loạt trên điện thoại, chịu được mạng chập chờn**: xếp hàng ở máy, tự gửi lại khi có sóng, hiện rõ cái nào chưa lên. Hội chợ luôn là chỗ sóng yếu — mất mạng giữa chừng hiện nay là mất cả lô. Chạm `templates/cards/batch.html` của Q → Q review | T | C | 10h | ⬜ Chưa làm |
+
+### Bốn thứ cố ý KHÔNG đề xuất
+
+| Không làm | Vì sao |
+|-----------|--------|
+| **Chấm điểm tiềm năng khách hàng bằng AI** | Không có dữ liệu lịch sử để học, nên điểm số chỉ là con số bịa trông có vẻ khoa học — đúng kiểu rủi ro **R4** mà F2 đã tránh bằng luật *mọi trường phải có nguồn* |
+| **Gửi email hàng loạt từ trong sản phẩm** | Vướng chống spam, cần tên miền gửi thư và danh tiếng IP; mọi công ty đều đã có công cụ riêng |
+| **Cào LinkedIn / mạng xã hội để làm giàu hồ sơ** | Vi phạm điều khoản dịch vụ, và phá đúng điểm mạnh hiện tại: **mọi trường đều có nguồn bấm được** |
+| **Tích hợp sâu một CRM cụ thể** (HubSpot, Salesforce…) | Chưa khách hàng thật nào yêu cầu. `NEXT-02` + CSV/JSON đã có phủ ~80% nhu cầu với ~10% công sức |
 
 ---
 

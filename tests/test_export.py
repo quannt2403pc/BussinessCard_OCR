@@ -15,6 +15,7 @@ from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
 from app.routers import export
+from app.schemas.export import CardExportRow
 from tests.conftest import make_user
 
 #: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
@@ -212,3 +213,151 @@ async def test_export_reads_every_row_across_batches(
     assert payload["total"] == 5
     assert names == [f"Người {index}" for index in range(5)]
     assert len({item["id"] for item in payload["items"]}) == 5
+
+
+# --------------------------------------------------------------------------- vCard (NEXT-02)
+
+
+def vcard_lines(text: str) -> list[str]:
+    """Bỏ gập dòng rồi tách — kiểm nội dung thì phải so trên dòng đã nối lại."""
+    return text.replace("\r\n ", "").rstrip("\r\n").split("\r\n")
+
+
+def field(text: str, name: str) -> str:
+    return next(line.split(":", 1)[1] for line in vcard_lines(text) if line.startswith(name))
+
+
+def test_vcard_escapes_and_folds() -> None:
+    row = CardExportRow(
+        id=uuid.uuid4(),
+        full_name="Nguyễn Văn A",
+        company_name="Công ty; Cổ phần, ABC",
+        notes="Dòng một\nDòng hai",
+        status=CardStatus.CONFIRMED,
+        uploaded_at=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 9, 21, 7, 30, tzinfo=UTC),
+    )
+
+    text = row.vcard()
+
+    assert text.startswith("BEGIN:VCARD\r\nVERSION:3.0\r\n")
+    assert text.endswith("END:VCARD\r\n")
+    # Dấu `;` và `,` trong tên công ty phải được thoát, nếu không chúng cắt giá trị thành nhiều trường.
+    assert field(text, "ORG") == r"Công ty\; Cổ phần\, ABC"
+    # vCard mã hoá xuống dòng thành **hai ký tự** `\` và `n`, không phải một ký tự xuống dòng.
+    assert field(text, "NOTE") == r"Dòng một\nDòng hai"
+    assert field(text, "N") == "Nguyễn;Văn A;;;"
+    assert field(text, "REV") == "20260921T073000Z"
+    # Mọi dòng thật (sau khi bỏ gập) đều ≤ 75 octet, kể cả chữ có dấu.
+    for line in text.split("\r\n"):
+        assert len(line.encode("utf-8")) <= 75
+
+
+def test_vcard_folding_never_splits_a_character() -> None:
+    row = CardExportRow(
+        id=uuid.uuid4(),
+        full_name="Nguyễn Văn A",
+        notes="ữ" * 120,
+        status=CardStatus.CONFIRMED,
+        uploaded_at=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+    )
+
+    text = row.vcard()
+
+    assert text.encode("utf-8").decode("utf-8")
+    assert field(text, "NOTE") == "ữ" * 120
+
+
+def test_vcard_prefers_vietnamese_name_and_keeps_the_original() -> None:
+    row = CardExportRow(
+        id=uuid.uuid4(),
+        full_name="김민수",
+        full_name_vi="Kim Min-su",
+        company_name="삼성전자 주식회사",
+        company_name_vi="Công ty Cổ phần Điện tử Samsung",
+        job_title="영업부 차장",
+        job_title_vi="Phó phòng Kinh doanh",
+        status=CardStatus.CONFIRMED,
+        uploaded_at=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
+    )
+
+    text = row.vcard()
+
+    # Danh bạ tìm bằng bàn phím Latin, nên `FN` lấy bản Việt hoá…
+    assert field(text, "FN") == "Kim Min-su"
+    assert field(text, "ORG") == "Công ty Cổ phần Điện tử Samsung"
+    assert field(text, "TITLE") == "Phó phòng Kinh doanh"
+    # …nhưng bản in trên thẻ không được mất, vì nó là thứ duy nhất đối chiếu lại được với ảnh.
+    assert "Tên trên thẻ: 김민수" in field(text, "NOTE")
+    assert "Công ty trên thẻ: 삼성전자 주식회사" in field(text, "NOTE")
+
+
+async def test_cards_vcf_exports_every_card(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    company = Company(user_id=OWNER_ID, display_name="Công ty FPT", name_normalized="fpt")
+    db_session.add(company)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            card(full_name="Nguyễn Văn A", company_id=company.id, email="a@fpt.vn"),
+            card(full_name="Trần Thị B", status=CardStatus.NEEDS_REVIEW),
+        ]
+    )
+    await db_session.flush()
+
+    response = await client.get("/api/export/cards.vcf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/vcard")
+    assert ".vcf" in response.headers["content-disposition"]
+    text = response.text
+    # BOM là mẹo cho Excel; trình đọc vCard coi nó là rác ngay dòng đầu.
+    assert not text.startswith("﻿")
+    assert text.count("BEGIN:VCARD") == 2
+    assert "FN:Nguyễn Văn A" in text
+    assert "ORG:Công ty FPT" in text
+
+
+async def test_cards_vcf_honours_the_status_filter(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    db_session.add_all(
+        [
+            card(full_name="Đã xác nhận", status=CardStatus.CONFIRMED),
+            card(full_name="Chờ duyệt", status=CardStatus.NEEDS_REVIEW),
+        ]
+    )
+    await db_session.flush()
+
+    text = (await client.get("/api/export/cards.vcf?status=confirmed")).text
+
+    assert text.count("BEGIN:VCARD") == 1
+    assert "FN:Đã xác nhận" in text
+
+
+async def test_one_card_vcf_and_other_users_card_is_404(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    mine = card(full_name="Của tôi")
+    stranger = await make_user(db_session, "nguoi-khac@example.com")
+    theirs = BusinessCard(
+        user_id=stranger.id,
+        image_path="export/khac.jpg",
+        image_hash=uuid.uuid4().hex * 2,
+        status=CardStatus.CONFIRMED,
+        full_name="Của người khác",
+    )
+    db_session.add_all([mine, theirs])
+    await db_session.flush()
+
+    ok = await client.get(f"/api/export/cards/{mine.id}.vcf")
+    forbidden = await client.get(f"/api/export/cards/{theirs.id}.vcf")
+    missing = await client.get(f"/api/export/cards/{uuid.uuid4()}.vcf")
+
+    assert ok.status_code == 200
+    assert "FN:Của tôi" in ok.text
+    assert (forbidden.status_code, missing.status_code) == (404, 404)
+    assert "Của người khác" not in forbidden.text
