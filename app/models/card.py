@@ -10,10 +10,10 @@ thật, và `alembic check` sinh ra một cặp drop/create thừa ở revision 
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
-from sqlalchemy import ForeignKey, Index, String, Text, func
+from sqlalchemy import Date, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,20 @@ class CardStatus(StrEnum):
     PENDING = "pending"  # vừa upload, chưa gọi OCR xong
     NEEDS_REVIEW = "needs_review"  # OCR xong, chờ người dùng duyệt
     CONFIRMED = "confirmed"  # người dùng đã xác nhận
+
+
+class RelationshipStatus(StrEnum):
+    """Vòng đời **quan hệ** với người trên thẻ (task NEXT-01).
+
+    Đúng bốn giá trị, và đây là ranh giới cố ý: thêm "cơ hội", "giá trị hợp đồng", "giai đoạn
+    phễu" là biến sản phẩm thành CRM nửa vời, thua mọi CRM thật. `closed` gộp cả *chốt* lẫn *bỏ*
+    — phân biệt hai cái đó chỉ có nghĩa khi có báo cáo chuyển đổi, tức là `NEXT-03`.
+    """
+
+    NEW = "new"  # vừa quét, chưa liên hệ lần nào
+    CONTACTED = "contacted"  # đã gọi hoặc gửi thư, chưa có hồi âm đáng kể
+    TALKING = "talking"  # đang trao đổi qua lại
+    CLOSED = "closed"  # đã chốt hoặc đã bỏ — dừng theo dõi
 
 
 class BusinessCard(Base):
@@ -43,6 +57,16 @@ class BusinessCard(Base):
         # Để unique toàn cục thì B upload đúng tấm thẻ A đã có sẽ bị từ chối, và câu từ chối đó
         # tự khai ra rằng A có tấm thẻ ấy. Đây cũng là index phục vụ `get_by_hash()`.
         Index("ix_business_cards_user_id_image_hash", "user_id", "image_hash", unique=True),
+        # Khối *Cần liên hệ hôm nay* của trang chủ hỏi đúng một câu:
+        # `WHERE user_id = ? AND follow_up_at <= ?` (task NEXT-01). Phần lớn thẻ không có hẹn nên
+        # index **partial** — chỉ số hoá đúng những dòng có hẹn. Tên và mệnh đề `WHERE` phải khớp
+        # từng chữ với revision `0008`, xem cảnh báo I-16 ở đầu file.
+        Index(
+            "ix_business_cards_follow_up",
+            "user_id",
+            "follow_up_at",
+            postgresql_where=text("follow_up_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -115,6 +139,21 @@ class BusinessCard(Base):
         index=True,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # --- Theo dõi quan hệ (task NEXT-01 của T; T sửa file của Q, Q review PR) ---
+    #
+    # Khác hẳn `status` ở trên: `status` là vòng đời **quét** (pending → needs_review →
+    # confirmed), còn hai cột này là vòng đời **quan hệ**. Trộn hai thứ vào một cột thì thẻ đã
+    # xác nhận xong không còn chỗ nào ghi "đã gọi cho người ta chưa".
+    relationship_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RelationshipStatus.NEW,
+        server_default=RelationshipStatus.NEW,
+    )
+    #: Ngày cần liên hệ lại. `NULL` = không hẹn, và đó là mặc định — không tự đặt hẹn hộ người
+    #: dùng, vì một hàng chờ đầy việc không ai hẹn là hàng chờ bị bỏ qua.
+    follow_up_at: Mapped[date | None] = mapped_column(Date)
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

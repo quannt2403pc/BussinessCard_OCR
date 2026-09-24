@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import current_user
-from app.models.card import BusinessCard, CardStatus
+from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
 from app.routers import export
@@ -112,6 +112,34 @@ async def test_cards_csv_exports_card_without_company(
     assert len(rows) == 2
     assert rows[1][rows[0].index("company_name")] == ""
     assert rows[1][rows[0].index("company_name_raw")] == "Cty chưa gắn"
+
+
+async def test_cards_filter_by_relationship(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    """Lọc theo **vòng đời quan hệ** (task NEXT-01), độc lập với `status` của việc quét.
+
+    Ca dùng thật: xuất riêng những người đang trao đổi để mang sang công cụ gửi thư.
+    """
+    db_session.add_all(
+        [
+            card(full_name="Đang trao đổi", relationship_status=RelationshipStatus.TALKING),
+            card(full_name="Mới quét"),
+        ]
+    )
+    await db_session.flush()
+
+    payload = json.loads((await client.get("/api/export/cards.json?relationship=talking")).text)
+
+    assert payload["filters"] == {"relationship": "talking"}
+    assert [row["full_name"] for row in payload["items"]] == ["Đang trao đổi"]
+    assert payload["items"][0]["relationship_status"] == "talking"
+
+
+async def test_cards_reject_unknown_relationship(owner: User, client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/export/cards.csv?relationship=won")
+
+    assert response.status_code == 400
 
 
 async def test_cards_filter_by_status(

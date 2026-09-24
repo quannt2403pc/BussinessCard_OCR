@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal
 from app.core.security import CurrentUser
-from app.models.card import BusinessCard, CardStatus
+from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
 from app.repositories import company as company_repo
 from app.schemas.export import (
@@ -30,15 +30,24 @@ from app.schemas.export import (
 router = APIRouter(prefix="/api/export", tags=["export"])
 
 STATUS_CHOICES: tuple[str, ...] = tuple(choice.value for choice in CardStatus)
+RELATIONSHIP_CHOICES: tuple[str, ...] = tuple(choice.value for choice in RelationshipStatus)
 
 CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 
 CardStatusQuery = Annotated[
     str | None, Query(alias="status", description="pending | needs_review | confirmed")
 ]
+#: Lọc theo **vòng đời quan hệ**, độc lập với `status` ở trên (task NEXT-01). Ca dùng thật là
+#: "xuất riêng những người đang trao đổi để mang sang công cụ gửi thư".
+RelationshipQuery = Annotated[
+    str | None,
+    Query(alias="relationship", description="new | contacted | talking | closed"),
+]
 
 
-def _cards_select(user_id: uuid.UUID, card_status: str | None) -> Select[Any]:
+def _cards_select(
+    user_id: uuid.UUID, card_status: str | None, relationship: str | None = None
+) -> Select[Any]:
     stmt = (
         select(
             BusinessCard.id,
@@ -58,6 +67,8 @@ def _cards_select(user_id: uuid.UUID, card_status: str | None) -> Select[Any]:
             BusinessCard.website,
             BusinessCard.language_detected,
             BusinessCard.status,
+            BusinessCard.relationship_status,
+            BusinessCard.follow_up_at,
             BusinessCard.notes,
             BusinessCard.uploaded_at,
             BusinessCard.updated_at,
@@ -68,6 +79,8 @@ def _cards_select(user_id: uuid.UUID, card_status: str | None) -> Select[Any]:
     )
     if card_status is not None:
         stmt = stmt.where(BusinessCard.status == card_status)
+    if relationship is not None:
+        stmt = stmt.where(BusinessCard.relationship_status == relationship)
     return stmt
 
 
@@ -101,10 +114,17 @@ def _companies_select(user_id: uuid.UUID) -> Select[Any]:
     )
 
 
-async def count_cards(db: AsyncSession, user_id: uuid.UUID, card_status: str | None) -> int:
+async def count_cards(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    card_status: str | None,
+    relationship: str | None = None,
+) -> int:
     stmt = select(func.count(BusinessCard.id)).where(BusinessCard.user_id == user_id)
     if card_status is not None:
         stmt = stmt.where(BusinessCard.status == card_status)
+    if relationship is not None:
+        stmt = stmt.where(BusinessCard.relationship_status == relationship)
     return int(await db.scalar(stmt) or 0)
 
 
@@ -114,11 +134,14 @@ async def count_companies(db: AsyncSession, user_id: uuid.UUID) -> int:
 
 
 async def iter_cards(
-    db: AsyncSession, user_id: uuid.UUID, card_status: str | None
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    card_status: str | None,
+    relationship: str | None = None,
 ) -> AsyncIterator[CardExportRow]:
     cursor: tuple[datetime, uuid.UUID] | None = None
     while True:
-        stmt = _cards_select(user_id, card_status).limit(EXPORT_BATCH_SIZE)
+        stmt = _cards_select(user_id, card_status, relationship).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(BusinessCard.uploaded_at, BusinessCard.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -205,16 +228,33 @@ def _validated_status(card_status: str | None) -> str | None:
     return card_status
 
 
+def _validated_relationship(relationship: str | None) -> str | None:
+    if relationship is not None and relationship not in RELATIONSHIP_CHOICES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"relationship phải là một trong {', '.join(RELATIONSHIP_CHOICES)}.",
+        )
+    return relationship
+
+
+def _filters(card_status: str | None, relationship: str | None) -> dict[str, str]:
+    chosen = {"status": card_status, "relationship": relationship}
+    return {key: value for key, value in chosen.items() if value is not None}
+
+
 @router.get("/cards.csv")
 async def export_cards_csv(
-    user: CurrentUser, card_status: CardStatusQuery = None
+    user: CurrentUser,
+    card_status: CardStatusQuery = None,
+    relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
+    stage = _validated_relationship(relationship)
     user_id = user.id
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = iter_cards(db, user_id, selected)
+            rows = iter_cards(db, user_id, selected, stage)
             async for chunk in _csv_body(rows, CardExportRow.columns()):
                 yield chunk
 
@@ -223,16 +263,19 @@ async def export_cards_csv(
 
 @router.get("/cards.json", responses={200: {"model": CardsExportOut}})
 async def export_cards_json(
-    user: CurrentUser, card_status: CardStatusQuery = None
+    user: CurrentUser,
+    card_status: CardStatusQuery = None,
+    relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
+    stage = _validated_relationship(relationship)
     user_id = user.id
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            total = await count_cards(db, user_id, selected)
-            meta = _meta(total, {"status": selected} if selected else {})
-            async for chunk in _json_body(iter_cards(db, user_id, selected), meta):
+            total = await count_cards(db, user_id, selected, stage)
+            meta = _meta(total, _filters(selected, stage))
+            async for chunk in _json_body(iter_cards(db, user_id, selected, stage), meta):
                 yield chunk
 
     return StreamingResponse(
@@ -242,7 +285,9 @@ async def export_cards_json(
 
 @router.get("/cards.vcf")
 async def export_cards_vcf(
-    user: CurrentUser, card_status: CardStatusQuery = None
+    user: CurrentUser,
+    card_status: CardStatusQuery = None,
+    relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
     """Cả lô danh thiếp dưới dạng vCard 3.0 — thả thẳng vào danh bạ điện thoại hoặc Outlook.
 
@@ -250,11 +295,12 @@ async def export_cards_vcf(
     là rác ngay ở dòng `BEGIN:VCARD` đầu tiên.
     """
     selected = _validated_status(card_status)
+    stage = _validated_relationship(relationship)
     user_id = user.id
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            async for chunk in _vcard_body(iter_cards(db, user_id, selected)):
+            async for chunk in _vcard_body(iter_cards(db, user_id, selected, stage)):
                 yield chunk
 
     return StreamingResponse(
