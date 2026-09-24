@@ -95,6 +95,20 @@
   </div>
 </section>
 
+{# NEXT-04: liên hệ trùng. Ẩn hẳn khi không có nhóm nào — đây là việc phải làm, không phải
+   bảng để ngắm, nên khối rỗng nằm lại chỉ tổ nhiễu (cùng luật với hai hàng chờ ở trên). #}
+<section id="dupes-section" class="mt-8 hidden" aria-label="Liên hệ trùng">
+  <div class="flex flex-wrap items-baseline gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Liên hệ trùng</h2>
+    <span id="dupes-count" class="text-xs text-muted"></span>
+  </div>
+  <div id="dupes" class="mt-3 space-y-3"></div>
+  <p class="mt-2 text-xs text-muted">
+    Máy chỉ <strong>gợi ý</strong>. Gộp rồi vẫn gỡ được: bản trùng không bị xoá, nó chỉ thôi
+    xuất hiện trong danh sách, bản xuất và các con số.
+  </p>
+</section>
+
 {# NEXT-03: sự kiện thu thập + báo cáo chuyển đổi. Đứng dưới hai hàng chờ vì đây là thứ để
    *nhìn lại*, không phải việc phải làm hôm nay. Khối ẩn cho tới khi biết có sự kiện hay không,
    để trang chủ của người chưa dùng tính năng này không loè lên một bảng rỗng. #}
@@ -240,6 +254,147 @@
 
       row.append(person, company, stage, badge);
       return row;
+    }
+
+    // --- liên hệ trùng (NEXT-04) --------------------------------------------
+
+    const KIND_LABEL = { email: "trùng email", phone: "trùng số điện thoại" };
+
+    function badge(text, tone) {
+      const box = document.createElement("span");
+      box.className = "rounded-full px-2 py-0.5 " + tone;
+      box.textContent = text;
+      return box;
+    }
+
+    function dupeCard(card, group, chosen) {
+      const row = document.createElement("label");
+      row.className = "flex cursor-pointer items-center gap-3 px-4 py-2 text-sm hover:bg-surface";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "primary-" + group.reasons.map((r) => r.kind + r.value).join("-");
+      radio.value = card.id;
+      radio.checked = card.id === chosen;
+      radio.className = "shrink-0";
+
+      const person = document.createElement("span");
+      person.className = "min-w-0 flex-1 truncate font-medium text-brand-ink";
+      person.textContent = card.full_name_vi || card.full_name || "(chưa có tên)";
+
+      const company = document.createElement("span");
+      company.className = "hidden min-w-0 flex-1 truncate text-muted sm:block";
+      company.textContent = card.company_name_vi || card.company_name_raw || "";
+
+      const meta = document.createElement("span");
+      meta.className = "shrink-0 text-xs text-muted";
+      meta.textContent = card.filled_fields + " ô có dữ liệu";
+
+      const open = document.createElement("a");
+      open.className = "link shrink-0 text-xs text-brand-700 hover:underline";
+      open.href = "/cards/" + card.id;
+      open.textContent = "Mở";
+      open.addEventListener("click", (e) => e.stopPropagation());
+
+      row.append(radio, person, company, meta, open);
+      return row;
+    }
+
+    // Gợi ý giữ thẻ **đầy đặn nhất** làm thẻ chính: ô trống của nó sẽ được lấp từ các bản kia,
+    // còn ô đã có thì không bị đụng tới, nên chọn thẻ nhiều dữ liệu nhất là mất ít nhất.
+    function fullest(cards) {
+      return cards.reduce((best, card) =>
+        card.filled_fields > best.filled_fields ? card : best, cards[0]).id;
+    }
+
+    function dupeGroup(group) {
+      const box = document.createElement("div");
+      box.className = "overflow-hidden rounded-lg border border-line bg-white";
+
+      const head = document.createElement("div");
+      head.className = "flex flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-xs";
+
+      const why = document.createElement("span");
+      why.className = "font-medium text-brand-ink";
+      why.textContent = group.reasons
+        .map((r) => (KIND_LABEL[r.kind] || r.kind) + ": " + r.value)
+        .join(" · ");
+      head.append(why);
+
+      // **Tín hiệu phủ định mới là cái đáng hiện.** Cùng tên chỉ xác nhận điều người dùng đã
+      // đoán; khác tên là lúc họ sắp gộp nhầm hai người — dữ liệu thật của dự án có đúng ca
+      // này: hai người khác hẳn nhau dùng chung một hộp thư `contact@` của công ty.
+      head.append(
+        group.same_name
+          ? badge("Cùng tên", "bg-emerald-50 text-emerald-800")
+          : badge("Tên khác nhau — kiểm lại trước khi gộp", "bg-amber-50 text-amber-900"));
+
+      if (group.reasons.length > 1) {
+        head.append(badge("Trùng nhiều dấu hiệu", "bg-emerald-50 text-emerald-800"));
+      }
+      if (group.likely_shared) {
+        // Trùng số tổng đài hay hộp thư info@ trông y hệt một người bị quét hai lần. Nói ra
+        // trước khi người dùng bấm, chứ không để họ phát hiện sau khi đã gộp nhầm cả phòng.
+        head.append(badge("Có thể là số/hộp thư dùng chung", "bg-rose-50 text-rose-800"));
+      }
+
+      const chosen = fullest(group.cards);
+      const list = document.createElement("div");
+      list.className = "divide-y divide-line";
+      list.append(...group.cards.map((card) => dupeCard(card, group, chosen)));
+
+      const foot = document.createElement("div");
+      foot.className = "flex items-center gap-3 border-t border-line px-4 py-2";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn py-1 text-sm";
+      button.textContent = "Gộp vào thẻ đã chọn";
+      button.addEventListener("click", () => mergeGroup(box, group, button));
+      const hint = document.createElement("span");
+      hint.className = "text-xs text-muted";
+      hint.textContent = "Chọn thẻ giữ lại ở cột đầu.";
+      foot.append(button, hint);
+
+      box.append(head, list, foot);
+      return box;
+    }
+
+    async function mergeGroup(box, group, button) {
+      const picked = box.querySelector("input[type=radio]:checked");
+      if (!picked) return;
+      const duplicates = group.cards.map((card) => card.id).filter((id) => id !== picked.value);
+      if (!duplicates.length) return;
+
+      button.disabled = true;
+      const res = await fetch("/api/duplicates/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primary_id: picked.value, duplicate_ids: duplicates }),
+      });
+      if (!res.ok) {
+        button.disabled = false;
+        fail("Không gộp được. Tải lại trang rồi thử lại.");
+        return;
+      }
+      // Gộp xong thì cả số liệu lẫn báo cáo sự kiện đều đổi, nên vẽ lại hết chứ không chỉ gỡ
+      // một khối đi — để hai con số trên cùng màn hình nói hai chuyện khác nhau là tệ hơn.
+      loadDuplicates();
+      loadStats();
+      loadEvents();
+    }
+
+    async function loadDuplicates() {
+      let data;
+      try {
+        data = await read("/api/duplicates");
+      } catch (err) {
+        return;  // gợi ý trùng hỏng thì im lặng, đừng che mất trang chủ
+      }
+      $("dupes").replaceChildren(...data.items.map(dupeGroup));
+      $("dupes-count").textContent = data.total_groups
+        ? data.total_groups + " nhóm cần xem"
+        : "";
+      $("dupes-section").classList.toggle("hidden", !data.total_groups);
     }
 
     // --- sự kiện thu thập (NEXT-03) -----------------------------------------
@@ -431,6 +586,7 @@
     $("event-cancel").addEventListener("click", () => showEventForm(false));
     $("event-form").addEventListener("submit", createEvent);
     loadEvents();
+    loadDuplicates();
 
     read("/api/integration/status")
       .then((data) => {

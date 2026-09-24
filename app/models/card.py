@@ -85,6 +85,14 @@ class BusinessCard(Base):
         # trang danh sách lọc y hệt. Không partial như index trên: thẻ **có** nhãn sự kiện mới
         # là số đông một khi người dùng bật một sự kiện đang diễn ra.
         Index("ix_business_cards_user_id_event_id", "user_id", "event_id"),
+        # Gần hết bảng để `NULL` ở cột này, nên index đầy đủ chỉ tổ phí (task NEXT-04). Câu duy
+        # nhất cần tới nó là "liệt kê những thẻ đã gộp vào thẻ X". Tên và mệnh đề `WHERE` phải
+        # khớp từng chữ với revision `0010` — xem cảnh báo I-16 ở đầu file.
+        Index(
+            "ix_business_cards_merged_into",
+            "merged_into_id",
+            postgresql_where=text("merged_into_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -181,6 +189,23 @@ class BusinessCard(Base):
     #: Ngày cần liên hệ lại. `NULL` = không hẹn, và đó là mặc định — không tự đặt hẹn hộ người
     #: dùng, vì một hàng chờ đầy việc không ai hẹn là hàng chờ bị bỏ qua.
     follow_up_at: Mapped[date | None] = mapped_column(Date)
+
+    # --- Gộp liên hệ trùng (task NEXT-04 của T; T sửa file của Q, Q review PR) ---
+    #
+    # **Gộp mềm, không xoá.** Máy chỉ *gợi ý* hai thẻ là một người — trùng số tổng đài hay trùng
+    # địa chỉ `info@` là chuyện thường — nên đoán sai mà xoá là mất một tấm ảnh thật vì một phỏng
+    # đoán. Dòng mang giá trị ở đây biến mất khỏi mọi danh sách, bản xuất và con số báo cáo,
+    # nhưng vẫn đọc được và **gỡ gộp được**.
+    #
+    # ⚠️ Hệ quả: mọi câu liệt kê phải kèm `merged_into_id IS NULL`. Sáu chỗ, liệt kê đủ trong
+    # docstring của revision `0010`.
+    #
+    # `SET NULL`: xoá hẳn thẻ chính thì các bản trùng **quay lại làm thẻ độc lập**, không biến
+    # mất theo. Chúng vốn là dữ liệu thật.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("business_cards.id", ondelete="SET NULL"),
+    )
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

@@ -67,7 +67,11 @@ async def get_stats(db: Annotated[AsyncSession, Depends(get_db)], user: CurrentU
                 ),
                 companies,
                 profiles,
-            ).where(BusinessCard.user_id == user.id)
+            ).where(
+                BusinessCard.user_id == user.id,
+                # Bản trùng đã gộp không tính vào số liệu (task NEXT-04).
+                BusinessCard.merged_into_id.is_(None),
+            )
         )
     ).one()
 

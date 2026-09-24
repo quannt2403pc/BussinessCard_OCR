@@ -33,7 +33,9 @@ def _owned(user_id: uuid.UUID) -> Select[tuple[BusinessCard, str | None]]:
     return (
         select(BusinessCard, company_name)
         .outerjoin(Company, Company.id == BusinessCard.company_id)
-        .where(BusinessCard.user_id == user_id)
+        # Thẻ đã gộp không nhắc nữa (task NEXT-04): lời nhắc của nó đã theo sang thẻ chính,
+        # nhắc cả hai là bắt người dùng gọi cùng một người hai lần.
+        .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None))
     )
 
 
@@ -101,6 +103,7 @@ async def due_count(db: AsyncSession, *, user_id: uuid.UUID, on: date) -> int:
         .select_from(BusinessCard)
         .where(
             BusinessCard.user_id == user_id,
+            BusinessCard.merged_into_id.is_(None),
             BusinessCard.follow_up_at.is_not(None),
             BusinessCard.follow_up_at <= on,
             BusinessCard.relationship_status.not_in(TERMINAL_RELATIONSHIP_STATUSES),
