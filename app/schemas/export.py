@@ -1,11 +1,11 @@
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.card import CardStatus
+from app.models.card import CardStatus, RelationshipStatus
 from app.schemas.company import ProfileStatus, SourceRef, as_utc
 
 EXPORT_BATCH_SIZE = 200
@@ -55,6 +55,8 @@ class CardExportRow(ExportRow):
     website: str | None = None
     language_detected: str | None = None
     status: CardStatus
+    relationship_status: RelationshipStatus = RelationshipStatus.NEW
+    follow_up_at: date | None = None
     notes: str | None = None
     uploaded_at: datetime
     updated_at: datetime

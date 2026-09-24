@@ -74,6 +74,17 @@
   <div id="queue" class="mt-3 divide-y divide-line overflow-hidden rounded-lg border border-line bg-white"></div>
 </section>
 
+{# NEXT-01: cùng khuôn với khối *Chờ bạn duyệt* ở trên — cũng là một hàng chờ, cũng ẩn khi rỗng.
+   Đứng ngay dưới nó vì việc đến hạn hôm nay gấp hơn tấm thẻ chờ duyệt. #}
+<section id="due-section" class="mt-8 hidden" aria-label="Cần liên hệ hôm nay">
+  <div class="flex items-baseline gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Cần liên hệ hôm nay</h2>
+    <span id="due-total" class="text-xs text-muted"></span>
+    <a href="/cards" class="link ml-auto text-sm text-brand-700 hover:text-brand-600">Xem tất cả</a>
+  </div>
+  <div id="due" class="mt-3 divide-y divide-line overflow-hidden rounded-lg border border-line bg-white"></div>
+</section>
+
 <section class="mt-8" aria-label="Danh thiếp gần đây">
   <div class="flex items-baseline gap-3">
     <h2 class="text-sm font-semibold text-brand-ink">Danh thiếp gần đây</h2>
@@ -147,6 +158,36 @@
       return row;
     }
 
+    // Quá hạn tô đỏ, đến hạn hôm nay tô hổ phách: một hàng chờ mà mọi dòng trông như nhau thì
+    // người dùng đọc từ trên xuống, còn thứ trượt lịch từ tuần trước mới là thứ dễ rơi mất.
+    function dueRow(item) {
+      const row = document.createElement("a");
+      row.href = "/cards/" + item.card_id;
+      row.className = "link flex items-center gap-3 px-4 py-3 text-sm hover:bg-surface";
+
+      const person = document.createElement("span");
+      person.className = "min-w-0 flex-1 truncate font-medium text-brand-ink";
+      person.textContent = item.display_name;
+
+      const company = document.createElement("span");
+      company.className = "hidden min-w-0 flex-1 truncate text-muted sm:block";
+      company.textContent = item.company_name || "";
+
+      const stage = document.createElement("span");
+      stage.className = "hidden shrink-0 text-xs text-muted sm:block";
+      stage.textContent = item.relationship_label;
+
+      const late = item.overdue_days > 0;
+      const badge = document.createElement("span");
+      badge.className = "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs "
+        + (late ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-900");
+      badge.innerHTML = ICON(late ? "warn" : "clock");
+      badge.append(document.createTextNode(late ? "Trễ " + item.overdue_days + " ngày" : "Hôm nay"));
+
+      row.append(person, company, stage, badge);
+      return row;
+    }
+
     function emptyRow(text) {
       const box = document.createElement("div");
       box.className = "px-4 py-6 text-sm text-muted";
@@ -207,6 +248,16 @@
     loadStats();
     loadList("/api/cards?size=5", $("recent"), "Chưa có danh thiếp nào. Bấm Quét danh thiếp để bắt đầu.");
     loadList("/api/cards?status=needs_review&size=5", $("queue"), "", $("queue-section"));
+
+    read("/api/contacts/due")
+      .then((data) => {
+        if (!data.items.length) return;
+        $("due").replaceChildren(...data.items.map(dueRow));
+        // `total` đếm cả những dòng vượt trần của API, nên chỉ nhắc khi thật sự còn thứ chưa hiện.
+        if (data.total > data.items.length) $("due-total").textContent = data.total + " liên hệ";
+        $("due-section").classList.remove("hidden");
+      })
+      .catch(() => { /* hàng chờ nhắc việc hỏng thì im lặng, đừng che mất trang chủ */ });
 
     read("/api/integration/status")
       .then((data) => {
