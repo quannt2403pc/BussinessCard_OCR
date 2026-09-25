@@ -16,10 +16,6 @@
 {% block content %}
 <div>
   <h1 class="text-2xl font-semibold text-brand-ink">Dữ liệu cá nhân</h1>
-  <p class="mt-1 text-sm text-slate-600">
-    Danh thiếp bạn quét chứa thông tin của <strong>người khác</strong>. Trang này nói rõ hệ thống
-    thu thập để làm gì, giữ bao lâu, và xoá thế nào khi người ta yêu cầu.
-  </p>
 </div>
 
 <section class="mt-6 rounded-lg border border-line bg-white p-5" aria-label="Mục đích thu thập">
@@ -61,10 +57,7 @@
 
 <section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Hạn lưu trữ">
   <h2 class="text-sm font-semibold text-brand-ink">Hạn lưu trữ</h2>
-  <p class="mt-1 text-xs text-muted">
-    Mặc định giữ vô thời hạn. Đặt hạn thì hệ thống <strong>đếm ra</strong> phần quá hạn và chờ
-    bạn bấm — không tự xoá gì.
-  </p>
+  <p class="mt-1 text-xs text-muted">Mặc định giữ vô thời hạn. Đặt hạn chỉ để đếm — hệ thống <strong>không tự xoá</strong>.</p>
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <label class="text-sm">
       <span class="text-slate-600">Giữ trong (ngày)</span>
@@ -83,10 +76,7 @@
 <section class="mt-4 rounded-lg border border-rose-200 bg-rose-50/40 p-5"
          aria-label="Xoá theo yêu cầu của chủ thể dữ liệu">
   <h2 class="text-sm font-semibold text-brand-ink">Xoá theo yêu cầu</h2>
-  <p class="mt-1 text-xs text-slate-600">
-    Nhập <strong>email hoặc số điện thoại</strong> của người yêu cầu xoá. Hệ thống tìm trước cho
-    bạn xem, xoá là một cú bấm riêng — và <strong>không lấy lại được</strong>.
-  </p>
+  <p class="mt-1 text-xs text-slate-600">Tìm trước, xoá sau. Xoá rồi <strong>không lấy lại được</strong>.</p>
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <label class="text-sm flex-1 min-w-64">
       <span class="text-slate-600">Email hoặc số điện thoại đã chuẩn hoá</span>
@@ -106,10 +96,7 @@
 
 <section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Nhật ký">
   <h2 class="text-sm font-semibold text-brand-ink">Nhật ký truy xuất</h2>
-  <p class="mt-1 text-xs text-muted">
-    Mỗi lần dữ liệu ra khỏi hệ thống hoặc bị xoá đều ghi lại ở đây. Dòng nhật ký
-    <strong>không bị xoá theo</strong> dữ liệu nó nói về.
-  </p>
+  <p class="mt-1 text-xs text-muted">Nhật ký <strong>không bị xoá theo</strong> dữ liệu.</p>
   <div id="log-list" class="mt-3 divide-y divide-line text-sm">
     <p class="py-4 text-muted">Đang tải…</p>
   </div>
