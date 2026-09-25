@@ -226,3 +226,34 @@ def test_o_thong_bao_cua_q_deu_doc_duoc_bang_trinh_doc_man_hinh() -> None:
             assert "aria-live" in match.group(2), (
                 f"{path.name}: ô #{match.group(1)} thiếu aria-live"
             )
+
+
+# --------------------------------------------------------------- hàng đợi chịu mạng yếu (NEXT-09)
+
+
+async def test_batch_giu_anh_tren_may_truoc_khi_gui(app_client, user_a: User) -> None:
+    """Trang quét hàng loạt phải khai đủ bộ đồ nghề của `NEXT-09`.
+
+    Phần thật sự đáng kiểm là hành vi lúc mất sóng, mà cái đó chỉ chạy trong trình duyệt thật
+    (đã đo bằng Playwright, xem `Task.md`). Ca này giữ **hợp đồng template**: đổi tên id hay bỏ
+    khối hàng đợi đi thì đoạn JavaScript kia hỏng im lặng — trang vẫn mở được, ảnh vẫn chọn
+    được, chỉ là không còn gì giữ chúng lại khi rớt mạng.
+    """
+    async with app_client(user_a) as http:
+        html = (await http.get("/cards/batch")).text
+
+    for marker in ('id="offline-banner"', 'id="queue-box"', 'id="queue-list"', 'id="btn-retry"'):
+        assert marker in html, marker
+    assert (
+        "indexedDB.open" in html
+    )  # hàng đợi phải nằm ở chỗ giữ được Blob, không phải localStorage
+    assert 'addEventListener("online"' in html
+
+
+async def test_batch_noi_ro_anh_duoc_giu_tren_may(app_client, user_a: User) -> None:
+    """Lời hứa với người dùng phải hiện ngay trên trang, không nằm trong mã nguồn."""
+    async with app_client(user_a) as http:
+        html = (await http.get("/cards/batch")).text
+
+    assert "giữ trên máy trước" in html
+    assert "tự gửi tiếp khi có mạng" in html
