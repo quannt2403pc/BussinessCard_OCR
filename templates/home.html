@@ -18,7 +18,6 @@
 
 {% block content %}
 <h1 class="text-2xl font-semibold text-brand-ink">Chào {{ current_user.label }}</h1>
-<p class="mt-1 text-sm text-muted">Số liệu đọc thẳng từ cơ sở dữ liệu mỗi lần mở trang.</p>
 
 {# Banner nhắc kết nối OAuth. Ẩn sẵn, JS chỉ hiện khi `/api/integration/status` nói là chưa nối —
    hiện trước rồi ẩn sau là nháy một dải cảnh báo giả vào mặt người đã kết nối. #}
@@ -52,7 +51,6 @@
   <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
     <div id="review-bar" class="h-full w-0 bg-amber-400 transition-all"></div>
   </div>
-  <p class="mt-1 text-xs text-muted">Danh thiếp còn chờ duyệt trên tổng số đã quét.</p>
 </section>
 
 <p id="empty" class="mt-4 hidden rounded-lg border border-dashed border-line bg-white px-6 py-8 text-center text-sm text-muted"></p>
@@ -103,10 +101,6 @@
     <span id="dupes-count" class="text-xs text-muted"></span>
   </div>
   <div id="dupes" class="mt-3 space-y-3"></div>
-  <p class="mt-2 text-xs text-muted">
-    Máy chỉ <strong>gợi ý</strong>. Gộp rồi vẫn gỡ được: bản trùng không bị xoá, nó chỉ thôi
-    xuất hiện trong danh sách, bản xuất và các con số.
-  </p>
 </section>
 
 {# NEXT-02: bốn endpoint export có từ 7.6 nhưng **không template nào trỏ tới**, nên tới giờ chỉ
@@ -118,7 +112,6 @@
     <a href="/api/export/cards.csv" class="btn" download>{{ icon("download") }} Danh thiếp · CSV</a>
     <a href="/api/export/companies.csv" class="btn" download>{{ icon("download") }} Doanh nghiệp · CSV</a>
   </div>
-  <p class="mt-2 text-xs text-muted">vCard thả thẳng vào danh bạ điện thoại hoặc Outlook. CSV mở bằng Excel.</p>
 </section>
 
 <div id="home-message" class="hidden" role="status" aria-live="polite"></div>

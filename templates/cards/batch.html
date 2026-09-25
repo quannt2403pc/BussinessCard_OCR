@@ -31,9 +31,8 @@
   <div>
     <h1 class="text-2xl font-semibold text-slate-900">Quét hàng loạt</h1>
     <p class="mt-1 text-sm text-slate-600">
-      Chọn tối đa <strong>{{ max_batch_files }}</strong> ảnh (≤ {{ max_upload_mb }}MB mỗi ảnh).
-      Ảnh được <strong>giữ trên máy trước</strong>, rồi gửi dần theo từng lô nhỏ — mất sóng giữa
-      chừng thì tự gửi tiếp khi có mạng, không mất ảnh nào.
+      Tối đa <strong>{{ max_batch_files }}</strong> ảnh, ≤ {{ max_upload_mb }}MB mỗi ảnh.
+      Ảnh <strong>giữ trên máy trước</strong>, mất sóng thì tự gửi tiếp khi có mạng.
     </p>
   </div>
   <a href="/cards" class="btn ml-auto">{{ icon("card") }} Danh sách</a>
@@ -42,7 +41,7 @@
 <div id="offline-banner"
      class="mt-4 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
      role="status">
-  {{ icon("warn", "sm") }} Đang mất mạng. Ảnh vẫn được giữ trên máy và sẽ tự gửi khi có sóng lại.
+  {{ icon("warn", "sm") }} Mất mạng. Ảnh giữ trên máy, tự gửi khi có sóng lại.
 </div>
 
 <section id="dropzone"
@@ -389,8 +388,8 @@
       sessionStorage.removeItem(KEY);
       if (!merged.aborted_reason) {
         message(merged.failed
-          ? `Xong: ${merged.done} ảnh quét được, ${merged.failed} ảnh lỗi — xem lý do ở cột Kết quả.`
-          : `Xong cả ${merged.done} ảnh. Bấm “Review →” từng dòng để kiểm rồi xác nhận.`,
+          ? `Xong ${merged.done} ảnh, ${merged.failed} lỗi — lý do ở cột Kết quả.`
+          : `Xong cả ${merged.done} ảnh. Bấm “Review →” để kiểm từng tấm.`,
           merged.failed ? "error" : "ok");
       }
       return;

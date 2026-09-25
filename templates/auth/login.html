@@ -7,7 +7,6 @@
   <img src="{{ url_for('static', path='img/logo-full.webp') }}?v={{ asset_v }}" alt="OCR Xì Mi"
        width="480" height="266" class="mx-auto mb-6 h-20 w-auto">
   <h1 class="text-2xl font-semibold text-brand-ink">Đăng nhập</h1>
-  <p class="mt-1 text-sm text-muted">Dữ liệu danh thiếp và hồ sơ doanh nghiệp của mỗi tài khoản là riêng.</p>
 
   {% if error %}
   <div class="mt-4">{{ banner('error', error) }}</div>

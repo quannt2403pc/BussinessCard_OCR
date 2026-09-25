@@ -7,7 +7,6 @@
   <img src="{{ url_for('static', path='img/logo-full.webp') }}?v={{ asset_v }}" alt="OCR Xì Mi"
        width="480" height="266" class="mx-auto mb-6 h-20 w-auto">
   <h1 class="text-2xl font-semibold text-brand-ink">Tạo tài khoản</h1>
-  <p class="mt-1 text-sm text-muted">Sau khi đăng ký, vào Cài đặt để tự kết nối AI bằng tài khoản Google của bạn.</p>
 
   {% if error %}
   <div class="mt-4">{{ banner('error', error) }}</div>
