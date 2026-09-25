@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.contact_note import ContactNote
 from app.models.user import User
-from app.repositories import event as event_repo
 
 ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
 
@@ -349,15 +348,11 @@ async def test_merged_card_disappears_from_every_listing(
 ) -> None:
     """Sót một chỗ là một con số thổi phồng mà không ai nhận ra.
 
-    Bốn chỗ ở đây; hai chỗ còn lại của export nằm ở `tests/test_export.py`.
+    Ba chỗ ở đây; hai chỗ còn lại của export nằm ở `tests/test_export.py`. Chỗ thứ sáu là báo
+    cáo theo sự kiện của `NEXT-03`, đã cắt khỏi phạm vi 2026-09-25.
     """
-    event = await event_repo.create(db_session, user_id=user_a.id, name="VietnamExpo 2026")
-    primary = await make_card(
-        db_session, user_a, email=EMAIL, minutes=0, event_id=event.id, follow_up_at=TODAY
-    )
-    other = await make_card(
-        db_session, user_a, email=EMAIL, minutes=5, event_id=event.id, follow_up_at=TODAY
-    )
+    primary = await make_card(db_session, user_a, email=EMAIL, minutes=0, follow_up_at=TODAY)
+    other = await make_card(db_session, user_a, email=EMAIL, minutes=5, follow_up_at=TODAY)
 
     async with app_client(user_a) as http:
         before_stats = (await http.get("/api/stats")).json()["total_cards"]
@@ -366,15 +361,13 @@ async def test_merged_card_disappears_from_every_listing(
         cards = (await http.get("/api/cards?size=50")).json()
         stats = (await http.get("/api/stats")).json()
         due = (await http.get("/api/contacts/due", params={"on": TODAY.isoformat()})).json()
-        events = (await http.get("/api/events")).json()
 
     assert before_stats == 2
     assert cards["total"] == 1  # 1. danh sách danh thiếp
     assert stats["total_cards"] == 1  # 2. số liệu trang chủ
     assert due["total"] == 1  # 3. hàng chờ nhắc liên hệ
     assert [item["card_id"] for item in due["items"]] == [str(primary.id)]
-    assert events["items"][0]["total_cards"] == 1  # 4. báo cáo theo sự kiện
-    # Chỗ thứ 5 và 6 — câu đếm và câu lấy dòng của export — kiểm ở `tests/test_export.py`:
+    # Hai chỗ còn lại — câu đếm và câu lấy dòng của export — kiểm ở `tests/test_export.py`:
     # router export tự mở `SessionLocal()`, chỉ file kia mới có bộ vá cho nó.
 
 

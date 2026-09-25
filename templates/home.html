@@ -55,11 +55,8 @@
 
 <p id="empty" class="mt-4 hidden rounded-lg border border-dashed border-line bg-white px-6 py-8 text-center text-sm text-muted"></p>
 
-<section class="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Hành động chính">
+<section class="mt-8 grid gap-3 sm:grid-cols-3" aria-label="Hành động chính">
   <a href="/cards/upload" class="btn-primary justify-start px-5 py-3">{{ icon("scan") }} Quét danh thiếp</a>
-  {# NEXT-08: phần lớn liên hệ ngày nay đến qua email chứ không qua thẻ giấy, nên lối vào này
-     đứng ngay cạnh nút quét chứ không nằm trong một menu nào. #}
-  <a href="/paste" class="btn justify-start px-5 py-3">{{ icon("file") }} Dán chữ ký email</a>
   <a href="/companies" class="btn justify-start px-5 py-3">{{ icon("building") }} Lập hồ sơ</a>
   {# EX-09: trang `/assistant` đã gỡ — nút này mở bong bóng tại chỗ. `<button>` chứ không `<a href>`:
      nó không dẫn đi đâu cả, mà link giả còn bị trình duyệt prefetch và mở được ở tab mới. #}
@@ -104,52 +101,6 @@
     <span id="dupes-count" class="text-xs text-muted"></span>
   </div>
   <div id="dupes" class="mt-3 space-y-3"></div>
-</section>
-
-{# NEXT-03: sự kiện thu thập + báo cáo chuyển đổi. Đứng dưới hai hàng chờ vì đây là thứ để
-   *nhìn lại*, không phải việc phải làm hôm nay. Khối ẩn cho tới khi biết có sự kiện hay không,
-   để trang chủ của người chưa dùng tính năng này không loè lên một bảng rỗng. #}
-<section id="events-section" class="mt-8" aria-label="Sự kiện thu thập">
-  <div class="flex flex-wrap items-baseline gap-3">
-    <h2 class="text-sm font-semibold text-brand-ink">Sự kiện thu thập</h2>
-    <span id="event-active" class="text-xs text-muted"></span>
-    <button type="button" id="event-new" class="btn ml-auto py-1 text-sm">{{ icon("plus", "sm") }} Sự kiện mới</button>
-  </div>
-
-  {# Form tại chỗ chứ không `window.prompt`: hộp thoại của trình duyệt khoá cả trang, không
-     hiện nổi lỗi trùng tên, và một số trình duyệt chặn thẳng khi trang chưa được tương tác. #}
-  <form id="event-form" class="mt-3 hidden flex-wrap items-end gap-2">
-    <label class="text-sm">
-      <span class="sr-only">Tên sự kiện</span>
-      <input id="event-name" type="text" maxlength="120" required
-             placeholder="VietnamExpo 2026"
-             class="block rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
-    </label>
-    <button type="submit" class="btn py-2">{{ icon("check", "sm") }} Tạo và quét vào đây</button>
-    <button type="button" id="event-cancel" class="btn py-2">Huỷ</button>
-  </form>
-
-
-  {# Bảng và chú thích dưới nó cùng ẩn khi chưa có sự kiện: một bảng rỗng có đủ tiêu đề cột
-     nằm lại trên trang chủ chỉ là thứ phải bỏ qua. Nút *Sự kiện mới* thì luôn hiện, nếu không
-     người chưa có sự kiện nào sẽ không có đường nào tạo cái đầu tiên. #}
-  <div id="event-table" class="hidden">
-  <div class="mt-3 overflow-x-auto rounded-lg border border-line bg-white">
-    <table class="w-full text-sm">
-      <thead class="bg-surface text-left text-xs uppercase tracking-wide text-muted">
-        <tr>
-          <th scope="col" class="px-4 py-2 font-medium">Sự kiện</th>
-          <th scope="col" class="px-4 py-2 text-right font-medium">Thẻ</th>
-          <th scope="col" class="px-4 py-2 text-right font-medium">Đang trao đổi</th>
-          <th scope="col" class="px-4 py-2 text-right font-medium">Chốt / Trượt</th>
-          <th scope="col" class="px-4 py-2 text-right font-medium">Tỉ lệ chốt</th>
-          <th scope="col" class="px-4 py-2"><span class="sr-only">Hành động</span></th>
-        </tr>
-      </thead>
-      <tbody id="event-rows" class="divide-y divide-line"></tbody>
-    </table>
-  </div>
-  </div>
 </section>
 
 {# NEXT-02: bốn endpoint export có từ 7.6 nhưng **không template nào trỏ tới**, nên tới giờ chỉ
@@ -364,11 +315,10 @@
         fail("Không gộp được. Tải lại trang rồi thử lại.");
         return;
       }
-      // Gộp xong thì cả số liệu lẫn báo cáo sự kiện đều đổi, nên vẽ lại hết chứ không chỉ gỡ
-      // một khối đi — để hai con số trên cùng màn hình nói hai chuyện khác nhau là tệ hơn.
+      // Gộp xong thì số liệu trên đầu trang cũng đổi, nên vẽ lại hết chứ không chỉ gỡ một
+      // khối đi — để hai con số trên cùng màn hình nói hai chuyện khác nhau là tệ hơn.
       loadDuplicates();
       loadStats();
-      loadEvents();
     }
 
     async function loadDuplicates() {
@@ -383,119 +333,6 @@
         ? data.total_groups + " nhóm cần xem"
         : "";
       $("dupes-section").classList.toggle("hidden", !data.total_groups);
-    }
-
-    // --- sự kiện thu thập (NEXT-03) -----------------------------------------
-
-    function cell(text, className) {
-      const box = document.createElement("td");
-      box.className = "px-4 py-2 " + (className || "");
-      box.textContent = text;
-      return box;
-    }
-
-    function rateText(item) {
-      // Dấu gạch chứ không phải `0%`: "chưa ai ngã ngũ" khác hẳn "ngã ngũ hết và trượt sạch".
-      return item.conversion_rate === null ? "—" : Math.round(item.conversion_rate * 100) + "%";
-    }
-
-    async function setActiveEvent(id, on) {
-      const res = await fetch("/api/events/" + id, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activate: on }),
-      });
-      if (!res.ok) {
-        fail("Không đổi được sự kiện đang diễn ra.");
-        return;
-      }
-      loadEvents();
-    }
-
-    function eventRow(item) {
-      const row = document.createElement("tr");
-      if (item.is_active) row.className = "bg-brand-50/50";
-
-      const name = document.createElement("td");
-      name.className = "px-4 py-2";
-      const link = document.createElement("a");
-      link.className = "link font-medium text-brand-ink hover:text-brand-700";
-      link.href = item.event_id ? "/cards?event_id=" + item.event_id : "/cards";
-      link.textContent = item.name;
-      name.append(link);
-      if (item.is_active) {
-        const badge = document.createElement("span");
-        badge.className = "ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800";
-        badge.textContent = "Đang diễn ra";
-        name.append(badge);
-      }
-
-      const action = document.createElement("td");
-      action.className = "px-4 py-2 text-right";
-      if (item.event_id) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "text-xs text-brand-700 hover:underline";
-        button.textContent = item.is_active ? "Dừng quét vào đây" : "Quét vào đây";
-        button.addEventListener("click", () => setActiveEvent(item.event_id, !item.is_active));
-        action.append(button);
-      }
-
-      row.append(
-        name,
-        cell(String(item.total_cards), "text-right tabular-nums"),
-        cell(String(item.in_progress), "text-right tabular-nums text-muted"),
-        cell(item.won + " / " + item.lost, "text-right tabular-nums"),
-        cell(rateText(item), "text-right tabular-nums font-medium"),
-        action,
-      );
-      return row;
-    }
-
-    function showEventForm(on) {
-      $("event-form").classList.toggle("hidden", !on);
-      $("event-form").classList.toggle("flex", on);
-      if (on) $("event-name").focus();
-    }
-
-    async function createEvent(event) {
-      event.preventDefault();
-      const name = $("event-name").value.trim();
-      if (!name) return;
-      // `activate: true`: sự kiện mới gần như luôn là sự kiện sắp quét vào. Tạo xong mà vẫn
-      // phải bấm thêm một nút nữa mới đóng dấu được là đúng chỗ người dùng sẽ quên.
-      const res = await fetch("/api/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, activate: true }),
-      });
-      if (!res.ok) {
-        fail(res.status === 409 ? "Đã có sự kiện trùng tên." : "Không tạo được sự kiện.");
-        return;
-      }
-      $("event-name").value = "";
-      showEventForm(false);
-      loadEvents();
-    }
-
-    async function loadEvents() {
-      let data;
-      try {
-        data = await read("/api/events");
-      } catch (err) {
-        return;  // bảng báo cáo hỏng thì im lặng, đừng che mất trang chủ
-      }
-      // Thẻ chưa gắn sự kiện nào vẫn hiện thành một dòng, nhưng chỉ khi thật sự có thẻ như
-      // vậy — giấu nó đi thì tổng các dòng không bằng tổng số thẻ và người đọc đi tìm chỗ sai.
-      const rows = data.items.slice();
-      if (data.unassigned.total_cards > 0) rows.push(data.unassigned);
-
-      $("event-rows").replaceChildren(...rows.map(eventRow));
-      $("event-table").classList.toggle("hidden", !rows.length);
-      $("event-active").textContent =
-        data.items.length && !data.active_event_id
-          ? "Chưa bật sự kiện nào — thẻ quét từ giờ sẽ không có nhãn."
-          : "";
     }
 
     function emptyRow(text) {
@@ -569,10 +406,6 @@
       })
       .catch(() => { /* hàng chờ nhắc việc hỏng thì im lặng, đừng che mất trang chủ */ });
 
-    $("event-new").addEventListener("click", () => showEventForm(true));
-    $("event-cancel").addEventListener("click", () => showEventForm(false));
-    $("event-form").addEventListener("submit", createEvent);
-    loadEvents();
     loadDuplicates();
 
     read("/api/integration/status")

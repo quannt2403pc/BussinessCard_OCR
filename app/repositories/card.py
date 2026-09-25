@@ -26,7 +26,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard, CardStatus
-from app.repositories import event as event_repo
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,6 @@ async def list_cards(
     status: str | None = None,
     company_id: uuid.UUID | None = None,
     language: str | None = None,
-    event_id: uuid.UUID | None = None,
     page: int = 1,
     size: int = 20,
 ) -> tuple[Sequence[BusinessCard], int]:
@@ -137,12 +135,7 @@ async def list_cards(
     có bản ghi hiện hai lần / mất hẳn.
     """
     conditions = _list_conditions(
-        user_id=user_id,
-        q=q,
-        status=status,
-        company_id=company_id,
-        language=language,
-        event_id=event_id,
+        user_id=user_id, q=q, status=status, company_id=company_id, language=language
     )
     size = max(1, min(size, MAX_PAGE_SIZE))
     page = max(1, page)
@@ -180,7 +173,6 @@ async def create_card(
     ocr_raw_json: dict[str, Any] | None = None,
     status: CardStatus = CardStatus.PENDING,
     notes: str | None = None,
-    source: str = "scan",
 ) -> BusinessCard:
     """Tạo một bản ghi danh thiếp và commit.
 
@@ -195,13 +187,6 @@ async def create_card(
         ocr_raw_json=ocr_raw_json,
         status=status,
         notes=notes,
-        source=source,
-        # Nhãn sự kiện đang diễn ra, đóng dấu ngay lúc tạo (task NEXT-03 của T; T sửa file của
-        # Q, Q review PR). Đặt ở đây chứ không ở router vì **đây là chỗ duy nhất sinh ra một
-        # `business_cards`** — upload một ảnh và upload hàng loạt đều đi qua đây, nên không có
-        # đường nào quét được một tấm thẻ mà quên mất nhãn. `None` khi người dùng chưa bật sự
-        # kiện nào, và đó là mặc định.
-        event_id=await event_repo.active_event_id(db, user_id),
     )
     for name, value in (fields or {}).items():
         if name in OCR_COLUMNS:
@@ -250,7 +235,6 @@ def _list_conditions(
     status: str | None,
     company_id: uuid.UUID | None,
     language: str | None,
-    event_id: uuid.UUID | None = None,
 ) -> list[ColumnElement[bool]]:
     """Điều kiện WHERE dùng chung cho cả câu đếm lẫn câu lấy trang (xem `list_cards`).
 
@@ -273,9 +257,6 @@ def _list_conditions(
         conditions.append(BusinessCard.company_id == company_id)
     if language and (code := language.strip().lower()):
         conditions.append(BusinessCard.language_detected == code)
-    if event_id is not None:
-        conditions.append(BusinessCard.event_id == event_id)
-
     return conditions
 
 

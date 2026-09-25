@@ -367,8 +367,6 @@ async def list_cards(
     language: Annotated[
         str | None, Query(description="Mã ISO 639-1: en | vi | ko | ja | zh")
     ] = None,
-    # Lọc theo sự kiện thu thập (task NEXT-03 của T; T sửa file của Q, Q review PR).
-    event_id: Annotated[uuid.UUID | None, Query(description="Sự kiện thu thập")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=card_repo.MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
 ) -> CardListOut:
@@ -390,7 +388,6 @@ async def list_cards(
         status=card_status,
         company_id=company_id,
         language=language,
-        event_id=event_id,
         page=page,
         size=size,
     )
@@ -430,12 +427,13 @@ async def get_card_image(
     kiểm tra quyền chỉ phải sửa một chỗ.
     """
     card = await _get_or_404(db, card_id, user_id=user.id)
-    # Liên hệ nhập từ chữ ký email không có ảnh (task NEXT-08 của T; T sửa file của Q, Q
-    # review PR) — nói thẳng ra thay vì để `_resolve_image(None)` nổ kiểu.
+    # `image_path` cho phép `NULL` từ revision `0013`, và `0014` giữ nguyên dù `NEXT-08` đã
+    # bị cắt — xem lý do ở `models/card.py`. Nói thẳng ra thay vì để `_resolve_image(None)`
+    # nổ kiểu.
     if card.image_path is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            detail="Liên hệ này nhập từ chữ ký email, không có ảnh gốc.",
+            detail="Bản ghi này không có ảnh gốc.",
         )
     path = _resolve_image(card.image_path)
     if path is None:

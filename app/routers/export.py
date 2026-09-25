@@ -15,7 +15,6 @@ from app.core.db import SessionLocal
 from app.core.security import CurrentUser
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
-from app.models.event import Event
 from app.models.privacy import PrivacyAction
 from app.repositories import company as company_repo
 from app.repositories import privacy as privacy_repo
@@ -47,15 +46,12 @@ RelationshipQuery = Annotated[
     str | None,
     Query(alias="relationship", description="new | contacted | talking | won | lost | closed"),
 ]
-#: Loc theo **su kien thu thap** (task NEXT-03): xuat rieng danh ba cua mot hoi cho.
-EventQuery = Annotated[uuid.UUID | None, Query(alias="event_id", description="Su kien thu thap")]
 
 
 def _cards_select(
     user_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
-    event_id: uuid.UUID | None = None,
 ) -> Select[Any]:
     stmt = (
         select(
@@ -78,13 +74,11 @@ def _cards_select(
             BusinessCard.status,
             BusinessCard.relationship_status,
             BusinessCard.follow_up_at,
-            Event.name.label("event_name"),
             BusinessCard.notes,
             BusinessCard.uploaded_at,
             BusinessCard.updated_at,
         )
         .outerjoin(Company, Company.id == BusinessCard.company_id)
-        .outerjoin(Event, Event.id == BusinessCard.event_id)
         # Bản trùng đã gộp không nằm trong bản xuất (task NEXT-04) — xuất ra thì công cụ nhận
         # file lại dựng lại đúng cặp trùng mà người dùng vừa gộp xong.
         .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None))
@@ -94,8 +88,6 @@ def _cards_select(
         stmt = stmt.where(BusinessCard.status == card_status)
     if relationship is not None:
         stmt = stmt.where(BusinessCard.relationship_status == relationship)
-    if event_id is not None:
-        stmt = stmt.where(BusinessCard.event_id == event_id)
     return stmt
 
 
@@ -134,7 +126,6 @@ async def count_cards(
     user_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
-    event_id: uuid.UUID | None = None,
 ) -> int:
     stmt = select(func.count(BusinessCard.id)).where(
         BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None)
@@ -143,8 +134,6 @@ async def count_cards(
         stmt = stmt.where(BusinessCard.status == card_status)
     if relationship is not None:
         stmt = stmt.where(BusinessCard.relationship_status == relationship)
-    if event_id is not None:
-        stmt = stmt.where(BusinessCard.event_id == event_id)
     return int(await db.scalar(stmt) or 0)
 
 
@@ -158,11 +147,10 @@ async def iter_cards(
     user_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
-    event_id: uuid.UUID | None = None,
 ) -> AsyncIterator[CardExportRow]:
     cursor: tuple[datetime, uuid.UUID] | None = None
     while True:
-        stmt = _cards_select(user_id, card_status, relationship, event_id).limit(EXPORT_BATCH_SIZE)
+        stmt = _cards_select(user_id, card_status, relationship).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(BusinessCard.uploaded_at, BusinessCard.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -297,14 +285,8 @@ def _validated_relationship(relationship: str | None) -> str | None:
     return relationship
 
 
-def _filters(
-    card_status: str | None, relationship: str | None, event_id: uuid.UUID | None
-) -> dict[str, str]:
-    chosen = {
-        "status": card_status,
-        "relationship": relationship,
-        "event_id": str(event_id) if event_id is not None else None,
-    }
+def _filters(card_status: str | None, relationship: str | None) -> dict[str, str]:
+    chosen = {"status": card_status, "relationship": relationship}
     return {key: value for key, value in chosen.items() if value is not None}
 
 
@@ -313,7 +295,6 @@ async def export_cards_csv(
     user: CurrentUser,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
-    event_id: EventQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
@@ -322,7 +303,7 @@ async def export_cards_csv(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
+            rows = counter.watch(iter_cards(db, user_id, selected, stage))
             async for chunk in _csv_body(rows, CardExportRow.columns()):
                 yield chunk
 
@@ -330,7 +311,7 @@ async def export_cards_csv(
         body(),
         media_type=CSV_MEDIA_TYPE,
         headers=_headers("cards", "csv"),
-        background=_audit(user_id, "cards", "csv", _filters(selected, stage, event_id), counter),
+        background=_audit(user_id, "cards", "csv", _filters(selected, stage), counter),
     )
 
 
@@ -339,7 +320,6 @@ async def export_cards_json(
     user: CurrentUser,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
-    event_id: EventQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
@@ -348,9 +328,9 @@ async def export_cards_json(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            total = await count_cards(db, user_id, selected, stage, event_id)
-            meta = _meta(total, _filters(selected, stage, event_id))
-            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
+            total = await count_cards(db, user_id, selected, stage)
+            meta = _meta(total, _filters(selected, stage))
+            rows = counter.watch(iter_cards(db, user_id, selected, stage))
             async for chunk in _json_body(rows, meta):
                 yield chunk
 
@@ -358,7 +338,7 @@ async def export_cards_json(
         body(),
         media_type="application/json",
         headers=_headers("cards", "json"),
-        background=_audit(user_id, "cards", "json", _filters(selected, stage, event_id), counter),
+        background=_audit(user_id, "cards", "json", _filters(selected, stage), counter),
     )
 
 
@@ -367,7 +347,6 @@ async def export_cards_vcf(
     user: CurrentUser,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
-    event_id: EventQuery = None,
 ) -> StreamingResponse:
     """Cả lô danh thiếp dưới dạng vCard 3.0 — thả thẳng vào danh bạ điện thoại hoặc Outlook.
 
@@ -381,7 +360,7 @@ async def export_cards_vcf(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
+            rows = counter.watch(iter_cards(db, user_id, selected, stage))
             async for chunk in _vcard_body(rows):
                 yield chunk
 
@@ -389,7 +368,7 @@ async def export_cards_vcf(
         body(),
         media_type=VCARD_MEDIA_TYPE,
         headers=_headers("danh-thiep", "vcf"),
-        background=_audit(user_id, "cards", "vcf", _filters(selected, stage, event_id), counter),
+        background=_audit(user_id, "cards", "vcf", _filters(selected, stage), counter),
     )
 
 

@@ -166,11 +166,10 @@ def _drop_suffix(tokens: list[str]) -> list[str]:
 
 
 def normalize_label(text: str) -> str:
-    """Khoá chuẩn hoá cho một nhãn tự do — hiện dùng cho tên sự kiện (task `NEXT-03`).
+    """Khoá chuẩn hoá cho một nhãn tự do — nay chỉ còn `NEXT-04` dùng để so tên người.
 
-    Khác `normalize_company_name()` ở đúng một chỗ: **không gỡ hình thức pháp lý**. "Co., Ltd"
-    trong tên công ty là nhiễu, nhưng trong tên sự kiện thì mọi chữ đều là tên riêng — gỡ đi là
-    hai sự kiện khác nhau đụng nhau ở ràng buộc unique.
+    Khác `normalize_company_name()` ở đúng một chỗ: **không gỡ hình thức pháp lý**. Với tên công
+    ty thì "Co., Ltd" là nhiễu, nhưng với tên người thì mọi chữ đều mang nghĩa.
 
     Ném `ValueError` khi nhãn không còn ký tự nào có nghĩa.
     """

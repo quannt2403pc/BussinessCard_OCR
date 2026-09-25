@@ -60,17 +60,6 @@
       </select>
     </label>
 
-    {# NEXT-03: lọc theo sự kiện thu thập. Ô chọn đổ bằng JavaScript từ `/api/events` —
-       render sẵn bằng Jinja thì trang này phải đi hỏi DB ngay cả với người chưa dùng sự kiện
-       bao giờ, mà toàn bộ dữ liệu còn lại của trang vốn đã tải bằng JavaScript. #}
-    <label class="hidden text-sm" id="f-event-wrap">
-      <span class="text-slate-500">Sự kiện</span>
-      <select id="f-event" name="event_id"
-              class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
-        <option value="">Tất cả</option>
-      </select>
-    </label>
-
     <button type="reset" id="btn-reset" class="btn">{{ icon("filter") }} Bỏ lọc</button>
     <span id="summary" class="ml-auto text-sm text-slate-500">Đang tải…</span>
   </form>
@@ -308,11 +297,9 @@
     const q = $("f-q").value.trim();
     const status = $("f-status").value;
     const language = $("f-language").value;
-    const event = $("f-event").value;
     if (q) params.set("q", q);
     if (status) params.set("status", status);
     if (language) params.set("language", language);
-    if (event) params.set("event_id", event);
     return params;
   }
 
@@ -341,8 +328,7 @@
     const empty = $("empty");
     if (body.items.length === 0) {
       // Phân biệt "chưa có gì" với "bộ lọc không khớp" — hai việc phải làm tiếp khác hẳn nhau.
-      const filtered =
-        $("f-q").value || $("f-status").value || $("f-language").value || $("f-event").value;
+      const filtered = $("f-q").value || $("f-status").value || $("f-language").value;
       empty.textContent = filtered
         ? "Không có danh thiếp nào khớp bộ lọc."
         : "Chưa có danh thiếp nào. Bấm “Quét danh thiếp mới” để bắt đầu.";
@@ -365,7 +351,6 @@
   $("f-q").addEventListener("input", () => reload(300));
   $("f-status").addEventListener("change", () => reload(0));
   $("f-language").addEventListener("change", () => reload(0));
-  $("f-event").addEventListener("change", () => reload(0));
   $("btn-reset").addEventListener("click", () => reload(0));
   $("filters").addEventListener("submit", (e) => { e.preventDefault(); reload(0); });
 
@@ -387,11 +372,7 @@
     const text = (params.get("q") || "").trim();
     if (text) $("f-q").value = text;
 
-    for (const [key, id] of [
-      ["status", "f-status"],
-      ["language", "f-language"],
-      ["event_id", "f-event"],
-    ]) {
+    for (const [key, id] of [["status", "f-status"], ["language", "f-language"]]) {
       const value = params.get(key);
       if (!value) continue;
       const select = $(id);
@@ -412,7 +393,7 @@
     history.replaceState(null, "", search ? `${location.pathname}?${search}` : location.pathname);
   }
 
-  for (const id of ["f-q", "f-status", "f-language", "f-event"]) {
+  for (const id of ["f-q", "f-status", "f-language"]) {
     $(id).addEventListener("change", syncUrl);
   }
   $("btn-reset").addEventListener("click", () => {
@@ -420,43 +401,8 @@
     setTimeout(syncUrl, 0);
   });
 
-  // Ô chọn sự kiện chỉ hiện khi người dùng **có** sự kiện: chưa dùng tính năng này thì một ô
-  // chọn rỗng nằm giữa thanh lọc chỉ là thứ phải bỏ qua. Nạp xong mới áp bộ lọc trên URL, vì
-  // `applyUrlFilters()` cố ý chỉ nhận giá trị khớp một option có thật (I-27).
-  async function loadEventOptions() {
-    let data;
-    try {
-      const res = await fetch("/api/events");
-      if (!res.ok) return false;
-      data = await res.json();
-    } catch (err) {
-      return false;  // không đọc được thì cứ để trang chạy với ba bộ lọc cũ
-    }
-    if (!data.items.length) return false;
-
-    const select = $("f-event");
-    for (const item of data.items) {
-      const option = document.createElement("option");
-      option.value = item.event_id;
-      option.textContent = item.name;
-      select.append(option);
-    }
-    $("f-event-wrap").classList.remove("hidden");
-    return true;
-  }
-
   applyUrlFilters();
   load();
-
-  // Danh sách thẻ **không chờ** lượt gọi này: nó là bộ lọc thứ tư, không phải nội dung chính.
-  // Chỉ tải lại khi trên URL có sẵn `?event_id=` và giá trị ấy khớp một sự kiện có thật.
-  loadEventOptions().then((added) => {
-    if (!added) return;
-    const wanted = new URLSearchParams(location.search).get("event_id");
-    if (!wanted) return;
-    applyUrlFilters();
-    if ($("f-event").value) load();
-  });
 })();
 </script>
 {% endblock %}
