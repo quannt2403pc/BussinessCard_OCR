@@ -505,10 +505,20 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
     async def fake_index(pid: uuid.UUID) -> None:
         order.append(f"index:{pid}")
 
+    # Task NEXT-06 xen hai lượt gọi mới vào giữa. Ở đây chưa có hồ sơ hoàn chỉnh nào, nên đây là
+    # lần **tạo** chứ không phải lần làm mới: không so sánh, không sinh dòng nhật ký nào.
+    async def fake_previous(db: Any, cid: uuid.UUID) -> None:
+        return None
+
+    async def fake_mark_checked(db: Any, cid: uuid.UUID, *, at: Any) -> None:
+        order.append("checked")
+
     monkeypatch.setattr(enrich_jobs, "SessionLocal", FakeSessionFactory(None))
     monkeypatch.setattr(company_repo, "get_company", fake_get_company)
     monkeypatch.setattr(company_repo, "list_contacts", fake_contacts)
     monkeypatch.setattr(company_repo, "ensure_draft_profile", fake_draft)
+    monkeypatch.setattr(company_repo, "finished_profile", fake_previous)
+    monkeypatch.setattr(company_repo, "mark_checked", fake_mark_checked)
     monkeypatch.setattr(company_repo, "save_profile", fake_save)
     monkeypatch.setattr(enrich_jobs, "enrich_company", fake_enrich)
     monkeypatch.setattr(enrich_jobs, "build_hints", lambda cards: {})
@@ -516,7 +526,9 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(enrich_jobs.user_credentials, "model_for_user_id", fake_model)
 
     assert await enrich_jobs.enrich_and_save(company_id) == 7
-    assert order == ["save", f"index:{profile_id}"]
+    # Mốc "đã đi tra lại" phải nằm **cùng transaction** với lượt ghi hồ sơ và trước bước index:
+    # đóng mốc ở một transaction khác thì một lần hỏng giữa chừng để lại hồ sơ mới mà mốc cũ.
+    assert order == ["save", "checked", f"index:{profile_id}"]
     assert models == ["uowner/gemini-3-flash"]
 
 

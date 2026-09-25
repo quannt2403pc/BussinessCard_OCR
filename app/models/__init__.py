@@ -15,6 +15,7 @@ thiếu thì hỏng.
 from app.models import company  # noqa: F401  — model của T, nạp `companies` vào metadata
 from app.models.card import BusinessCard, CardStatus
 from app.models.chat import ChatMessage, ChatRole, ChatSession
+from app.models.company import ProfileChange
 from app.models.contact_note import ContactNote
 from app.models.event import Event
 from app.models.integration import IntegrationStatus
@@ -30,6 +31,7 @@ __all__ = [
     "ChatSession",
     "ContactNote",
     "Event",
+    "ProfileChange",
     "IntegrationStatus",
     "KBChunk",
     "KBSourceType",

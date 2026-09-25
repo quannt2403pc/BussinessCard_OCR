@@ -176,3 +176,49 @@ def as_utc(value: datetime | None) -> datetime | None:
     if value is not None and value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
+
+
+# --------------------------------------------------------------- làm mới hồ sơ (NEXT-06)
+
+
+class StaleProfile(BaseModel):
+    """Một công ty có hồ sơ lâu rồi chưa đi tra lại."""
+
+    company_id: uuid.UUID
+    display_name: str
+    checked_at: datetime | None = None
+    days_since: int | None = Field(default=None, description="null = chưa từng đóng mốc kiểm tra.")
+
+
+class StaleListOut(BaseModel):
+    days: int
+    total: int = 0
+    items: list[StaleProfile] = Field(default_factory=list)
+
+
+class FieldChangeOut(BaseModel):
+    field: str
+    label: str
+    old: Any = None
+    new: Any = None
+    notable: bool = False
+
+
+class ProfileChangeOut(BaseModel):
+    """Một lượt làm mới có phát hiện khác biệt."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    display_name: str
+    detected_at: datetime
+    notable: bool = False
+    changes: list[FieldChangeOut] = Field(default_factory=list)
+    #: Trường lần trước có mà lần này tra không ra. Giá trị cũ **vẫn được giữ** — đây chỉ là lời
+    #: nhắc rằng nguồn hôm nay không xác nhận lại được.
+    missing: list[str] = Field(default_factory=list)
+
+
+class ChangeListOut(BaseModel):
+    total: int = 0
+    notable: int = 0
+    items: list[ProfileChangeOut] = Field(default_factory=list)

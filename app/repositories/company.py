@@ -5,12 +5,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, ScalarSelect, Select, delete, func, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    ScalarSelect,
+    Select,
+    delete,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import BusinessCard
-from app.models.company import Company, CompanyProfile
+from app.models.company import Company, CompanyProfile, ProfileChange
 from app.schemas.company import SOURCED_FIELDS, CompanyProfileSchema, ProfileStatus
 from app.services.company_matching import domains_overlap, extract_domains
 from app.services.normalize_company import normalize_company_name
@@ -133,6 +142,111 @@ async def save_profile(
         .execution_options(populate_existing=True)
     )
     return result.scalar_one()
+
+
+# --------------------------------------------------------------- làm mới hồ sơ (NEXT-06)
+
+
+async def finished_profile(db: AsyncSession, company_id: uuid.UUID) -> CompanyProfileSchema | None:
+    """Bản hồ sơ **đã hoàn chỉnh** đang lưu, hoặc `None` nếu chưa có.
+
+    Trả `None` cho hồ sơ `draft` và `archived`: lượt chạy trên một hồ sơ nháp là lần **tạo**
+    chứ không phải lần **làm mới**, mà so bản đầu tiên với một bản rỗng thì ra "mọi trường đều
+    đổi" — đúng kiểu thông báo khiến người dùng thôi đọc từ lần sau.
+    """
+    profile = await db.scalar(
+        select(CompanyProfile).where(
+            CompanyProfile.company_id == company_id,
+            CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES),
+        )
+    )
+    if profile is None:
+        return None
+    return CompanyProfileSchema.model_validate(profile, from_attributes=True)
+
+
+async def mark_checked(db: AsyncSession, company_id: uuid.UUID, *, at: datetime) -> None:
+    """Đóng mốc "đã đi tra lại" — chạy cả khi lượt tra **không** đổi gì.
+
+    Không đóng mốc ở ca không đổi thì hồ sơ ấy mãi mãi nằm trong danh sách quá hạn và người
+    dùng tra lại nó mỗi tuần một lần mà chẳng để làm gì.
+    """
+    await db.execute(
+        update(CompanyProfile)
+        .where(CompanyProfile.company_id == company_id)
+        .values(last_checked_at=_naive_utc(at))
+    )
+
+
+async def record_change(
+    db: AsyncSession, company_id: uuid.UUID, payload: dict[str, Any], *, notable: bool
+) -> ProfileChange:
+    change = ProfileChange(
+        user_id=await db.scalar(select(Company.user_id).where(Company.id == company_id)),
+        company_id=company_id,
+        changes=payload,
+        notable=notable,
+    )
+    db.add(change)
+    await db.flush()
+    return change
+
+
+async def stale_profiles(
+    db: AsyncSession, *, user_id: uuid.UUID, before: datetime, limit: int = 50
+) -> Sequence[tuple[Company, datetime | None]]:
+    """Công ty có hồ sơ hoàn chỉnh mà **lâu rồi chưa đi tra lại**, cũ nhất trước.
+
+    `last_checked_at` chưa có (hồ sơ lập trước `0011`) thì lấy `generated_at` thay: coi lần sinh
+    ra là lần đối chiếu gần nhất, đúng về mặt sự thật và không cần lượt vá dữ liệu nào.
+    """
+    checked = func.coalesce(CompanyProfile.last_checked_at, CompanyProfile.generated_at)
+    rows = await db.execute(
+        select(Company, checked.label("checked_at"))
+        .join(CompanyProfile, CompanyProfile.company_id == Company.id)
+        .where(
+            Company.user_id == user_id,
+            CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES),
+            or_(checked.is_(None), checked < _naive_utc(before)),
+        )
+        .order_by(checked.asc().nullsfirst(), Company.display_name)
+        .limit(limit)
+    )
+    return list(rows.tuples().all())
+
+
+async def list_changes(
+    db: AsyncSession, *, user_id: uuid.UUID, unseen_only: bool = True, limit: int = 50
+) -> Sequence[tuple[ProfileChange, str]]:
+    """Nhật ký thay đổi kèm tên công ty. Đáng chú ý trước, rồi mới nhất trước."""
+    stmt = (
+        select(ProfileChange, Company.display_name)
+        .join(Company, Company.id == ProfileChange.company_id)
+        .where(ProfileChange.user_id == user_id)
+    )
+    if unseen_only:
+        stmt = stmt.where(ProfileChange.acknowledged_at.is_(None))
+    rows = await db.execute(
+        stmt.order_by(ProfileChange.notable.desc(), ProfileChange.detected_at.desc()).limit(limit)
+    )
+    return list(rows.tuples().all())
+
+
+async def acknowledge_change(
+    db: AsyncSession, change_id: uuid.UUID, *, user_id: uuid.UUID, at: datetime
+) -> bool:
+    change = await db.scalar(
+        select(ProfileChange).where(
+            ProfileChange.id == change_id,
+            ProfileChange.user_id == user_id,
+            ProfileChange.acknowledged_at.is_(None),
+        )
+    )
+    if change is None:
+        return False
+    change.acknowledged_at = _naive_utc(at)
+    await db.flush()
+    return True
 
 
 async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
