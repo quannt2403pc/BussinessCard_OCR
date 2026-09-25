@@ -9,13 +9,16 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.db import SessionLocal
 from app.core.security import CurrentUser
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
 from app.models.event import Event
+from app.models.privacy import PrivacyAction
 from app.repositories import company as company_repo
+from app.repositories import privacy as privacy_repo
 from app.schemas.export import (
     CSV_BOM,
     EXPORT_BATCH_SIZE,
@@ -237,6 +240,45 @@ def _headers(name: str, suffix: str) -> dict[str, str]:
     return {"Content-Disposition": f'attachment; filename="{name}-{today}.{suffix}"'}
 
 
+class _Counter:
+    """Đếm số bản ghi **thật sự chảy ra ngoài**, để nhật ký của `NEXT-07` ghi đúng con số.
+
+    Đếm ở đây chứ không dùng lại `count_cards()`: hai câu truy vấn riêng có thể lệch nhau, mà
+    một nhật ký bảo vệ dữ liệu cá nhân nói sai số bản ghi thì còn tệ hơn không có nhật ký.
+    """
+
+    def __init__(self) -> None:
+        self.rows = 0
+
+    async def watch(self, rows: AsyncIterator[Any]) -> AsyncIterator[Any]:
+        async for row in rows:
+            self.rows += 1
+            yield row
+
+
+def _audit(
+    user_id: uuid.UUID, kind: str, fmt: str, filters: dict[str, str], counter: _Counter
+) -> BackgroundTask:
+    """Ghi nhật ký **sau khi** file đã gửi xong (task NEXT-07).
+
+    `BackgroundTask` chạy sau lượt truyền, nên con số ghi lại là số bản ghi thật sự ra khỏi hệ
+    thống: tải nửa chừng rồi ngắt thì nhật ký ghi đúng phần đã đi, không ghi phần định gửi.
+    """
+
+    async def write() -> None:
+        async with SessionLocal() as db:
+            await privacy_repo.log(
+                db,
+                user_id=user_id,
+                action=PrivacyAction.EXPORT,
+                detail={"kind": kind, "format": fmt, "filters": filters},
+                record_count=counter.rows,
+            )
+            await db.commit()
+
+    return BackgroundTask(write)
+
+
 def _validated_status(card_status: str | None) -> str | None:
     if card_status is not None and card_status not in STATUS_CHOICES:
         raise HTTPException(
@@ -276,14 +318,20 @@ async def export_cards_csv(
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
     user_id = user.id
+    counter = _Counter()
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = iter_cards(db, user_id, selected, stage, event_id)
+            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
             async for chunk in _csv_body(rows, CardExportRow.columns()):
                 yield chunk
 
-    return StreamingResponse(body(), media_type=CSV_MEDIA_TYPE, headers=_headers("cards", "csv"))
+    return StreamingResponse(
+        body(),
+        media_type=CSV_MEDIA_TYPE,
+        headers=_headers("cards", "csv"),
+        background=_audit(user_id, "cards", "csv", _filters(selected, stage, event_id), counter),
+    )
 
 
 @router.get("/cards.json", responses={200: {"model": CardsExportOut}})
@@ -296,16 +344,21 @@ async def export_cards_json(
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
     user_id = user.id
+    counter = _Counter()
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
             total = await count_cards(db, user_id, selected, stage, event_id)
             meta = _meta(total, _filters(selected, stage, event_id))
-            async for chunk in _json_body(iter_cards(db, user_id, selected, stage, event_id), meta):
+            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
+            async for chunk in _json_body(rows, meta):
                 yield chunk
 
     return StreamingResponse(
-        body(), media_type="application/json", headers=_headers("cards", "json")
+        body(),
+        media_type="application/json",
+        headers=_headers("cards", "json"),
+        background=_audit(user_id, "cards", "json", _filters(selected, stage, event_id), counter),
     )
 
 
@@ -324,14 +377,19 @@ async def export_cards_vcf(
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
     user_id = user.id
+    counter = _Counter()
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            async for chunk in _vcard_body(iter_cards(db, user_id, selected, stage, event_id)):
+            rows = counter.watch(iter_cards(db, user_id, selected, stage, event_id))
+            async for chunk in _vcard_body(rows):
                 yield chunk
 
     return StreamingResponse(
-        body(), media_type=VCARD_MEDIA_TYPE, headers=_headers("danh-thiep", "vcf")
+        body(),
+        media_type=VCARD_MEDIA_TYPE,
+        headers=_headers("danh-thiep", "vcf"),
+        background=_audit(user_id, "cards", "vcf", _filters(selected, stage, event_id), counter),
     )
 
 
@@ -340,6 +398,14 @@ async def export_card_vcf(card_id: uuid.UUID, user: CurrentUser) -> Response:
     """Một danh thiếp dưới dạng vCard. Thẻ của người khác trả **404**, không phải 403."""
     async with SessionLocal() as db:
         row = await one_card(db, user.id, card_id)
+        await privacy_repo.log(
+            db,
+            user_id=user.id,
+            action=PrivacyAction.EXPORT,
+            detail={"kind": "card", "format": "vcf", "card_id": str(card_id)},
+            record_count=1,
+        )
+        await db.commit()
     return Response(
         row.vcard(),
         media_type=VCARD_MEDIA_TYPE,
@@ -350,28 +416,36 @@ async def export_card_vcf(card_id: uuid.UUID, user: CurrentUser) -> Response:
 @router.get("/companies.csv")
 async def export_companies_csv(user: CurrentUser) -> StreamingResponse:
     user_id = user.id
+    counter = _Counter()
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = iter_companies(db, user_id)
+            rows = counter.watch(iter_companies(db, user_id))
             async for chunk in _csv_body(rows, CompanyExportRow.columns()):
                 yield chunk
 
     return StreamingResponse(
-        body(), media_type=CSV_MEDIA_TYPE, headers=_headers("companies", "csv")
+        body(),
+        media_type=CSV_MEDIA_TYPE,
+        headers=_headers("companies", "csv"),
+        background=_audit(user_id, "companies", "csv", {}, counter),
     )
 
 
 @router.get("/companies.json", responses={200: {"model": CompaniesExportOut}})
 async def export_companies_json(user: CurrentUser) -> StreamingResponse:
     user_id = user.id
+    counter = _Counter()
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
             meta = _meta(await count_companies(db, user_id), {})
-            async for chunk in _json_body(iter_companies(db, user_id), meta):
+            async for chunk in _json_body(counter.watch(iter_companies(db, user_id)), meta):
                 yield chunk
 
     return StreamingResponse(
-        body(), media_type="application/json", headers=_headers("companies", "json")
+        body(),
+        media_type="application/json",
+        headers=_headers("companies", "json"),
+        background=_audit(user_id, "companies", "json", {}, counter),
     )

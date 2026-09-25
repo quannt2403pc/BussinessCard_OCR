@@ -1,0 +1,311 @@
+{# Dữ liệu cá nhân: mục đích thu thập, nhật ký, hạn lưu trữ, xoá theo yêu cầu. #}
+{# Chủ sở hữu: T | Task: NEXT-07 | xem Task.md #}
+{#
+  Trang này tồn tại vì dữ liệu trong hệ thống **là dữ liệu cá nhân của người khác**, và Nghị
+  định 13/2023 đòi người thu thập phải nói rõ thu để làm gì, giữ bao lâu, và xoá thế nào khi
+  chủ thể dữ liệu yêu cầu.
+
+  Phần *mục đích* viết thẳng trong HTML chứ không nạp bằng JavaScript: đây là văn bản phải đọc
+  được kể cả khi mọi lời gọi API đều hỏng.
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+
+{% block title %}Dữ liệu cá nhân{% endblock %}
+
+{% block content %}
+<div>
+  <h1 class="text-2xl font-semibold text-brand-ink">Dữ liệu cá nhân</h1>
+  <p class="mt-1 text-sm text-slate-600">
+    Danh thiếp bạn quét chứa thông tin của <strong>người khác</strong>. Trang này nói rõ hệ thống
+    thu thập để làm gì, giữ bao lâu, và xoá thế nào khi người ta yêu cầu.
+  </p>
+</div>
+
+<section class="mt-6 rounded-lg border border-line bg-white p-5" aria-label="Mục đích thu thập">
+  <h2 class="text-sm font-semibold text-brand-ink">Thu thập để làm gì</h2>
+  <dl class="mt-3 space-y-3 text-sm">
+    <div>
+      <dt class="font-medium text-brand-ink">Dữ liệu nào</dt>
+      <dd class="text-slate-600">
+        Ảnh danh thiếp và các trường đọc được từ ảnh: họ tên, chức vụ, công ty, email, số điện
+        thoại, địa chỉ, website. Cộng thêm những gì bạn tự ghi: trạng thái quan hệ, ngày hẹn
+        liên hệ lại, ghi chú theo dõi.
+      </dd>
+    </div>
+    <div>
+      <dt class="font-medium text-brand-ink">Dùng vào việc gì</dt>
+      <dd class="text-slate-600">
+        Số hoá danh thiếp để khỏi nhập tay, lập hồ sơ doanh nghiệp đối tác, và trả lời câu hỏi
+        của bạn về chính những dữ liệu đó. <strong>Không</strong> dùng cho mục đích nào khác,
+        không bán, không chia sẻ sang tài khoản khác.
+      </dd>
+    </div>
+    <div>
+      <dt class="font-medium text-brand-ink">Ai đọc được</dt>
+      <dd class="text-slate-600">
+        Chỉ tài khoản đã quét. Mỗi tài khoản là một vùng dữ liệu riêng, kể cả trong câu trả lời
+        của trợ lý AI.
+      </dd>
+    </div>
+    <div>
+      <dt class="font-medium text-brand-ink">Gửi đi đâu</dt>
+      <dd class="text-slate-600">
+        Ảnh và chữ trên thẻ được gửi tới model ngôn ngữ để đọc và dịch, qua kết nối OAuth của
+        <strong>chính bạn</strong>. Hồ sơ doanh nghiệp còn dùng tìm kiếm Internet. Vector phục
+        vụ tìm kiếm ngữ nghĩa sinh <strong>ngay trong hệ thống</strong>, không gửi ra ngoài.
+      </dd>
+    </div>
+  </dl>
+</section>
+
+<section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Hạn lưu trữ">
+  <h2 class="text-sm font-semibold text-brand-ink">Hạn lưu trữ</h2>
+  <p class="mt-1 text-xs text-muted">
+    Mặc định giữ vô thời hạn. Đặt hạn thì hệ thống <strong>đếm ra</strong> phần quá hạn và chờ
+    bạn bấm — không tự xoá gì.
+  </p>
+  <div class="mt-3 flex flex-wrap items-end gap-3">
+    <label class="text-sm">
+      <span class="text-slate-600">Giữ trong (ngày)</span>
+      <input id="ret-days" type="number" min="30" max="3650" placeholder="không giới hạn"
+             class="mt-1 block w-44 rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+    </label>
+    <button type="button" id="ret-save" class="btn">{{ icon("check") }} Lưu hạn</button>
+    <button type="button" id="ret-clear" class="btn">Gỡ hạn</button>
+  </div>
+  <p id="ret-summary" class="mt-3 text-sm text-slate-600"></p>
+  <button type="button" id="ret-purge" class="btn mt-2 hidden border-rose-200 text-rose-700 hover:bg-rose-50">
+    {{ icon("trash") }} Xoá phần quá hạn
+  </button>
+</section>
+
+<section class="mt-4 rounded-lg border border-rose-200 bg-rose-50/40 p-5"
+         aria-label="Xoá theo yêu cầu của chủ thể dữ liệu">
+  <h2 class="text-sm font-semibold text-brand-ink">Xoá theo yêu cầu</h2>
+  <p class="mt-1 text-xs text-slate-600">
+    Nhập <strong>email hoặc số điện thoại</strong> của người yêu cầu xoá. Hệ thống tìm trước cho
+    bạn xem, xoá là một cú bấm riêng — và <strong>không lấy lại được</strong>.
+  </p>
+  <div class="mt-3 flex flex-wrap items-end gap-3">
+    <label class="text-sm flex-1 min-w-64">
+      <span class="text-slate-600">Email hoặc số điện thoại đã chuẩn hoá</span>
+      <input id="subj-term" type="text" placeholder="an.nguyen@vidu.vn hoặc +84912345678"
+             class="mt-1 block w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+    </label>
+    <button type="button" id="subj-find" class="btn">{{ icon("search") }} Tìm</button>
+  </div>
+  <div id="subj-result" class="mt-3 hidden">
+    <ul id="subj-list" class="divide-y divide-line overflow-hidden rounded-lg border border-line bg-white text-sm"></ul>
+    <button type="button" id="subj-erase" class="btn mt-3 border-rose-300 bg-rose-600 text-white hover:bg-rose-700">
+      {{ icon("trash") }} Xoá vĩnh viễn
+    </button>
+  </div>
+  <p id="subj-empty" class="mt-3 hidden text-sm text-slate-600"></p>
+</section>
+
+<section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Nhật ký">
+  <h2 class="text-sm font-semibold text-brand-ink">Nhật ký truy xuất</h2>
+  <p class="mt-1 text-xs text-muted">
+    Mỗi lần dữ liệu ra khỏi hệ thống hoặc bị xoá đều ghi lại ở đây. Dòng nhật ký
+    <strong>không bị xoá theo</strong> dữ liệu nó nói về.
+  </p>
+  <div id="log-list" class="mt-3 divide-y divide-line text-sm">
+    <p class="py-4 text-muted">Đang tải…</p>
+  </div>
+</section>
+
+<div id="message" class="hidden" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    let found = [];
+
+    function say(text, kind) {
+      toastShow($("message"), text, kind || "info");
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = text;
+      return node;
+    }
+
+    function when(value) {
+      if (!value) return "—";
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? value : d.toLocaleString("vi-VN");
+    }
+
+    async function read(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error("Lỗi HTTP " + res.status);
+      return res.json();
+    }
+
+    async function send(path, body, method) {
+      const res = await fetch(path, {
+        method: method || "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Lỗi HTTP " + res.status);
+      return res.json();
+    }
+
+    // --- hạn lưu trữ -------------------------------------------------------
+
+    function showRetention(data) {
+      $("ret-days").value = data.days || "";
+      const parts = [`Đang giữ ${data.total_contacts} danh thiếp.`];
+      parts.push(data.days ? `Hạn lưu trữ: ${data.days} ngày.` : "Không đặt hạn lưu trữ.");
+      if (data.oldest_upload) parts.push(`Cũ nhất quét ngày ${when(data.oldest_upload)}.`);
+      if (data.expired) parts.push(`${data.expired} danh thiếp đã quá hạn.`);
+      $("ret-summary").textContent = parts.join(" ");
+      $("ret-purge").classList.toggle("hidden", !data.expired);
+      if (data.expired) $("ret-purge").textContent = `Xoá ${data.expired} danh thiếp quá hạn`;
+    }
+
+    async function loadRetention() {
+      try {
+        showRetention(await read("/api/privacy/retention"));
+      } catch (err) {
+        $("ret-summary").textContent = "Không đọc được cấu hình lưu trữ.";
+      }
+    }
+
+    async function saveRetention(days) {
+      try {
+        showRetention(await send("/api/privacy/retention", { days }, "PUT"));
+        say(days ? `Đã đặt hạn ${days} ngày. Chưa xoá gì cả.` : "Đã gỡ hạn lưu trữ.", "ok");
+      } catch (err) {
+        say("Không lưu được. Hạn phải từ 30 đến 3650 ngày.", "error");
+      }
+    }
+
+    $("ret-save").addEventListener("click", () => {
+      const days = parseInt($("ret-days").value, 10);
+      if (!Number.isFinite(days)) {
+        say("Nhập số ngày, hoặc bấm Gỡ hạn để giữ vô thời hạn.", "error");
+        return;
+      }
+      saveRetention(days);
+    });
+
+    $("ret-clear").addEventListener("click", () => saveRetention(null));
+
+    $("ret-purge").addEventListener("click", async () => {
+      if (!window.confirm("Xoá vĩnh viễn những danh thiếp đã quá hạn lưu trữ?")) return;
+      try {
+        const data = await send("/api/privacy/purge", {});
+        say(`Đã xoá ${data.erased} danh thiếp quá hạn.`, "ok");
+        loadRetention();
+        loadLogs();
+      } catch (err) {
+        say("Không xoá được.", "error");
+      }
+    });
+
+    // --- xoá theo yêu cầu --------------------------------------------------
+
+    function subjectRow(card) {
+      const row = el("li", "flex flex-wrap items-center gap-3 px-4 py-2");
+      row.append(el("span", "min-w-0 flex-1 truncate font-medium text-brand-ink",
+                    card.full_name_vi || card.full_name || "(chưa có tên)"));
+      row.append(el("span", "hidden min-w-0 flex-1 truncate text-muted sm:block",
+                    card.company_name_raw || ""));
+      row.append(el("span", "shrink-0 text-xs text-muted", card.email || card.phone || ""));
+      return row;
+    }
+
+    async function findSubject() {
+      const term = $("subj-term").value.trim();
+      if (term.length < 3) {
+        say("Nhập ít nhất 3 ký tự.", "error");
+        return;
+      }
+      let data;
+      try {
+        data = await send("/api/privacy/subject", { term });
+      } catch (err) {
+        say("Không tìm được.", "error");
+        return;
+      }
+      found = data.items;
+      $("subj-result").classList.toggle("hidden", !data.total);
+      $("subj-empty").classList.toggle("hidden", Boolean(data.total));
+      if (!data.total) {
+        $("subj-empty").textContent = `Không có danh thiếp nào khớp ${term}.`;
+        return;
+      }
+      $("subj-list").replaceChildren(...found.map(subjectRow));
+      $("subj-erase").textContent = `Xoá vĩnh viễn ${data.total} danh thiếp`;
+    }
+
+    $("subj-find").addEventListener("click", findSubject);
+    $("subj-term").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); findSubject(); }
+    });
+
+    $("subj-erase").addEventListener("click", async () => {
+      const term = $("subj-term").value.trim();
+      // Hỏi lại bằng đúng con số: "xoá 4 danh thiếp" khác hẳn "xoá dữ liệu", và đây là thao
+      // tác không có đường lùi.
+      if (!window.confirm(`Xoá vĩnh viễn ${found.length} danh thiếp của ${term}? Không lấy lại được.`)) return;
+      try {
+        const data = await send("/api/privacy/erase", { term });
+        say(`Đã xoá ${data.erased} danh thiếp và ${data.images_removed} ảnh.`, "ok");
+        $("subj-result").classList.add("hidden");
+        $("subj-term").value = "";
+        loadRetention();
+        loadLogs();
+      } catch (err) {
+        say("Không xoá được.", "error");
+      }
+    });
+
+    // --- nhật ký -----------------------------------------------------------
+
+    function logRow(entry) {
+      const row = el("div", "flex flex-wrap items-baseline gap-3 py-2");
+      row.append(el("span", "w-40 shrink-0 text-xs text-muted", when(entry.created_at)));
+      row.append(el("span", "font-medium text-brand-ink", entry.label));
+      const detail = entry.detail || {};
+      const bits = [];
+      if (detail.format) bits.push(detail.format.toUpperCase());
+      if (detail.term) bits.push(detail.term);
+      if (detail.days) bits.push(`hạn ${detail.days} ngày`);
+      if (detail.filters && Object.keys(detail.filters).length) {
+        bits.push(Object.entries(detail.filters).map(([k, v]) => `${k}=${v}`).join(", "));
+      }
+      if (bits.length) row.append(el("span", "text-xs text-muted", bits.join(" · ")));
+      row.append(el("span", "ml-auto text-xs tabular-nums text-slate-600",
+                    entry.record_count + " bản ghi"));
+      return row;
+    }
+
+    async function loadLogs() {
+      let data;
+      try {
+        data = await read("/api/privacy/logs");
+      } catch (err) {
+        $("log-list").replaceChildren(el("p", "py-4 text-muted", "Không đọc được nhật ký."));
+        return;
+      }
+      $("log-list").replaceChildren(
+        ...(data.total
+          ? data.items.map(logRow)
+          : [el("p", "py-4 text-muted", "Chưa có lượt xuất hay xoá nào.")]));
+    }
+
+    loadRetention();
+    loadLogs();
+  })();
+</script>
+{% endblock %}

@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import current_user
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
+from app.models.privacy import PrivacyAction, PrivacyLog
 from app.models.user import User
 from app.routers import export
 from app.schemas.export import CardExportRow
@@ -112,6 +114,49 @@ async def test_cards_csv_exports_card_without_company(
     assert len(rows) == 2
     assert rows[1][rows[0].index("company_name")] == ""
     assert rows[1][rows[0].index("company_name_raw")] == "Cty chưa gắn"
+
+
+async def test_export_is_written_to_the_privacy_log(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    """Mỗi lượt xuất file là một lần dữ liệu cá nhân ra khỏi hệ thống (task NEXT-07).
+
+    Con số ghi lại là số bản ghi **thật sự chảy ra**, đếm ngay trên dòng chảy chứ không hỏi
+    lại bằng một câu `COUNT` thứ hai — hai câu riêng có thể lệch nhau, mà một nhật ký bảo vệ
+    dữ liệu cá nhân nói sai số bản ghi thì còn tệ hơn không có nhật ký.
+    """
+    db_session.add_all([card(full_name="Một"), card(full_name="Hai")])
+    await db_session.flush()
+
+    response = await client.get("/api/export/cards.csv")
+    assert response.status_code == 200
+
+    rows = await db_session.scalars(select(PrivacyLog).where(PrivacyLog.user_id == OWNER_ID))
+    entries = list(rows.all())
+    assert len(entries) == 1
+    assert entries[0].action == PrivacyAction.EXPORT
+    assert entries[0].record_count == 2
+    assert entries[0].detail["format"] == "csv"
+
+
+async def test_a_filtered_export_records_its_filters(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    """Nhật ký phải nói rõ **phần nào** của dữ liệu đã ra ngoài, không chỉ nói là có."""
+    db_session.add_all(
+        [
+            card(full_name="Đã xác nhận", status=CardStatus.CONFIRMED),
+            card(full_name="Chờ duyệt", status=CardStatus.NEEDS_REVIEW),
+        ]
+    )
+    await db_session.flush()
+
+    await client.get("/api/export/cards.json?status=confirmed")
+
+    entry = await db_session.scalar(select(PrivacyLog).where(PrivacyLog.user_id == OWNER_ID))
+    assert entry is not None
+    assert entry.detail["filters"] == {"status": "confirmed"}
+    assert entry.record_count == 1
 
 
 async def test_merged_cards_are_left_out(

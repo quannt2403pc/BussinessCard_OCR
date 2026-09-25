@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text, func
+from sqlalchemy import Boolean, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,10 @@ class User(Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
     cliproxy_auth_file: Mapped[str | None] = mapped_column(Text)
+    #: Hạn lưu trữ danh thiếp, tính bằng ngày (task NEXT-07, revision `0012`). `NULL` = giữ vô
+    #: thời hạn, và đó là **mặc định**: tự đặt một hạn rồi tự xoá dữ liệu của người dùng là việc
+    #: không ai cho phép. Quá hạn cũng không tự xoá — hệ thống chỉ đếm ra và chờ người bấm.
+    retention_days: Mapped[int | None] = mapped_column(Integer)
     last_login_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
