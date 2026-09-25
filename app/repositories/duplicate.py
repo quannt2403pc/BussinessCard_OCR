@@ -230,7 +230,7 @@ async def merge(
         if filler is not None:
             values[field] = filler
 
-    for field in ("company_id", "event_id"):
+    for field in ("company_id",):
         if getattr(primary, field) is None:
             filler = next(
                 (getattr(card, field) for card in ordered if getattr(card, field) is not None),
