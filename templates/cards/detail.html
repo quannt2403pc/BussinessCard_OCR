@@ -51,7 +51,7 @@
 
   {# --- cột trái: ảnh model đã nhìn + siêu dữ liệu --- #}
   <aside class="space-y-4 lg:sticky lg:top-6 lg:self-start">
-    <figure class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <figure id="image-figure" class="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <a id="image-link" href="#" target="_blank" rel="noopener" class="block">
         <img id="image" src="" alt="Ảnh danh thiếp" class="w-full bg-slate-100 object-contain">
       </a>
@@ -59,6 +59,13 @@
         Đây là ảnh <strong>sau tiền xử lý</strong> — đúng bản mà model đã đọc (task 3.2).
       </figcaption>
     </figure>
+
+    {# Liên hệ dán từ chữ ký email không có ảnh (task NEXT-08 của T; T sửa file của Q, Q review
+       PR). Thay hẳn khung ảnh bằng một dòng nói rõ nguồn, chứ không để một khung xám trống —
+       khung trống đọc như "ảnh hỏng", mà ở đây không có gì hỏng cả. #}
+    <div id="no-image" class="hidden rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-muted">
+      Liên hệ này nhập từ <strong>chữ ký email</strong>, không có ảnh gốc để đối chiếu.
+    </div>
 
     <dl class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
       <div class="flex items-center justify-between gap-3">
@@ -394,8 +401,13 @@
     }
 
     // --- cột trái ---
-    $("image").src = `/api/cards/${card.id}/image`;
-    $("image-link").href = `/api/cards/${card.id}/image`;
+    if (card.source === "signature") {
+      $("image-figure").classList.add("hidden");
+      $("no-image").classList.remove("hidden");
+    } else {
+      $("image").src = `/api/cards/${card.id}/image`;
+      $("image-link").href = `/api/cards/${card.id}/image`;
+    }
     $("image").addEventListener("error", () => {
       $("image").replaceWith(el("div",
         "flex h-48 items-center justify-center bg-slate-100 text-sm text-muted",

@@ -122,7 +122,8 @@ async def erase_cards(
     await db.execute(
         delete(BusinessCard).where(BusinessCard.user_id == user_id, BusinessCard.id.in_(card_ids))
     )
-    return [card.image_path for card in cards]
+    # Liên hệ nhập từ chữ ký không có ảnh để xoá (task NEXT-08) — bỏ qua, không phải lỗi.
+    return [card.image_path for card in cards if card.image_path]
 
 
 # --------------------------------------------------------------- hạn lưu trữ
