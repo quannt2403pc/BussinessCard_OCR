@@ -21,6 +21,7 @@ from app.models.event import Event
 from app.models.integration import IntegrationStatus
 from app.models.kb import KBChunk, KBSourceType
 from app.models.model_pref import UserModelPref
+from app.models.privacy import PrivacyAction, PrivacyLog
 from app.models.user import User
 
 __all__ = [
@@ -35,6 +36,8 @@ __all__ = [
     "IntegrationStatus",
     "KBChunk",
     "KBSourceType",
+    "PrivacyAction",
+    "PrivacyLog",
     "User",
     "UserModelPref",
     "company",

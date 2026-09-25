@@ -36,6 +36,7 @@ ROUTER_MODULES: tuple[str, ...] = (
     "events",  # T — task NEXT-03
     "duplicates",  # T — task NEXT-04
     "refresh",  # T — task NEXT-06
+    "privacy",  # T — task NEXT-07
 )
 
 
