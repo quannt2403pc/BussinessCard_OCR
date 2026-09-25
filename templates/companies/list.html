@@ -18,6 +18,36 @@
   </div>
 </div>
 
+{# NEXT-06: hồ sơ cũ dần. Hai khối, cùng ẩn khi không có gì để làm — trang này vốn đã dài,
+   thêm hai khung rỗng nữa thì phần danh sách bị đẩy khỏi màn hình đầu. #}
+<section id="stale-section" class="mt-6 hidden rounded-lg border border-amber-200 bg-amber-50/60 p-4"
+         aria-label="Hồ sơ cần làm mới">
+  <div class="flex flex-wrap items-center gap-3">
+    <div>
+      <h2 class="text-sm font-semibold text-brand-ink">Hồ sơ cần làm mới</h2>
+      <p id="stale-note" class="mt-1 text-xs text-slate-600"></p>
+    </div>
+    <button type="button" id="btn-refresh-stale" class="btn ml-auto">
+      {{ icon("retry") }} Tra lại tất cả
+    </button>
+  </div>
+  <ul id="stale-list" class="mt-3 flex flex-wrap gap-2 text-xs"></ul>
+</section>
+
+<section id="changes-section" class="mt-4 hidden rounded-lg border border-line bg-white p-4"
+         aria-label="Thay đổi từ lần tra gần nhất">
+  <div class="flex flex-wrap items-baseline gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Lần tra lại gần đây thấy gì khác</h2>
+    <span id="changes-count" class="text-xs text-muted"></span>
+  </div>
+  <div id="changes-list" class="mt-3 space-y-3"></div>
+  <p class="mt-3 text-xs text-muted">
+    Chỉ so 11 trường có nguồn — phần mô tả do model viết thì lần nào cũng khác chữ, đưa vào đây
+    là mọi lượt tra đều báo &ldquo;có thay đổi&rdquo;. Trường lần này tra không ra
+    <strong>không bị xoá</strong>: giá trị cũ giữ nguyên, chỉ ghi lại là chưa xác nhận lại được.
+  </p>
+</section>
+
 <section class="mt-6 rounded-lg border border-line bg-white p-4">
   <form id="filters" class="flex flex-wrap items-end gap-3">
     <label class="flex-1 min-w-[16rem] text-sm">
@@ -556,9 +586,125 @@
   $("btn-enrich").addEventListener("click", startEnrich);
   $("btn-cancel-all").addEventListener("click", cancelAll);
 
+  // --- làm mới hồ sơ (NEXT-06) ---------------------------------------------
+
+  /** Công ty quá hạn: id → tên. Giữ cả tên vì `selected` là một Map id → tên, và hàng "đang
+      chạy" mà hiện ra một chuỗi UUID thì không ai đọc được đó là công ty nào. */
+  let stale = new Map();
+
+  function valueText(value) {
+    if (value === null || value === undefined || value === "") return "— trống —";
+    return Array.isArray(value) ? value.join(", ") : String(value);
+  }
+
+  function changeRow(item) {
+    const row = el("li", "flex flex-wrap items-baseline gap-2 text-sm");
+    row.append(el("span", "w-32 shrink-0 text-xs text-slate-500", item.label));
+    row.append(el("span", "text-slate-500 line-through", valueText(item.old)));
+    row.append(el("span", "text-xs text-slate-400", "→"));
+    const after = el(
+      "span",
+      item.notable ? "font-semibold text-rose-800" : "font-medium text-brand-ink",
+      valueText(item.new));
+    row.append(after);
+    return row;
+  }
+
+  function changeCard(entry) {
+    const box = el("div", "overflow-hidden rounded-lg border "
+      + (entry.notable ? "border-rose-200 bg-rose-50/40" : "border-line"));
+
+    const head = el("div", "flex flex-wrap items-center gap-2 border-b border-line px-4 py-2");
+    const link = el("a", "link font-medium text-brand-ink hover:text-brand-700",
+                    entry.display_name);
+    link.href = "/companies/" + entry.company_id;
+    head.append(link);
+    head.append(el("span", "text-xs text-muted", formatDate(entry.detected_at)));
+    if (entry.notable) {
+      // Mã số thuế đổi nghĩa là **pháp nhân đổi** — sáp nhập, tách công ty, hoặc hồ sơ cũ gắn
+      // nhầm doanh nghiệp. Đó là thứ phải dừng lại xem, không phải một dòng trong danh sách.
+      head.append(el("span",
+        "rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-800", "Đáng chú ý"));
+    }
+    const seen = el("button", "ml-auto text-xs text-brand-700 hover:underline", "Đã xem");
+    seen.type = "button";
+    seen.addEventListener("click", async () => {
+      const res = await fetch(`/api/refresh/changes/${entry.id}/ack`, { method: "POST" });
+      if (res.ok) loadChanges();
+    });
+    head.append(seen);
+
+    const list = el("ul", "space-y-1 px-4 py-3");
+    list.append(...entry.changes.map(changeRow));
+    if (entry.missing.length) {
+      const note = el("li", "pt-1 text-xs text-amber-800",
+        "Lần này chưa tra lại được: " + entry.missing.join(", ") + " — giá trị cũ vẫn giữ nguyên.");
+      list.append(note);
+    }
+
+    box.append(head, list);
+    return box;
+  }
+
+  async function loadStale() {
+    let data;
+    try {
+      const res = await fetch("/api/refresh/stale");
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (err) {
+      return;  // không đọc được thì cứ để trang chạy như cũ
+    }
+    stale = new Map(data.items.map((item) => [item.company_id, item.display_name]));
+    $("stale-section").classList.toggle("hidden", !data.total);
+    if (!data.total) return;
+
+    $("stale-note").textContent =
+      `${data.total} hồ sơ chưa đối chiếu lại quá ${data.days} ngày.`;
+    $("stale-list").replaceChildren(...data.items.slice(0, 8).map((item) => {
+      const chip = el("li", "rounded-full border border-amber-300 bg-white px-2 py-0.5");
+      chip.textContent = item.days_since === null
+        ? item.display_name + " · chưa từng kiểm"
+        : `${item.display_name} · ${item.days_since} ngày`;
+      return chip;
+    }));
+  }
+
+  async function loadChanges() {
+    let data;
+    try {
+      const res = await fetch("/api/refresh/changes");
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (err) {
+      return;
+    }
+    $("changes-section").classList.toggle("hidden", !data.total);
+    if (!data.total) return;
+    $("changes-count").textContent = data.notable
+      ? `${data.total} công ty · ${data.notable} đáng chú ý`
+      : `${data.total} công ty`;
+    $("changes-list").replaceChildren(...data.items.map(changeCard));
+  }
+
+  // Tra lại đi qua đúng hàng đợi nền của 5.6 — cùng đường với nút *Lập hồ sơ*, nên nó cũng
+  // chịu đúng giới hạn 2 công ty cùng lúc và hiện tiến trình y như vậy.
+  async function refreshStale() {
+    if (!stale.size) return;
+    clearSelection();
+    for (const [id, name] of stale) selected.set(id, name);
+    updateSelection();
+    await startEnrich();
+    loadStale();
+  }
+
+  $("btn-refresh-stale").addEventListener("click", refreshStale);
+
   applyUrlFilters();
   restoreJobs();
   load().then(pollJobs);
+  loadStale();
+  loadChanges();
 })();
 </script>
 {% endblock %}

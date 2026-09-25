@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    Boolean,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,6 +94,10 @@ class CompanyProfile(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="draft", server_default="draft"
     )
+    #: Lần gần nhất hồ sơ được **đi tra lại** với Internet (task NEXT-06, revision `0011`).
+    #: Tách khỏi `updated_at` có chủ đích: `updated_at` đổi cả khi người dùng sửa tay một
+    #: trường, mà sửa tay không phải là đã đối chiếu lại với nguồn.
+    last_checked_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now(), nullable=False
@@ -91,6 +105,51 @@ class CompanyProfile(Base):
 
     def __repr__(self) -> str:
         return f"<CompanyProfile {self.id} company={self.company_id} status={self.status}>"
+
+
+class ProfileChange(Base):
+    """Một lượt làm mới **có phát hiện khác biệt** (task NEXT-06, revision `0011`).
+
+    Chỉ sinh dòng khi thật sự có gì đó khác. Lượt làm mới không đổi gì chỉ cập nhật
+    `CompanyProfile.last_checked_at` — ghi cả những lượt ấy thì nhật ký đầy dòng "không có gì
+    mới" và phần đáng đọc bị chôn mất.
+    """
+
+    __tablename__ = "profile_changes"
+    __table_args__ = (
+        # Màn hình chỉ hỏi đúng "còn thay đổi nào chưa xem không". Dòng đã xem là phần lớn bảng
+        # sau vài tuần, không đáng số hoá — tên và mệnh đề `WHERE` khớp từng chữ với `0011`.
+        Index(
+            "ix_profile_changes_unseen",
+            "user_id",
+            "detected_at",
+            postgresql_where=text("acknowledged_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    #: `{"changes": {trường: {"old": …, "new": …}}, "missing": [trường]}` — xem
+    #: `services/profile_diff.py`. `missing` **không phải** thay đổi: giá trị cũ vẫn được giữ.
+    changes: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    #: Mã số thuế / tên pháp lý / địa chỉ / website đổi. Mã số thuế đổi nghĩa là **pháp nhân
+    #: đổi** — sáp nhập, tách công ty, hoặc hồ sơ cũ gắn nhầm doanh nghiệp.
+    notable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acknowledged_at: Mapped[datetime | None] = mapped_column()
+    detected_at: Mapped[datetime] = mapped_column(
+        server_default=text("clock_timestamp()"), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ProfileChange {self.id} company={self.company_id} notable={self.notable}>"
 
 
 ACTIVE_JOB_ITEM_STATUSES = ("pending", "running")

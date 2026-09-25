@@ -3,7 +3,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from app.services.llm import (
     LLMInvalidModelError,
     LLMNotConnectedError,
 )
+from app.services.profile_diff import diff_profiles, merge_keeping_known
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,18 @@ async def run_job(job_id: uuid.UUID) -> None:
 
 
 async def enrich_and_save(company_id: uuid.UUID) -> int:
+    """Tra một công ty rồi lưu hồ sơ. **Cùng một hàm lo cả lần tạo lẫn lần làm mới.**
+
+    Chạy trên một công ty đã có hồ sơ hoàn chỉnh thì đây là lượt *làm mới* (task NEXT-06), và
+    nó khác lần tạo ở hai chỗ, cả hai đều nhằm **không làm mất dữ liệu đang đúng**:
+
+    - Giá trị mới chỉ thắng ở đâu tra được; trường lần này tra không ra thì giữ nguyên bản cũ
+      (`merge_keeping_known`). Ghi đè `NULL` lên một mã số thuế đã có là mất một dữ kiện đúng
+      chỉ vì hôm nay Internet trả lời khác.
+    - Phần thật sự khác được ghi vào `profile_changes` để người dùng đọc sau. Lượt không đổi gì
+      chỉ đóng mốc `last_checked_at` — ghi cả những lượt ấy thì nhật ký đầy dòng "không có gì
+      mới" và phần đáng đọc bị chôn mất.
+    """
     async with SessionLocal() as db:
         company = await company_repo.get_company(db, company_id)
         if company is None:
@@ -183,6 +196,7 @@ async def enrich_and_save(company_id: uuid.UUID) -> int:
         name = company.display_name
         model = await user_credentials.model_for_user_id(db, company.user_id, "enrich")
         hints = build_hints(await company_repo.list_contacts(db, company_id))
+        previous = await company_repo.finished_profile(db, company_id)
         await company_repo.ensure_draft_profile(db, company_id)
         await db.commit()
 
@@ -191,14 +205,28 @@ async def enrich_and_save(company_id: uuid.UUID) -> int:
     if not sourced:
         raise NoSourcedDataError(name)
 
+    diff = diff_profiles(previous, profile) if previous is not None else None
+    to_save = merge_keeping_known(previous, profile) if previous is not None else profile
+
     async with SessionLocal() as db:
         saved = await company_repo.save_profile(
             db,
             company_id,
-            profile,
+            to_save,
             llm_model=profile.llm_model,
             generated_at=profile.generated_at,
         )
+        checked_at = profile.generated_at or datetime.now(UTC)
+        await company_repo.mark_checked(db, company_id, at=checked_at)
+        if diff is not None and not diff.is_empty():
+            await company_repo.record_change(db, company_id, diff.as_json(), notable=diff.notable)
+            logger.info(
+                "Hồ sơ %s: làm mới thấy %d thay đổi, %d trường tra không lại được%s",
+                company_id,
+                len(diff.changes),
+                len(diff.missing),
+                " — ĐÁNG CHÚ Ý" if diff.notable else "",
+            )
         await db.commit()
     await index_profile(saved.id)
     return sourced
