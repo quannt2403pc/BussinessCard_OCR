@@ -3,7 +3,11 @@ fastapi
 uvicorn[standard]
 pydantic>=2
 pydantic-settings
-sqlalchemy>=2
+# Ghim tran <2.1: SQLAlchemy 2.1.0 (2026-09-25) doi kieu `Select` sang dang variadic, lam do
+# 29 loi mypy o 9 file cua ca hai nguoi, va thoi kem `greenlet` nen toan bo tang async chet
+# ngay o `conftest.py`. Go tran nay la mot viec rieng, khong phai viec cua mot PR tinh nang.
+# `[asyncio]` khai thang `greenlet` thay vi trong cho no duoc kem san.
+sqlalchemy[asyncio]>=2,<2.1
 alembic
 psycopg[binary]
 pgvector
