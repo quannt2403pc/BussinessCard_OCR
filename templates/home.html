@@ -57,8 +57,11 @@
 
 <p id="empty" class="mt-4 hidden rounded-lg border border-dashed border-line bg-white px-6 py-8 text-center text-sm text-muted"></p>
 
-<section class="mt-8 grid gap-3 sm:grid-cols-3" aria-label="Hành động chính">
+<section class="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Hành động chính">
   <a href="/cards/upload" class="btn-primary justify-start px-5 py-3">{{ icon("scan") }} Quét danh thiếp</a>
+  {# NEXT-08: phần lớn liên hệ ngày nay đến qua email chứ không qua thẻ giấy, nên lối vào này
+     đứng ngay cạnh nút quét chứ không nằm trong một menu nào. #}
+  <a href="/paste" class="btn justify-start px-5 py-3">{{ icon("file") }} Dán chữ ký email</a>
   <a href="/companies" class="btn justify-start px-5 py-3">{{ icon("building") }} Lập hồ sơ</a>
   {# EX-09: trang `/assistant` đã gỡ — nút này mở bong bóng tại chỗ. `<button>` chứ không `<a href>`:
      nó không dẫn đi đâu cả, mà link giả còn bị trình duyệt prefetch và mở được ở tab mới. #}

@@ -159,6 +159,26 @@ async def test_a_filtered_export_records_its_filters(
     assert entry.record_count == 1
 
 
+async def test_a_signature_contact_exports_like_any_other(
+    db_session: AsyncSession, owner: User, client: httpx.AsyncClient
+) -> None:
+    """Liên hệ dán từ chữ ký email (task NEXT-08) không có ảnh, nhưng xuất ra y hệt thẻ quét.
+
+    Đó là cả điểm của task: đổi đầu vào, giữ nguyên mọi thứ còn lại. `image_path` là `NULL`,
+    mà không đường nào của export đọc cột ấy — nếu có thì ca này sẽ nổ.
+    """
+    db_session.add(
+        card(full_name="Dán từ chữ ký", image_path=None, source="signature", email="an@vidu.vn")
+    )
+    await db_session.flush()
+
+    payload = json.loads((await client.get("/api/export/cards.json")).text)
+    vcf = (await client.get("/api/export/cards.vcf")).text
+
+    assert [row["full_name"] for row in payload["items"]] == ["Dán từ chữ ký"]
+    assert "FN:Dán từ chữ ký" in vcf
+
+
 async def test_merged_cards_are_left_out(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:

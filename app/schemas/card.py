@@ -221,6 +221,10 @@ class CardOut(BaseModel):
 
     id: uuid.UUID
     status: str
+    #: `scan` hoặc `signature` (task NEXT-08 của T; T sửa file của Q, Q review PR). Nằm ở
+    #: `CardOut` chứ không chỉ ở `CardDetailOut`: danh sách thẻ cũng cần phân biệt để về sau
+    #: đánh dấu được nguồn, và nó chỉ là một chuỗi 16 ký tự.
+    source: str = "scan"
     full_name: str | None = None
     job_title: str | None = None
     company_name_raw: str | None = None
@@ -240,8 +244,20 @@ class CardOut(BaseModel):
     translation_meta: dict[str, Any] | None = None
     company_id: uuid.UUID | None = None
     notes: str | None = None
-    image_path: str
+    #: `None` khi liên hệ nhập từ chữ ký email (task NEXT-08) — không có ảnh gốc.
+    image_path: str | None = None
     uploaded_at: datetime
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def default_source(cls, value: object) -> object:
+        """Object ORM **chưa flush** thì default phía Python chưa chạy, nên `source` là `None`.
+
+        Cột là `NOT NULL` trong DB (revision `0013`), nên `None` chỉ tới được đây từ đúng tình
+        huống ấy — vài chỗ test dựng bản ghi trong bộ nhớ để không phải chạm Postgres. Quy về
+        mặc định thay vì ném lỗi kiểu: hợp đồng API là *"scan trừ khi nói khác"*.
+        """
+        return "scan" if value is None else value
 
 
 class CardDetailOut(CardOut):

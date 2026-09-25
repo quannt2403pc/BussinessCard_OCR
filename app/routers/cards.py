@@ -430,6 +430,13 @@ async def get_card_image(
     kiểm tra quyền chỉ phải sửa một chỗ.
     """
     card = await _get_or_404(db, card_id, user_id=user.id)
+    # Liên hệ nhập từ chữ ký email không có ảnh (task NEXT-08 của T; T sửa file của Q, Q
+    # review PR) — nói thẳng ra thay vì để `_resolve_image(None)` nổ kiểu.
+    if card.image_path is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Liên hệ này nhập từ chữ ký email, không có ảnh gốc.",
+        )
     path = _resolve_image(card.image_path)
     if path is None:
         raise HTTPException(
@@ -551,7 +558,7 @@ async def delete_card(
 
     await card_repo.delete_card(db, card)
 
-    path = _resolve_image(image_path)
+    path = _resolve_image(image_path) if image_path is not None else None
     if path is not None:
         try:
             path.unlink()

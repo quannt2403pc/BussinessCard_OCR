@@ -106,9 +106,23 @@ class BusinessCard(Base):
         index=True,
     )
 
+    # --- Nguồn dữ liệu ---
+    #
+    # `scan` (mặc định) hoặc `signature` — liên hệ dán từ khối chữ ký email (task NEXT-08 của T;
+    # T sửa file của Q, Q review PR). Giao diện cần biết để không vẽ một khung ảnh rỗng.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="scan", server_default="scan"
+    )
+
     # --- Ảnh gốc ---
-    image_path: Mapped[str] = mapped_column(Text, nullable=False)
-    # SHA-256 của file gốc (task 3.1). Unique theo `(user_id, image_hash)` — xem __table_args__.
+    #
+    # `NULL` khi liên hệ **không đến từ ảnh** (nhập từ chữ ký email). Cách khác là nhét chuỗi
+    # rỗng vào đây, nhưng rồi mọi chỗ đọc cột này phải đoán xem chuỗi rỗng nghĩa là gì — mà
+    # `_resolve_image("")` trả về chính thư mục gốc, tức một đường dẫn *hợp lệ* trỏ vào chỗ sai.
+    image_path: Mapped[str | None] = mapped_column(Text)
+    # SHA-256 của **nội dung nguồn** (task 3.1): file ảnh với thẻ quét, khối chữ ký đã chuẩn hoá
+    # với liên hệ nhập tay. Unique theo `(user_id, image_hash)` — xem __table_args__ — nên cùng
+    # một ràng buộc bắt cả ảnh trùng lẫn chữ ký dán hai lần.
     image_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 

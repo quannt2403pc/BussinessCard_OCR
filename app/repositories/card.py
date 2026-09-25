@@ -174,12 +174,13 @@ async def create_card(
     db: AsyncSession,
     *,
     user_id: uuid.UUID,
-    image_path: str,
+    image_path: str | None,
     image_hash: str,
     fields: Mapping[str, Any] | None = None,
     ocr_raw_json: dict[str, Any] | None = None,
     status: CardStatus = CardStatus.PENDING,
     notes: str | None = None,
+    source: str = "scan",
 ) -> BusinessCard:
     """Tạo một bản ghi danh thiếp và commit.
 
@@ -194,6 +195,7 @@ async def create_card(
         ocr_raw_json=ocr_raw_json,
         status=status,
         notes=notes,
+        source=source,
         # Nhãn sự kiện đang diễn ra, đóng dấu ngay lúc tạo (task NEXT-03 của T; T sửa file của
         # Q, Q review PR). Đặt ở đây chứ không ở router vì **đây là chỗ duy nhất sinh ra một
         # `business_cards`** — upload một ảnh và upload hàng loạt đều đi qua đây, nên không có
