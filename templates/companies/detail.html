@@ -35,7 +35,7 @@
 <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm" role="status" aria-live="polite"></div>
 
 <div id="archived" class="mt-4 hidden flex flex-wrap items-center gap-3 rounded-md border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
-  <span>Hồ sơ này đang <strong>ẩn</strong>: không hiện trong danh sách Doanh nghiệp, ô tìm kiếm và câu trả lời của trợ lý AI.</span>
+  <span>Hồ sơ này đang <strong>ẩn</strong>.</span>
   <button id="btn-restore" type="button"
           class="ml-auto rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
     Hiện lại
@@ -49,25 +49,14 @@
 
 <div id="empty" class="mt-6 hidden rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
   <p class="text-sm text-slate-600">Công ty này chưa có hồ sơ doanh nghiệp.</p>
-  <p class="mt-1 text-xs text-slate-500">
-    Bấm <em>Tạo hồ sơ</em> để hệ thống tra cứu Internet và tổng hợp thông tin có nguồn.
-  </p>
 </div>
 
 <div id="drafting" class="mt-6 hidden rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-6 py-10 text-center">
   <p class="text-sm text-slate-700">Hồ sơ đang được tạo.</p>
-  <p class="mt-1 text-xs text-slate-500">
-    Trang tự cập nhật khi tra cứu xong. Bấm nhầm hoặc chờ quá lâu thì bấm <em>Huỷ tạo hồ sơ</em>.
-  </p>
 </div>
 
 <section id="edit-panel" class="mt-6 hidden rounded-lg border border-slate-200 bg-white p-5">
   <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sửa hồ sơ</h2>
-  <p class="mt-1 text-xs text-slate-500">
-    Trường bạn sửa được coi là <strong>đã kiểm bằng người</strong>: nguồn cũ của đúng trường đó bị gỡ
-    (nguồn cũ chỉ chứng minh cho giá trị cũ) và hồ sơ chuyển sang <em>Đã kiểm</em>.
-    Bấm <em>Tạo lại hồ sơ</em> về sau sẽ ghi đè phần sửa tay.
-  </p>
   <div id="edit-fields" class="mt-4 grid gap-4 sm:grid-cols-2"></div>
   <div class="mt-4 flex justify-end gap-2">
     <button id="btn-cancel" type="button"
@@ -104,9 +93,6 @@
 
   <section class="rounded-lg border border-slate-200 bg-white p-5">
     <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Nguồn tham khảo</h2>
-    <p class="mt-1 text-xs text-slate-500">
-      Mỗi trường chỉ được giữ lại khi có trang nguồn kiểm chứng được. Trường không có nguồn để trống.
-    </p>
     <ul id="block-sources" class="mt-3 space-y-3"></ul>
   </section>
 
@@ -114,9 +100,6 @@
 </div>
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5">
   <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Người liên hệ</h2>
-  <p class="mt-1 text-xs text-slate-500">
-    Lấy từ danh thiếp đã gắn với công ty này. Bấm vào tên để mở lại tấm danh thiếp gốc.
-  </p>
   <div class="mt-3 overflow-hidden rounded-md border border-slate-200">
     <table class="w-full text-left text-sm">
       <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -449,7 +432,7 @@
         el("span", null, `Mã số thuế ${code} trùng với: `),
         companyLinks(twins, false),
         el("div", "mt-1 text-xs text-amber-800",
-          "Có thể cùng một pháp nhân đang được lưu thành nhiều công ty vì tên in trên danh thiếp khác nhau."),
+          "Có thể là cùng một pháp nhân, tên in trên thẻ khác nhau."),
       );
     }
     if (neighbours.length) {
@@ -457,7 +440,7 @@
         el("span", null, "Cùng tên miền email / website với: "),
         companyLinks(neighbours, true),
         el("div", "mt-1 text-xs text-slate-500",
-          "Thường là cùng tập đoàn hoặc công ty con — chỉ để tham khảo, không phải cùng một pháp nhân."),
+          "Thường là cùng tập đoàn — chỉ để tham khảo."),
       );
     }
     tax.classList.toggle("hidden", !twins.length);
@@ -491,7 +474,7 @@
     if (!hasProfile) return Promise.resolve(true);
     return confirmDialog(
       "Tạo lại hồ sơ?",
-      "Hồ sơ hiện tại sẽ bị ghi đè bằng kết quả tra cứu mới, gồm cả các sửa tay.",
+      "Ghi đè hồ sơ hiện tại, gồm cả phần sửa tay.",
       "Tạo lại",
     );
   }
@@ -522,7 +505,7 @@
   async function archiveProfile() {
     const ok = await confirmDialog(
       "Ẩn hồ sơ?",
-      "Hồ sơ vẫn được giữ nguyên và hiện lại được bất cứ lúc nào, nhưng sẽ không xuất hiện trong danh sách Doanh nghiệp, ô tìm kiếm và câu trả lời của trợ lý AI.",
+      "Hồ sơ vẫn giữ nguyên, hiện lại được bất cứ lúc nào.",
       "Ẩn hồ sơ",
     );
     if (!ok) return;
@@ -582,7 +565,7 @@
 
   function watchDraft() {
     if (draftPolls >= DRAFT_POLL_LIMIT) {
-      message("Hồ sơ vẫn đang tạo sau 3 phút — lượt chạy có thể đã dừng giữa chừng. Bấm Tạo hồ sơ để chạy lại.", "info");
+      message("Quá 3 phút chưa xong. Bấm Tạo hồ sơ để chạy lại.", "info");
       return;
     }
     draftPolls += 1;

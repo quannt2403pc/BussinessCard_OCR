@@ -27,11 +27,6 @@
 
 {% block content %}
 <h1 class="text-2xl font-semibold text-slate-900">Cài đặt kết nối</h1>
-<p class="mt-2 max-w-2xl text-slate-600">
-  Hệ thống gọi Gemini qua <strong>CLIProxyAPI</strong> bằng OAuth — không nhúng API key trong
-  ứng dụng. Bấm nút bên dưới một lần, token được giữ lại trong volume
-  <code class="rounded bg-slate-100 px-1">cliproxy_auths</code> qua các lần restart.
-</p>
 
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
   <div class="flex flex-wrap items-center gap-3">
@@ -96,9 +91,6 @@
           <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">1</span>
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-slate-900">Đăng nhập Google và bấm <em>Cho phép</em></p>
-            <p class="mt-1 text-sm text-slate-600">
-              Một cửa sổ nhỏ sẽ mở ra bên cạnh. Hộp thoại này vẫn ở đây để bạn nhìn theo.
-            </p>
             <button id="btn-start-oauth" type="button" class="btn-primary mt-2">
               {{ icon("external") }} Đăng nhập Google
             </button>
@@ -142,9 +134,7 @@
           <span data-dot class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-white">3</span>
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-slate-900">Quay lại hộp thoại này</p>
-            <p id="paste-hint" class="mt-1 text-sm text-slate-600">
-              Trang tự nhận địa chỉ trong clipboard rồi tự kết nối — không phải dán tay.
-            </p>
+            <p id="paste-hint" class="mt-1 text-sm text-slate-600">Trang tự đọc clipboard rồi tự kết nối.</p>
 
             {# Lối thủ công: chỉ mở ra khi đường tự động không chạy được. #}
             <details id="paste-manual" class="mt-2">
@@ -191,11 +181,6 @@
    và đã lọc theo năng lực đo được ở EX-12 — xem `docs/adr-model-per-feature.md`. #}
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
   <h2 class="text-base font-semibold text-slate-900">Model cho từng chức năng</h2>
-  <p class="mt-1 text-sm text-slate-500">
-    Mỗi chức năng dùng một model riêng, lưu theo tài khoản của bạn. Để trống là dùng mặc định
-    của hệ thống (<code id="default-model" class="rounded bg-slate-100 px-1">{{ model }}</code>).
-    Danh sách chỉ hiện model <strong>đã đo là làm được việc đó</strong>.
-  </p>
 
   <div id="model-fields" class="mt-4 grid gap-4 sm:grid-cols-3">
     <p class="text-sm text-muted">Đang tải…</p>
@@ -381,7 +366,6 @@
 
   function renderModelPrefs(data) {
     modelFields.replaceChildren();
-    el("default-model").textContent = data.default_model;
 
     if (!data.reachable) {
       const note = document.createElement("p");
@@ -496,7 +480,7 @@
     pasteManual.open = false;
     callbackUrl.value = "";
     oauthLinkFallback.classList.add("hidden");
-    pasteHint.textContent = "Trang tự nhận địa chỉ trong clipboard rồi tự kết nối — không phải dán tay.";
+    pasteHint.textContent = "Trang tự đọc clipboard rồi tự kết nối.";
     btnStartOauth.disabled = false;
     if (!dlg.open) dlg.showModal();
   }
