@@ -26,6 +26,7 @@ from app.models.card import BusinessCard, CardStatus
 from app.models.kb import KBChunk, KBSourceType
 from app.models.privacy import PrivacyLog
 from app.models.user import User
+from tests.conftest import workspace_id_of
 
 ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
 
@@ -44,6 +45,7 @@ async def make_card(
 ) -> BusinessCard:
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=await workspace_id_of(db, user),
         user_id=user.id,
         image_path=f"uploads/{uuid.uuid4().hex}.jpg",
         image_hash=uuid.uuid4().hex * 2,
@@ -61,7 +63,7 @@ async def make_card(
 async def make_chunk(db: AsyncSession, user: User, card: BusinessCard) -> KBChunk:
     chunk = KBChunk(
         id=uuid.uuid4(),
-        user_id=user.id,
+        workspace_id=await workspace_id_of(db, user),
         source_type=str(KBSourceType.CARD),
         source_id=card.id,
         content="Nguyễn Văn An — Công ty Ví Dụ",

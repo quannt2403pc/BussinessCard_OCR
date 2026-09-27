@@ -29,7 +29,7 @@ from app.models.user import User
 from app.repositories import kb as kb_repo
 from app.routers import cards as cards_router
 from app.services import kb
-from tests.conftest import api_client
+from tests.conftest import api_client, workspace_id_of
 
 HTML_HEADERS = {"accept": "text/html,application/xhtml+xml"}
 
@@ -162,6 +162,7 @@ async def test_tai_khoan_bi_khoa_thi_phien_cu_het_hieu_luc(db_session, user_a: U
 
 async def make_card(db_session, user: User, **overrides) -> BusinessCard:
     values = {
+        "workspace_id": await workspace_id_of(db_session, user),
         "user_id": user.id,
         "image_path": f"sec/{uuid.uuid4().hex[:8]}.jpg",
         "image_hash": uuid.uuid4().hex,
@@ -178,49 +179,57 @@ async def make_card(db_session, user: User, **overrides) -> BusinessCard:
     return card
 
 
-async def test_danh_sach_the_chi_thay_the_cua_minh(db_session, user_a, user_b) -> None:
+async def test_danh_sach_the_chi_thay_the_cua_minh(db_session, user_a, active_a, user_b) -> None:
     await make_card(db_session, user_a, full_name="Của A")
     await make_card(db_session, user_b, full_name="Của B")
 
-    result = await cards_router.list_cards(db_session, user_a)
+    result = await cards_router.list_cards(db_session, user_a, active_a)
 
     assert [row.full_name for row in result.items] == ["Của A"]
     assert result.total == 1
 
 
-async def test_the_cua_nguoi_khac_tra_404_khong_phai_403(db_session, user_a, user_b) -> None:
+async def test_the_cua_nguoi_khac_tra_404_khong_phai_403(
+    db_session, user_a, active_a, user_b
+) -> None:
     """403 là tự khai rằng bản ghi đó tồn tại — xem Plan.md mục 4."""
     from fastapi import HTTPException
 
     card_b = await make_card(db_session, user_b)
 
     with pytest.raises(HTTPException) as exc:
-        await cards_router.get_card(card_b.id, db_session, user_a)
+        await cards_router.get_card(card_b.id, db_session, user_a, active_a)
 
     assert exc.value.status_code == 404
     # Cùng **một câu** với ca id không tồn tại: khác câu chữ là còn một kênh để dò.
     with pytest.raises(HTTPException) as missing:
-        await cards_router.get_card(uuid.uuid4(), db_session, user_a)
+        await cards_router.get_card(uuid.uuid4(), db_session, user_a, active_a)
     assert exc.value.detail == missing.value.detail
 
 
-async def test_upload_trung_anh_chi_tinh_trong_pham_vi_mot_nguoi(
-    db_session, user_a, user_b
+async def test_upload_trung_anh_chi_tinh_trong_pham_vi_mot_khong_gian(
+    db_session, user_a, workspace_a, user_b, workspace_b
 ) -> None:
-    """B upload đúng tấm ảnh A đã có thì **được** — và không hề biết A có tấm thẻ đó (12.3)."""
+    """Tổ chức khác upload đúng tấm ảnh này thì **được**, và không biết bên kia đã có (`NEXT-05`).
+
+    Đổi từ *một người* sang *một không gian* là đúng nửa còn lại của A9′: hai người **cùng** một
+    không gian quét trùng một tấm thẻ thì phải bị chặn — ca đó nằm ở `test_isolation.py`.
+    """
     from app.repositories import card as card_repo
 
     shared_hash = uuid.uuid4().hex
     await make_card(db_session, user_a, image_hash=shared_hash)
 
-    assert await card_repo.get_by_hash(db_session, shared_hash, user_id=user_b.id) is None
-    assert await card_repo.get_by_hash(db_session, shared_hash, user_id=user_a.id) is not None
+    assert await card_repo.get_by_hash(db_session, shared_hash, workspace_id=workspace_b) is None
+    assert (
+        await card_repo.get_by_hash(db_session, shared_hash, workspace_id=workspace_a) is not None
+    )
 
 
-async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_nguoi_khac(
-    db_session, user_a, user_b, embedder
+async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_khong_gian_khac(
+    db_session, user_a, workspace_a, user_b, workspace_b, embedder
 ) -> None:
-    """Đường rò khó thấy nhất của A9: chunk của B lọt vào ngữ cảnh trợ lý AI của A.
+    """Đường rò khó thấy nhất của A9′: chunk của tổ chức B lọt vào ngữ cảnh trợ lý AI của A.
 
     Ca "A hỏi trợ lý về công ty chỉ B có" đầy đủ (gồm cả câu trả lời của model) nằm ở
     `tests/test_isolation.py` — task 12.7 của T. Ở đây chặn tại tầng truy hồi, nơi rò bắt đầu.
@@ -232,11 +241,11 @@ async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_nguoi_khac(
     )
     await kb.ingest_card(db_session, card_b)
 
-    assert await kb_repo.count_chunks(db_session, user_id=user_b.id) >= 1
-    assert await kb_repo.count_chunks(db_session, user_id=user_a.id) == 0
+    assert await kb_repo.count_chunks(db_session, workspace_id=workspace_b) >= 1
+    assert await kb_repo.count_chunks(db_session, workspace_id=workspace_a) == 0
 
-    hits_b = await retriever.search(db_session, "Vận tải XYZ", user_id=user_b.id)
-    hits_a = await retriever.search(db_session, "Vận tải XYZ", user_id=user_a.id)
+    hits_b = await retriever.search(db_session, "Vận tải XYZ", workspace_id=workspace_b)
+    hits_a = await retriever.search(db_session, "Vận tải XYZ", workspace_id=workspace_a)
 
     assert hits_b, "tiền đề của test: chunk của B có thật và tìm được"
     assert hits_a == []

@@ -67,25 +67,20 @@ class KBChunk(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    # Chủ sở hữu chunk (task 12.3). Đây là cột **quan trọng nhất** của việc tách dữ liệu ở F3:
-    # rò một chunk là trợ lý AI đọc được dữ liệu của người khác rồi trả lời ra thành câu — đường
-    # rò khó thấy nhất mà tiêu chí A9 nhắm tới. Mọi câu tìm kiếm phải có nó trong `WHERE`
-    # (`repositories/kb.py::scope_filters`), không lọc lại sau khi đã lấy về.
+    # Cột tách dữ liệu **quan trọng nhất** của F3: rò một chunk là trợ lý AI đọc được dữ liệu
+    # của không gian khác rồi trả lời ra thành câu — đường rò khó thấy nhất mà A9′ nhắm tới. Mọi
+    # câu tìm kiếm phải có nó trong `WHERE` (`repositories/kb.py::scope_filters`), không lọc lại
+    # sau khi đã lấy về. Task 12.3 lọc theo `user_id`; `NEXT-05` đổi sang không gian làm việc.
+    #
+    # **Không có cột người tạo.** Chunk là dữ liệu dẫn xuất, sinh lại được từ nguồn bất cứ lúc
+    # nào, nên "ai tạo" ở đây chỉ là người bấm nút index gần nhất — một câu trả lời sai lệch mà
+    # không ai cần. Nguồn thật (`business_cards`, `companies`) mới giữ người tạo.
     #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
     #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
     #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
-    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

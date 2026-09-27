@@ -30,6 +30,7 @@ from app.routers import cards as cards_router
 from app.routers import kb as kb_router
 from app.services import retriever
 from app.services.retriever import Hit
+from tests.conftest import active_workspace_of, workspace_id_of
 
 NOW = datetime(2026, 9, 17, 9, 0, tzinfo=UTC)
 
@@ -129,9 +130,15 @@ def test_trộn_danh_sach_rong_tra_ve_rong():
 
 
 async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
-    """Một danh thiếp đã xác nhận + công ty của nó, đã nằm trong KB."""
+    """Một danh thiếp đã xác nhận + công ty của nó, đã nằm trong KB.
+
+    Ghi vào **không gian làm việc** của `user` (`NEXT-05`) — `user_id` ở lại chỉ để nói ai đã
+    nhập bản ghi, không còn quyết định ai đọc được nó.
+    """
+    workspace_id = await workspace_id_of(db_session, user)
     company = Company(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         display_name="Công ty TNHH Logistics ABC",
         name_normalized=f"abc-{uuid.uuid4().hex[:8]}",
@@ -142,6 +149,7 @@ async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
 
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         image_path="ab/abc.jpg",
         image_hash=uuid.uuid4().hex,
@@ -159,14 +167,17 @@ async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
     )
     db_session.add(card)
     await db_session.flush()
-    await kb_router.reindex(db_session, user)
+    await kb_router.reindex(db_session, await active_workspace_of(db_session, user))
     return card, company
 
 
 async def _stored_content(db_session, user) -> str:
-    """Nội dung chunk duy nhất đang có trong KB **của người này**."""
+    """Nội dung chunk duy nhất đang có trong KB **của không gian này**."""
     hits = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, user_id=user.id, top_k=1
+        db_session,
+        [0.0] * settings.embedding_dim,
+        workspace_id=await workspace_id_of(db_session, user),
+        top_k=1,
     )
     return hits[0][0].content
 
@@ -174,7 +185,7 @@ async def _stored_content(db_session, user) -> str:
 # --------------------------------------------------------------------------- 7.1 ngưỡng điểm
 
 
-async def test_nguong_diem_cat_bo_chunk_khong_lien_quan(db_session, user_a, embedder):
+async def test_nguong_diem_cat_bo_chunk_khong_lien_quan(db_session, user_a, workspace_a, embedder):
     """Hỏi một câu KB không có gì liên quan thì trả **rỗng**, không phải 5 chunk gần nhất.
 
     Không có bước này thì D8 nhận về mấy chunk ngẫu nhiên và trả lời bằng chúng — đúng kiểu bịa
@@ -183,29 +194,31 @@ async def test_nguong_diem_cat_bo_chunk_khong_lien_quan(db_session, user_a, embe
     await seed_kb(db_session, user_a)
 
     hits = await retriever.search(
-        db_session, "giá vàng hôm nay thế nào", hybrid=False, user_id=user_a.id
+        db_session, "giá vàng hôm nay thế nào", hybrid=False, workspace_id=workspace_a
     )
 
     assert hits == []
 
 
-async def test_duoi_nguong_van_tim_thay_neu_ha_nguong(db_session, user_a, embedder):
+async def test_duoi_nguong_van_tim_thay_neu_ha_nguong(db_session, user_a, workspace_a, embedder):
     """Phân biệt "KB rỗng" với "có nhưng bị ngưỡng cắt" — hai nguyên nhân rất dễ nhầm."""
     await seed_kb(db_session, user_a)
 
     hits = await retriever.search(
-        db_session, "giá vàng hôm nay", min_similarity=-1.0, hybrid=False, user_id=user_a.id
+        db_session, "giá vàng hôm nay", min_similarity=-1.0, hybrid=False, workspace_id=workspace_a
     )
 
     assert hits, "KB có dữ liệu mà hạ hết ngưỡng vẫn không ra gì"
     assert hits[0].similarity is not None and hits[0].similarity < retriever.MIN_SIMILARITY
 
 
-async def test_tim_bang_dung_noi_dung_chunk_thi_dat_diem_toi_da(db_session, user_a, embedder):
+async def test_tim_bang_dung_noi_dung_chunk_thi_dat_diem_toi_da(
+    db_session, user_a, workspace_a, embedder
+):
     await seed_kb(db_session, user_a)
     content = await _stored_content(db_session, user_a)
 
-    hits = await retriever.search(db_session, content, hybrid=False, user_id=user_a.id)
+    hits = await retriever.search(db_session, content, hybrid=False, workspace_id=workspace_a)
 
     assert hits[0].similarity == pytest.approx(1.0, abs=1e-6)
     assert hits[0].matched_by == "vector"
@@ -215,13 +228,15 @@ async def test_tim_bang_dung_noi_dung_chunk_thi_dat_diem_toi_da(db_session, user
 # --------------------------------------------------------------------------- 7.2 hybrid
 
 
-async def test_full_text_bat_duoc_email_ma_vector_khong_bat_duoc(db_session, user_a, embedder):
+async def test_full_text_bat_duoc_email_ma_vector_khong_bat_duoc(
+    db_session, user_a, workspace_a, embedder
+):
     """Câu hỏi chứa một địa chỉ email: nhánh vector rớt ngưỡng, nhánh full-text khớp chính xác."""
     await seed_kb(db_session, user_a)
     query = "ai dùng email a.nguyen@abc.vn?"
 
-    chi_vector = await retriever.search(db_session, query, hybrid=False, user_id=user_a.id)
-    ca_hai = await retriever.search(db_session, query, hybrid=True, user_id=user_a.id)
+    chi_vector = await retriever.search(db_session, query, hybrid=False, workspace_id=workspace_a)
+    ca_hai = await retriever.search(db_session, query, hybrid=True, workspace_id=workspace_a)
 
     assert chi_vector == []
     assert len(ca_hai) == 1
@@ -229,17 +244,23 @@ async def test_full_text_bat_duoc_email_ma_vector_khong_bat_duoc(db_session, use
     assert "a.nguyen@abc.vn" in ca_hai[0].content
 
 
-async def test_full_text_bat_duoc_so_dien_thoai_go_theo_kieu_noi_dia(db_session, user_a, embedder):
+async def test_full_text_bat_duoc_so_dien_thoai_go_theo_kieu_noi_dia(
+    db_session, user_a, workspace_a, embedder
+):
     """`0912 345 678` trong câu hỏi phải tìm ra thẻ lưu `+84912345678` (nhờ `expand_query`)."""
     await seed_kb(db_session, user_a)
 
-    hits = await retriever.search(db_session, "số 0912 345 678 là của ai?", user_id=user_a.id)
+    hits = await retriever.search(
+        db_session, "số 0912 345 678 là của ai?", workspace_id=workspace_a
+    )
 
     assert len(hits) == 1
     assert hits[0].matched_by == "text"
 
 
-async def test_full_text_khong_chuan_hoa_thi_truot_dung_so_do(db_session, user_a, embedder):
+async def test_full_text_khong_chuan_hoa_thi_truot_dung_so_do(
+    db_session, user_a, workspace_a, embedder
+):
     """Đối chứng cho test trên: tìm bằng đúng chữ người dùng gõ thì **không** khớp gì cả.
 
     Có test này thì bước sinh dạng E.164 trong `query_terms()` không thể bị xoá đi mà cả bộ
@@ -247,12 +268,14 @@ async def test_full_text_khong_chuan_hoa_thi_truot_dung_so_do(db_session, user_a
     """
     await seed_kb(db_session, user_a)
 
-    hits = await kb_repo.search_fulltext(db_session, ["0912 345 678"], user_id=user_a.id, top_k=5)
+    hits = await kb_repo.search_fulltext(
+        db_session, ["0912 345 678"], workspace_id=workspace_a, top_k=5
+    )
 
     assert hits == []
 
 
-async def test_full_text_khong_ghep_and_ca_cau_hoi(db_session, user_a, embedder):
+async def test_full_text_khong_ghep_and_ca_cau_hoi(db_session, user_a, workspace_a, embedder):
     """Bắt đúng lỗi đo được khi viết bộ test này (xem `repositories/kb.py::search_fulltext`).
 
     `websearch_to_tsquery` nối mọi từ bằng `AND`, nên ném cả câu hỏi xuống là đòi chunk chứa cả
@@ -261,56 +284,58 @@ async def test_full_text_khong_ghep_and_ca_cau_hoi(db_session, user_a, embedder)
     await seed_kb(db_session, user_a)
 
     ca_cau = await kb_repo.search_fulltext(
-        db_session, ["ai dùng email a.nguyen@abc.vn"], user_id=user_a.id, top_k=5
+        db_session, ["ai dùng email a.nguyen@abc.vn"], workspace_id=workspace_a, top_k=5
     )
     loc_tu_khoa = await kb_repo.search_fulltext(
-        db_session, ["a.nguyen@abc.vn"], user_id=user_a.id, top_k=5
+        db_session, ["a.nguyen@abc.vn"], workspace_id=workspace_a, top_k=5
     )
 
     assert ca_cau == []
     assert len(loc_tu_khoa) == 1
 
 
-async def test_full_text_khong_co_tu_khoa_thi_khong_cham_db(db_session, user_a, embedder):
-    assert await kb_repo.search_fulltext(db_session, [], user_id=user_a.id, top_k=5) == []
+async def test_full_text_khong_co_tu_khoa_thi_khong_cham_db(
+    db_session, user_a, workspace_a, embedder
+):
+    assert await kb_repo.search_fulltext(db_session, [], workspace_id=workspace_a, top_k=5) == []
 
 
-async def test_hybrid_khong_tra_ve_trung_chunk(db_session, user_a, embedder):
+async def test_hybrid_khong_tra_ve_trung_chunk(db_session, user_a, workspace_a, embedder):
     """Chunk khớp ở cả hai nhánh chỉ được xuất hiện **một lần**, và mang nhãn `both`."""
     await seed_kb(db_session, user_a)
     content = await _stored_content(db_session, user_a)
 
-    hits = await retriever.search(db_session, content, user_id=user_a.id)
+    hits = await retriever.search(db_session, content, workspace_id=workspace_a)
 
     assert len({hit.chunk_id for hit in hits}) == len(hits)
     assert hits[0].matched_by == "both"
 
 
-async def test_loc_theo_loai_nguon(db_session, user_a, embedder):
+async def test_loc_theo_loai_nguon(db_session, user_a, workspace_a, embedder):
     await seed_kb(db_session, user_a)
     content = await _stored_content(db_session, user_a)
 
     ho_so = await retriever.search(
-        db_session, content, source_type=KBSourceType.COMPANY_PROFILE, user_id=user_a.id
+        db_session, content, source_type=KBSourceType.COMPANY_PROFILE, workspace_id=workspace_a
     )
 
     assert ho_so == []
 
 
-async def test_cau_hoi_rong_khong_goi_embedder(db_session, user_a, embedder):
+async def test_cau_hoi_rong_khong_goi_embedder(db_session, user_a, workspace_a, embedder):
     await seed_kb(db_session, user_a)
     truoc = len(embedder.requests)
 
-    assert await retriever.search(db_session, "   ", user_id=user_a.id) == []
+    assert await retriever.search(db_session, "   ", workspace_id=workspace_a) == []
     assert len(embedder.requests) == truoc
 
 
-async def test_cau_hoi_di_qua_kind_query(db_session, user_a, embedder):
+async def test_cau_hoi_di_qua_kind_query(db_session, user_a, workspace_a, embedder):
     """Nhầm `passage` cho câu hỏi không sinh lỗi nào, chỉ làm chất lượng tụt — phải có test."""
     await seed_kb(db_session, user_a)
     embedder.requests.clear()
 
-    await retriever.search(db_session, "công ty logistics", user_id=user_a.id)
+    await retriever.search(db_session, "công ty logistics", workspace_id=workspace_a)
 
     assert embedder.kinds == ["query"]
 
@@ -321,6 +346,7 @@ async def test_cau_hoi_di_qua_kind_query(db_session, user_a, embedder):
 async def _pending_card(db_session, user) -> BusinessCard:
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=await workspace_id_of(db_session, user),
         user_id=user.id,
         image_path="cd/cde.jpg",
         image_hash=uuid.uuid4().hex,
@@ -338,93 +364,115 @@ async def _pending_card(db_session, user) -> BusinessCard:
     return card
 
 
-async def test_xac_nhan_danh_thiep_la_vao_kb_ngay(db_session, user_a, embedder):
+async def test_xac_nhan_danh_thiep_la_vao_kb_ngay(
+    db_session, user_a, active_a, workspace_a, embedder
+):
     """Tiêu chí của 7.3: xác nhận xong là hỏi trợ lý được ngay, không phải bấm reindex."""
     card = await _pending_card(db_session, user_a)
 
-    result = await cards_router.confirm_card(card.id, db_session, user_a)
+    result = await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     assert result.status == CardStatus.CONFIRMED
     assert result.kb_indexed is True
     assert (
-        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        await kb_repo.count_chunks(
+            db_session, workspace_id=workspace_a, source_type=KBSourceType.CARD
+        )
         == 1
     )
 
-    hits = await retriever.search(db_session, "b.tran@xyz.vn", user_id=user_a.id)
+    hits = await retriever.search(db_session, "b.tran@xyz.vn", workspace_id=workspace_a)
     assert hits and hits[0].source_id == card.id
 
 
-async def test_embedder_chet_khong_chan_duoc_viec_xac_nhan(db_session, user_a):
+async def test_embedder_chet_khong_chan_duoc_viec_xac_nhan(db_session, user_a, active_a):
     """F3 hỏng không được làm đứng luồng nhập liệu của F1 — cùng lý lẽ với `_upsert_company()`.
 
     Cố ý **không** dùng fixture `embedder`: hai router respx lồng nhau thì cái ngoài bắt request
     trước, và test sẽ xanh vì lý do sai.
     """
-    # Đọc `user_a.id` **trước** khi gọi confirm: đường lỗi của `_sync_kb()` gọi `db.rollback()`,
+    # Đọc không gian **trước** khi gọi confirm: đường lỗi của `_sync_kb()` gọi `db.rollback()`,
     # mà `rollback()` làm hết hạn **mọi** object ORM của session — không chỉ object nó vừa ghi dở.
-    # Chạm `user_a.id` sau đó là một lượt nạp lại đồng bộ giữa hàm async, tức `MissingGreenlet`.
-    # Cùng họ với cái bẫy đã ghi ở `routers/cards.py::_sync_kb`, chỉ lần này nó rơi vào chính test.
-    user_id = user_a.id
+    # Chạm `user_a.active_workspace_id` sau đó là một lượt nạp lại đồng bộ giữa hàm async, tức
+    # `MissingGreenlet`. Cùng họ với cái bẫy đã ghi ở `routers/cards.py::_sync_kb`, chỉ lần này
+    # nó rơi vào chính test.
+    workspace_id = await workspace_id_of(db_session, user_a)
     card = await _pending_card(db_session, user_a)
 
     with respx.mock(base_url=settings.embedder_url) as router:
         router.post("/embed").mock(side_effect=httpx.ConnectError("connection refused"))
 
-        result = await cards_router.confirm_card(card.id, db_session, user_a)
+        result = await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     assert result.status == CardStatus.CONFIRMED
     assert result.kb_indexed is False
     assert result.detail and "embedder" in result.detail
     assert (
-        await kb_repo.count_chunks(db_session, user_id=user_id, source_type=KBSourceType.CARD) == 0
+        await kb_repo.count_chunks(
+            db_session, workspace_id=workspace_id, source_type=KBSourceType.CARD
+        )
+        == 0
     )
 
 
-async def test_sua_the_da_xac_nhan_thi_kb_cap_nhat_theo(db_session, user_a, embedder):
+async def test_sua_the_da_xac_nhan_thi_kb_cap_nhat_theo(
+    db_session, user_a, active_a, workspace_a, embedder
+):
     """Sửa số điện thoại rồi vẫn nghe trợ lý đọc số cũ là lỗi không ai nghĩ tới việc đi tìm."""
     card = await _pending_card(db_session, user_a)
-    await cards_router.confirm_card(card.id, db_session, user_a)
+    await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     from app.schemas.card import CardUpdateIn
 
     await cards_router.update_card(
-        card.id, CardUpdateIn(job_title="Giám đốc điều hành"), db_session, user_a
+        card.id, CardUpdateIn(job_title="Giám đốc điều hành"), db_session, user_a, active_a
     )
 
     content = await _stored_content(db_session, user_a)
     assert "Giám đốc điều hành" in content
     assert "Trưởng phòng" not in content
     assert (
-        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        await kb_repo.count_chunks(
+            db_session, workspace_id=workspace_a, source_type=KBSourceType.CARD
+        )
         == 1
     )
 
 
-async def test_sua_the_chua_xac_nhan_thi_khong_dung_toi_kb(db_session, user_a, embedder):
+async def test_sua_the_chua_xac_nhan_thi_khong_dung_toi_kb(
+    db_session, user_a, active_a, workspace_a, embedder
+):
     """Màn hình review bấm Lưu liên tục; thẻ chưa xác nhận thì chưa bao giờ vào KB."""
     card = await _pending_card(db_session, user_a)
     embedder.requests.clear()
 
     from app.schemas.card import CardUpdateIn
 
-    await cards_router.update_card(card.id, CardUpdateIn(job_title="Phó phòng"), db_session, user_a)
+    await cards_router.update_card(
+        card.id, CardUpdateIn(job_title="Phó phòng"), db_session, user_a, active_a
+    )
 
     assert embedder.requests == []
     assert (
-        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        await kb_repo.count_chunks(
+            db_session, workspace_id=workspace_a, source_type=KBSourceType.CARD
+        )
         == 0
     )
 
 
-async def test_xoa_danh_thiep_thi_go_luon_khoi_kb(db_session, user_a, embedder):
+async def test_xoa_danh_thiep_thi_go_luon_khoi_kb(
+    db_session, user_a, active_a, workspace_a, embedder
+):
     """Không gỡ thì trợ lý vẫn trích dẫn được một danh thiếp người dùng tưởng đã xoá."""
     card = await _pending_card(db_session, user_a)
-    await cards_router.confirm_card(card.id, db_session, user_a)
+    await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
-    await cards_router.delete_card(card.id, db_session, user_a)
+    await cards_router.delete_card(card.id, db_session, user_a, active_a)
 
     assert (
-        await kb_repo.count_chunks(db_session, user_id=user_a.id, source_type=KBSourceType.CARD)
+        await kb_repo.count_chunks(
+            db_session, workspace_id=workspace_a, source_type=KBSourceType.CARD
+        )
         == 0
     )

@@ -110,6 +110,7 @@ async def answer(
     question: str,
     *,
     workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
     history: Sequence[Turn] = (),
     top_k: int = retriever.TOP_K,
     source_type: KBSourceType | str | None = None,
@@ -122,10 +123,16 @@ async def answer(
     người dùng cần biết "chưa kết nối OAuth" khác "embedder chết", mà chỉ router mới biết trả
     503 hay 500.
 
-    `workspace_id` (task 12.5) giới hạn **toàn bộ** ngữ cảnh trong dữ liệu của chính người hỏi. Nó đi
-    xuống cả hai chỗ đọc DB dưới đây, kể cả câu đếm "KB rỗng?" — đếm toàn cục thì người dùng mới
-    đăng ký, chưa có dữ liệu nào, sẽ nhận câu "không tìm thấy thông tin liên quan" (hàm ý *có* dữ
-    liệu nhưng không khớp) thay vì lời mời quét danh thiếp đầu tiên.
+    **Hai tham số, hai ranh giới khác nhau — đừng gộp** (`NEXT-05`):
+
+    - `workspace_id` giới hạn **ngữ cảnh**: cả hai chỗ đọc DB dưới đây, kể cả câu đếm "KB rỗng?"
+      — đếm toàn cục thì người dùng mới đăng ký, chưa có dữ liệu nào, sẽ nhận câu "không tìm thấy
+      thông tin liên quan" (hàm ý *có* dữ liệu nhưng không khớp) thay vì lời mời quét danh thiếp
+      đầu tiên.
+    - `user_id` chọn **credential và model**: từ 13.2 mỗi người gọi Gemini bằng OAuth của chính
+      mình, và `EX-14` cho mỗi người chọn model riêng. Dữ liệu là của tổ chức, nhưng hạn mức gọi
+      model thì vẫn của cá nhân — truyền nhầm `workspace_id` vào đây thì mọi lượt hỏi đều báo
+      "tài khoản chưa kết nối AI".
     """
     started = time.perf_counter()
     text = (question or "").strip()
@@ -156,7 +163,7 @@ async def answer(
     context = prompt.build_context([context_block(hit) for hit in hits])
     # Giữ lại tên model để **khai đúng thứ đã gọi** ở `Answer.model` bên dưới: trước EX-14 chỗ đó
     # đọc thẳng `settings.llm_model`, mà từ EX-14 thì người dùng chọn model riêng cho trợ lý (I-34).
-    model = await user_credentials.model_for_user_id(db, workspace_id, "chat")
+    model = await user_credentials.model_for_user_id(db, user_id, "chat")
     raw = await llm.generate_text(
         prompt.build_prompt(text, context, history=history_text(history)),
         model=model,

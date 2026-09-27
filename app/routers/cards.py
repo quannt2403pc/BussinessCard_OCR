@@ -610,7 +610,12 @@ async def confirm_card(
         detail = "Danh thiếp không có tên công ty nên chưa gắn được vào bảng companies."
     else:
         company_id, detail = await _upsert_company(
-            db, raw_name, workspace_id=workspace.id, email=card.email, website=card.website
+            db,
+            raw_name,
+            workspace_id=workspace.id,
+            user_id=user.id,
+            email=card.email,
+            website=card.website,
         )
 
     card.company_id = company_id
@@ -870,6 +875,7 @@ async def _upsert_company(
     raw_name: str,
     *,
     workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
     email: str | None = None,
     website: str | None = None,
 ) -> tuple[uuid.UUID | None, str | None]:
@@ -900,18 +906,13 @@ async def _upsert_company(
 
     try:
         return await upsert(
-            db, raw_name, workspace_id=workspace_id, email=email, website=website
+            db,
+            raw_name,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            email=email,
+            website=website,
         ), None
-    except TypeError as exc:
-        # `upsert_company()` chưa nhận `user_id` (task 12.6 của T chưa xong). Nói thẳng ra
-        # thay vì để nó lẫn vào câu "gắn công ty thất bại: …" chung chung: đây là việc
-        # đang chờ người khác, không phải lỗi dữ liệu của người dùng.
-        await db.rollback()
-        logger.info("upsert_company() chưa nhận user_id (task 12.6 của T): %s", exc)
-        return None, (
-            "Đã xác nhận. Chưa gắn được công ty: `company_matching.upsert_company()` chưa "
-            "nhận `user_id` — task 12.6 (chủ sở hữu T). Gắn lại được sau khi task đó xong."
-        )
     except Exception as exc:  # T sở hữu hàm này; lỗi của nó không được làm hỏng việc xác nhận
         await db.rollback()
         logger.warning("upsert_company(%r) lỗi: %s", raw_name, exc)

@@ -103,6 +103,12 @@ def upgrade() -> None:
         op.alter_column(table, "workspace_id", nullable=False)
         op.create_index(f"ix_{table}_workspace_id", table, ["workspace_id"])
 
+    # Hai bang du lieu dan xuat khong co nguoi tao that: chunk KB sinh lai duoc tu nguon bat
+    # cu luc nao, va mot thay doi ho so la do may phat hien khi di tra lai. Giu `user_id` o day
+    # la ghi mot su that khong dung, va tu gio khong cau nao doc no nua.
+    for table in ("kb_chunks", "profile_changes"):
+        op.drop_column(table, "user_id")
+
     # Hai rang buoc unique phai doi theo. De nguyen theo `user_id` thi hai thanh vien cung mot
     # khong gian quet dung mot tam the se tao ra hai ban ghi.
     op.drop_index("ix_business_cards_user_id_image_hash", table_name="business_cards")
@@ -163,11 +169,30 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Quay ve tach du lieu theo tai khoan.
 
-    Du lieu khong mat dong nao, nhung quan he "cua chung" thi mat: moi ban ghi tro lai thuoc
-    dung nguoi da tao ra no, nhung thanh vien khac mat quyen doc.
+    Quan he "cua chung" mat: moi ban ghi tro lai thuoc dung nguoi da tao ra no, thanh vien khac
+    mat quyen doc.
+
+    Mot truong hop MAT du lieu that: chunk KB va thay doi ho so cua mot khong gian khong con
+    `admin` nao bi xoa, vi hai bang do khong con cot nguoi tao va khong co ai de gan vao. Ca hai
+    la du lieu dan xuat, sinh lai duoc bang `POST /api/kb/reindex` va mot luot tra lai ho so.
     """
     op.drop_index("ix_business_cards_assigned_to", table_name="business_cards")
     op.drop_column("business_cards", "assigned_to_user_id")
+
+    # Dung lai cot nguoi tao cua hai bang dan xuat TRUOC khi bo `workspace_id`: khong con
+    # `workspace_members` thi khong con duong nao suy ra chu so huu. Lay `admin` cua khong gian.
+    for table in ("kb_chunks", "profile_changes"):
+        op.add_column(table, sa.Column("user_id", sa.UUID(as_uuid=True), nullable=True))
+        op.execute(
+            f"UPDATE {table} t SET user_id = m.user_id FROM workspace_members m "
+            "WHERE m.workspace_id = t.workspace_id AND m.role = 'admin'"
+        )
+        op.execute(f"DELETE FROM {table} WHERE user_id IS NULL")
+        op.alter_column(table, "user_id", nullable=False)
+        op.create_foreign_key(
+            f"fk_{table}_user_id_users", table, "users", ["user_id"], ["id"], ondelete="CASCADE"
+        )
+    op.create_index("ix_kb_chunks_user_id", "kb_chunks", ["user_id"])
 
     op.drop_index("ix_privacy_logs_workspace_id_created_at", table_name="privacy_logs")
     op.create_index(

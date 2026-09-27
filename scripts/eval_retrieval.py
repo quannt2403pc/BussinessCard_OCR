@@ -41,6 +41,7 @@ from app.core.config import settings
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
+from app.models.workspace import Role, Workspace, WorkspaceMember
 from app.services import embeddings, kb, retriever
 from app.services.normalize_company import normalize_company_name
 
@@ -105,24 +106,28 @@ QUERIES: tuple[Query, ...] = (
 class Corpus:
     """Dữ liệu mẫu đã ghi vào DB, kèm ánh xạ `source_id → nhãn` để chấm điểm."""
 
-    #: Chủ sở hữu bộ dữ liệu (task 12.5). Mọi lượt truy hồi phải đi kèm nó, nếu không câu tìm
-    #: lọc theo `user_id` sẽ không thấy chính dữ liệu vừa seed và mọi số đo recall thành 0.
+    #: Không gian làm việc của bộ dữ liệu (`NEXT-05`, trước là `user_id` ở task 12.5). Mọi
+    #: lượt truy hồi phải đi kèm nó, nếu không câu tìm sẽ không thấy chính dữ liệu vừa seed và
+    #: mọi số đo recall thành 0.
+    workspace_id: uuid.UUID
+    #: Người tạo — chỉ để ghi vào các bảng còn giữ cột ấy, không tham gia lọc.
     user_id: uuid.UUID
     labels: dict[uuid.UUID, str] = field(default_factory=dict)
     documents: list[kb.Document] = field(default_factory=list)
 
 
-async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
+async def seed(db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID) -> Corpus:
     """Dựng 4 danh thiếp + 3 hồ sơ doanh nghiệp, đủ 3 ngôn ngữ (Việt, Hàn, Nhật).
 
-    Toàn bộ bộ dữ liệu thuộc về **một** người dùng (`user_id`, task 12.5): nó là bộ chấm điểm
-    A6 nên phải nằm trọn trong phạm vi mà trợ lý AI của đúng người đó nhìn thấy.
+    Toàn bộ bộ dữ liệu nằm trong **một** không gian làm việc (`NEXT-05`): nó là bộ chấm điểm A6
+    nên phải nằm trọn trong phạm vi mà trợ lý AI của đúng không gian đó nhìn thấy.
     """
-    corpus = Corpus(user_id=user_id)
+    corpus = Corpus(workspace_id=workspace_id, user_id=user_id)
 
-    dai_viet = _company(user_id, "Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
-    moc_chau = _company(user_id, "Công ty CP Sữa Mộc Châu", ["Mocchau Milk"])
-    hanwha = _company(user_id, "Hanwha Precision Vietnam", ["한화정밀기계"])
+    args = (workspace_id, user_id)
+    dai_viet = _company(*args, "Công ty TNHH Logistics Đại Việt", ["Đại Việt Logistics"])
+    moc_chau = _company(*args, "Công ty CP Sữa Mộc Châu", ["Mocchau Milk"])
+    hanwha = _company(*args, "Hanwha Precision Vietnam", ["한화정밀기계"])
     db.add_all([dai_viet, moc_chau, hanwha])
     await db.flush()
 
@@ -175,6 +180,7 @@ async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
             "thẻ An",
             _card(
                 dai_viet,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 full_name="Nguyễn Văn An",
                 job_title="Giám đốc kinh doanh",
@@ -187,6 +193,7 @@ async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
             "thẻ Bình",
             _card(
                 moc_chau,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 full_name="Trần Thị Bình",
                 job_title="Trưởng phòng Marketing",
@@ -199,6 +206,7 @@ async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
             "thẻ Kim",
             _card(
                 hanwha,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 full_name="Kim Min-jun",
                 job_title="Sales Manager / 영업 과장",
@@ -211,6 +219,7 @@ async def seed(db: AsyncSession, *, user_id: uuid.UUID) -> Corpus:
             "thẻ Tanaka",
             _card(
                 None,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 full_name="田中 太郎",
                 job_title="営業部長",
@@ -254,7 +263,7 @@ async def evaluate(db: AsyncSession, corpus: Corpus) -> None:
             hits = await retriever.search(
                 db,
                 query.text,
-                user_id=corpus.user_id,
+                workspace_id=corpus.workspace_id,
                 top_k=largest,
                 min_similarity=-1.0,
                 hybrid=hybrid,
@@ -265,7 +274,7 @@ async def evaluate(db: AsyncSession, corpus: Corpus) -> None:
     _print_per_query(results["hybrid"], corpus)
     _print_recall(results, corpus)
     _print_threshold(results["hybrid"], corpus)
-    await _print_text_leg(db, corpus.user_id)
+    await _print_text_leg(db, corpus.workspace_id)
     _print_chunks(corpus)
 
 
@@ -338,12 +347,12 @@ def _print_threshold(rows: Sequence[tuple[Query, list[retriever.Hit]]], corpus: 
         print(f"ngưỡng đang dùng: {retriever.MIN_SIMILARITY:.2f}")
 
 
-async def _print_text_leg(db: AsyncSession, user_id: uuid.UUID) -> None:
+async def _print_text_leg(db: AsyncSession, workspace_id: uuid.UUID) -> None:
     """Nhánh full-text rút ra từ khoá gì, và có khớp được không."""
     print("\n=== Nhánh full-text: từ khoá rút được ===")
     for query in QUERIES:
         terms = retriever.query_terms(query.text)
-        hits = await retriever.text_search(db, query.text, user_id=user_id, top_k=5)
+        hits = await retriever.text_search(db, query.text, workspace_id=workspace_id, top_k=5)
         print(f"{_cut(query.text, 45):<46} {str(terms):<52} → {len(hits)} chunk")
 
 
@@ -376,7 +385,9 @@ def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _company(user_id: uuid.UUID, display_name: str, aliases: list[str]) -> Company:
+def _company(
+    workspace_id: uuid.UUID, user_id: uuid.UUID, display_name: str, aliases: list[str]
+) -> Company:
     # `name_normalized` dùng **đúng hàm chuẩn hoá của T**, không phải một chuỗi hex ngẫu nhiên
     # như bản đầu: `scripts/seed.py` (9.2) commit bộ dữ liệu này vào DB thật, mà khoá ngẫu nhiên
     # thì lần sau người dùng xác nhận một danh thiếp của đúng công ty đó, `upsert_company()`
@@ -384,6 +395,7 @@ def _company(user_id: uuid.UUID, display_name: str, aliases: list[str]) -> Compa
     # nên số đo truy hồi của 7.4 không đổi.
     return Company(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user_id,
         display_name=display_name,
         name_normalized=normalize_company_name(display_name),
@@ -394,6 +406,7 @@ def _company(user_id: uuid.UUID, display_name: str, aliases: list[str]) -> Compa
 def _profile(company: Company, **overrides) -> CompanyProfile:
     values = {
         "id": uuid.uuid4(),
+        "workspace_id": company.workspace_id,
         "user_id": company.user_id,
         "company_id": company.id,
         "legal_name": company.display_name,
@@ -413,6 +426,7 @@ def _profile(company: Company, **overrides) -> CompanyProfile:
 def _card(
     company: Company | None,
     *,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     full_name: str,
     job_title: str,
@@ -423,6 +437,7 @@ def _card(
 ) -> BusinessCard:
     return BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user_id,
         image_path=f"ev/{uuid.uuid4().hex}.jpg",
         image_hash=uuid.uuid4().hex,
@@ -453,8 +468,9 @@ async def run() -> int:
                 expire_on_commit=False,
             )
             try:
-                # Người dùng dùng thử: bộ dữ liệu này phải thuộc về **một ai đó** từ D12, và cả
-                # nó lẫn tài khoản này đều bị rollback ở cuối nên không để lại gì trong DB thật.
+                # Một tài khoản + một không gian làm việc dùng thử: từ `NEXT-05` dữ liệu
+                # thuộc về không gian, mà mọi bảng ở đây đều đòi `workspace_id` NOT NULL. Cả ba
+                # đều bị rollback ở cuối nên không để lại gì trong DB thật.
                 owner = User(
                     email=f"eval-{uuid.uuid4().hex[:8]}@bizcard.local",
                     password_hash="!khong-dang-nhap-duoc",
@@ -462,8 +478,13 @@ async def run() -> int:
                 )
                 db.add(owner)
                 await db.flush()
+                space = Workspace(id=uuid.uuid4(), name="Không gian đo truy hồi (7.4)")
+                db.add(space)
+                await db.flush()
+                db.add(WorkspaceMember(workspace_id=space.id, user_id=owner.id, role=Role.ADMIN))
+                await db.flush()
 
-                corpus = await seed(db, user_id=owner.id)
+                corpus = await seed(db, workspace_id=space.id, user_id=owner.id)
                 await evaluate(db, corpus)
             finally:
                 await db.close()

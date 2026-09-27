@@ -26,6 +26,7 @@ from app.repositories import company as company_repo
 from app.schemas.company import CompanyProfileSchema, ProfileStatus
 from app.services.normalize_company import normalize_company_name
 from app.services.profile_diff import diff_profiles, merge_keeping_known
+from tests.conftest import workspace_id_of
 
 ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
 
@@ -54,6 +55,7 @@ async def make_company(
 ) -> Company:
     company = Company(
         id=uuid.uuid4(),
+        workspace_id=await workspace_id_of(db, user),
         user_id=user.id,
         display_name=name,
         name_normalized=normalize_company_name(name),

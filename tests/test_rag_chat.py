@@ -33,7 +33,7 @@ from app.routers import kb as kb_router
 from app.services import assistant, retriever
 from app.services.assistant import Turn
 from app.services.retriever import Hit
-from tests.conftest import api_client
+from tests.conftest import active_workspace_of, api_client, workspace_id_of
 
 NOW = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
 
@@ -224,9 +224,14 @@ def test_lich_su_cat_ngan_luot_qua_dai():
 
 
 async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
-    """Một danh thiếp đã xác nhận + một hồ sơ DN, cả hai đã nằm trong KB."""
+    """Một danh thiếp đã xác nhận + một hồ sơ DN, cả hai đã nằm trong KB.
+
+    Ghi vào **không gian làm việc** của `user` (`NEXT-05`); `user_id` ở lại chỉ nói ai đã nhập.
+    """
+    workspace_id = await workspace_id_of(db_session, user)
     company = Company(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         display_name="Công ty TNHH Logistics Đại Việt",
         name_normalized=f"dai-viet-{uuid.uuid4().hex[:8]}",
@@ -238,6 +243,7 @@ async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
     db_session.add(
         CompanyProfile(
             id=uuid.uuid4(),
+            workspace_id=workspace_id,
             user_id=user.id,
             company_id=company.id,
             legal_name="Công ty TNHH Logistics Đại Việt",
@@ -252,6 +258,7 @@ async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
     )
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         image_path="ab/abc.jpg",
         image_hash=uuid.uuid4().hex,
@@ -267,7 +274,7 @@ async def seed_kb(db_session, user) -> tuple[BusinessCard, Company]:
     )
     db_session.add(card)
     await db_session.flush()
-    await kb_router.reindex(db_session, user)
+    await kb_router.reindex(db_session, await active_workspace_of(db_session, user))
     return card, company
 
 
@@ -276,7 +283,7 @@ async def chunk_content(db_session, user, source_type: str) -> str:
     rows = await kb_repo.search_similar(
         db_session,
         [0.0] * settings.embedding_dim,
-        user_id=user.id,
+        workspace_id=await workspace_id_of(db_session, user),
         top_k=1,
         source_type=source_type,
     )
@@ -322,7 +329,9 @@ async def test_chat_tra_loi_kem_trich_dan_bam_duoc(db_session, user_a, embedder,
     assert body["citations"][0]["title"].startswith("Danh thiếp — Nguyễn Văn An")
 
 
-async def test_chat_ghi_lai_ca_cau_hoi_lan_cau_tra_loi(db_session, user_a, embedder, cliproxy):
+async def test_chat_ghi_lai_ca_cau_hoi_lan_cau_tra_loi(
+    db_session, user_a, workspace_a, embedder, cliproxy
+):
     """Một lượt hỏi ghi đúng hai dòng, và trích dẫn được lưu để mở lại hội thoại còn thấy."""
     await seed_kb(db_session, user_a)
     question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
@@ -330,7 +339,7 @@ async def test_chat_ghi_lai_ca_cau_hoi_lan_cau_tra_loi(db_session, user_a, embed
 
     body = (await post_chat(db_session, {"question": question}, user_a)).json()
     rows = await chat_repo.list_messages(
-        db_session, uuid.UUID(body["session_id"]), user_id=user_a.id
+        db_session, uuid.UUID(body["session_id"]), workspace_id=workspace_a
     )
 
     assert [row.role for row in rows] == [ChatRole.USER.value, ChatRole.ASSISTANT.value]
@@ -470,7 +479,7 @@ async def test_doc_lai_phien_khong_ton_tai_tra_404(db_session, user_a, embedder,
     assert (await get_chat(db_session, uuid.uuid4(), user_a)).status_code == 404
 
 
-async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a):
+async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a, workspace_a):
     """Bắt đúng lỗi phát hiện khi chạy test 8.3 lần đầu — xem `repositories/chat.py::_ROLE_ORDER`.
 
     `now()` của Postgres là thời điểm **bắt đầu transaction**, nên hai dòng ghi trong cùng một
@@ -480,7 +489,9 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a)
     Cố ý ghi câu trả lời **trước** câu hỏi để chứng minh thứ tự đọc ra không phụ thuộc thứ tự
     ghi vào — nếu nó phụ thuộc thì test này xanh vì lý do sai.
     """
-    session = await chat_repo.create_session(db_session, user_id=user_a.id, title="thử")
+    session = await chat_repo.create_session(
+        db_session, workspace_id=workspace_a, user_id=user_a.id, title="thử"
+    )
     await chat_repo.add_message(
         db_session, session_id=session.id, role=ChatRole.ASSISTANT, content="đáp", citations=[]
     )
@@ -488,8 +499,10 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a)
         db_session, session_id=session.id, role=ChatRole.USER, content="hỏi"
     )
 
-    doc_het = await chat_repo.list_messages(db_session, session.id, user_id=user_a.id)
-    gan_nhat = await chat_repo.recent_messages(db_session, session.id, user_id=user_a.id, limit=2)
+    doc_het = await chat_repo.list_messages(db_session, session.id, workspace_id=workspace_a)
+    gan_nhat = await chat_repo.recent_messages(
+        db_session, session.id, workspace_id=workspace_a, limit=2
+    )
 
     assert doc_het[0].created_at == doc_het[1].created_at, "tiền đề của test: cùng transaction"
     assert [row.content for row in doc_het] == ["hỏi", "đáp"]
@@ -499,7 +512,9 @@ async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a)
 # --------------------------------------------------------------------------- 8.5 lọc phạm vi
 
 
-async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(db_session, user_a, embedder):
+async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(
+    db_session, user_a, workspace_a, embedder
+):
     """Hỏi bằng đúng nội dung chunk hồ sơ; lọc `card` thì chunk hồ sơ đó không được lọt vào.
 
     Ghi chú rút ra khi viết test này: câu hỏi đó **vẫn ra kết quả** sau khi lọc, vì chunk danh
@@ -510,9 +525,9 @@ async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(db_session, user_a
     await seed_kb(db_session, user_a)
     profile_chunk = await chunk_content(db_session, user_a, KBSourceType.COMPANY_PROFILE.value)
 
-    khong_loc = await retriever.search(db_session, profile_chunk, user_id=user_a.id)
+    khong_loc = await retriever.search(db_session, profile_chunk, workspace_id=workspace_a)
     chi_card = await retriever.search(
-        db_session, profile_chunk, user_id=user_a.id, source_type=KBSourceType.CARD
+        db_session, profile_chunk, workspace_id=workspace_a, source_type=KBSourceType.CARD
     )
 
     assert KBSourceType.COMPANY_PROFILE.value in {hit.source_type for hit in khong_loc}
@@ -541,14 +556,16 @@ async def test_bo_loc_di_tu_api_xuong_tang_truy_hoi(db_session, user_a, embedder
     assert body["citations"][0]["source_urls"] == ["https://masothue.example/0301234567"]
 
 
-async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(db_session, user_a, embedder, cliproxy):
+async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(
+    db_session, user_a, workspace_a, embedder, cliproxy
+):
     """`metadata.company_id` là khoá chung của hai loại nguồn — lọc theo cột thì sót một nửa."""
     _, company = await seed_kb(db_session, user_a)
 
     hits = await kb_repo.search_similar(
         db_session,
         [0.0] * settings.embedding_dim,
-        user_id=user_a.id,
+        workspace_id=workspace_a,
         top_k=10,
         company_id=company.id,
     )
@@ -559,13 +576,15 @@ async def test_loc_theo_cong_ty_bat_ca_danh_thiep_lan_ho_so(db_session, user_a, 
     }
 
 
-async def test_loc_theo_cong_ty_khac_thi_khong_ra_gi(db_session, user_a, embedder, cliproxy):
+async def test_loc_theo_cong_ty_khac_thi_khong_ra_gi(
+    db_session, user_a, workspace_a, embedder, cliproxy
+):
     await seed_kb(db_session, user_a)
 
     hits = await kb_repo.search_similar(
         db_session,
         [0.0] * settings.embedding_dim,
-        user_id=user_a.id,
+        workspace_id=workspace_a,
         top_k=10,
         company_id=uuid.uuid4(),
     )
@@ -573,19 +592,25 @@ async def test_loc_theo_cong_ty_khac_thi_khong_ra_gi(db_session, user_a, embedde
     assert hits == []
 
 
-async def test_loc_ap_dung_cho_ca_nhanh_full_text(db_session, user_a, embedder, cliproxy):
+async def test_loc_ap_dung_cho_ca_nhanh_full_text(
+    db_session, user_a, workspace_a, embedder, cliproxy
+):
     """Hai nhánh lọc lệch nhau thì kết quả trộn ra một tập nửa trong nửa ngoài phạm vi."""
     await seed_kb(db_session, user_a)
 
     trong_pham_vi = await kb_repo.search_fulltext(
         db_session,
         ["0301234567"],
-        user_id=user_a.id,
+        workspace_id=workspace_a,
         top_k=5,
         source_type=KBSourceType.COMPANY_PROFILE.value,
     )
     ngoai_pham_vi = await kb_repo.search_fulltext(
-        db_session, ["0301234567"], user_id=user_a.id, top_k=5, source_type=KBSourceType.CARD.value
+        db_session,
+        ["0301234567"],
+        workspace_id=workspace_a,
+        top_k=5,
+        source_type=KBSourceType.CARD.value,
     )
 
     assert len(trong_pham_vi) == 1
@@ -593,11 +618,12 @@ async def test_loc_ap_dung_cho_ca_nhanh_full_text(db_session, user_a, embedder, 
 
 
 async def test_ho_so_chua_gan_cong_ty_khong_lot_vao_pham_vi_cong_ty_nao(
-    db_session, user_a, embedder
+    db_session, user_a, active_a, workspace_a, embedder
 ):
     """Danh thiếp chưa gắn công ty có `metadata.company_id = null` → không thuộc phạm vi nào."""
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=workspace_a,
         user_id=user_a.id,
         image_path="cd/cde.jpg",
         image_hash=uuid.uuid4().hex,
@@ -610,15 +636,15 @@ async def test_ho_so_chua_gan_cong_ty_khong_lot_vao_pham_vi_cong_ty_nao(
     )
     db_session.add(card)
     await db_session.flush()
-    await kb_router.reindex(db_session, user_a)
+    await kb_router.reindex(db_session, active_a)
 
     tat_ca = await kb_repo.search_similar(
-        db_session, [0.0] * settings.embedding_dim, user_id=user_a.id, top_k=10
+        db_session, [0.0] * settings.embedding_dim, workspace_id=workspace_a, top_k=10
     )
     theo_cong_ty = await kb_repo.search_similar(
         db_session,
         [0.0] * settings.embedding_dim,
-        user_id=user_a.id,
+        workspace_id=workspace_a,
         top_k=10,
         company_id=uuid.uuid4(),
     )

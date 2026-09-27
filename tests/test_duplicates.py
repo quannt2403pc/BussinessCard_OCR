@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.contact_note import ContactNote
 from app.models.user import User
+from tests.conftest import workspace_id_of
 
 ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
 
@@ -47,6 +48,7 @@ async def make_card(
 ) -> BusinessCard:
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=await workspace_id_of(db, user),
         user_id=user.id,
         image_path=f"uploads/{uuid.uuid4().hex}.jpg",
         image_hash=uuid.uuid4().hex * 2,

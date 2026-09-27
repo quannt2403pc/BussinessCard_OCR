@@ -167,11 +167,8 @@ class ProfileChange(Base):
         index=True,
     )
 
-    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
-    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    #: **Không có cột người tạo.** Một thay đổi hồ sơ do máy phát hiện khi đi tra lại (task
+    #: 11.x), không do ai nhập; gán nó cho người bấm nút là ghi một sự thật không đúng.
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="CASCADE"),

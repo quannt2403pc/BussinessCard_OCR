@@ -32,7 +32,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import CurrentUser
 from app.core.workspace import CurrentWorkspace
 from app.repositories import kb as kb_repo
 from app.schemas.kb import ReindexOut, ReindexScope
@@ -56,7 +55,6 @@ _reindex_lock = asyncio.Lock()
 @router.post("/reindex", response_model=ReindexOut)
 async def reindex(
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: CurrentUser,
     workspace: CurrentWorkspace,
     scope: Annotated[
         ReindexScope | None,
@@ -64,6 +62,10 @@ async def reindex(
     ] = None,
 ) -> ReindexOut:
     """Nhúng lại toàn bộ KB từ dữ liệu đang có trong DB.
+
+    Không nhận `CurrentUser`: từ `NEXT-05` phạm vi index là **không gian làm việc**, mà
+    `CurrentWorkspace` đã đòi đăng nhập rồi — giữ thêm một tham số không ai đọc chỉ mời gọi
+    ai đó lại index theo `user.id`, đúng cái lỗi vừa sửa ở đây.
 
     Chỉ lấy danh thiếp **đã xác nhận** và hồ sơ **generated/verified** — xem
     `repositories/kb.py::INDEXABLE_CARD_STATUSES`. Nguồn nào không còn trường nào có nội dung
@@ -88,11 +90,11 @@ async def reindex(
                 cards = chunks = skipped = 0
                 profiles = 0
                 if scope in (None, ReindexScope.CARD):
-                    cards, written, missing = await _reindex_cards(db, http, user.id)
+                    cards, written, missing = await _reindex_cards(db, http, workspace.id)
                     chunks += written
                     skipped += missing
                 if scope in (None, ReindexScope.COMPANY_PROFILE):
-                    profiles, written, missing = await _reindex_profiles(db, http, user.id)
+                    profiles, written, missing = await _reindex_profiles(db, http, workspace.id)
                     chunks += written
                     skipped += missing
         except EmbedderUnavailableError as exc:

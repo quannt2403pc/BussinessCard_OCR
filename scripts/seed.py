@@ -249,6 +249,7 @@ async def seed_demo(
             db,
             str(entry["company"]),
             workspace_id=workspace_id,
+            user_id=user_id,
             email=fields.get("email"),
             website=fields.get("website"),
         )
@@ -529,7 +530,7 @@ async def run(reset: bool, *, email: str, password: str) -> int:
                 await purge(db, companies, cards)
                 await db.commit()
 
-            corpus = await seed(db, user_id=user.id)
+            corpus = await seed(db, workspace_id=await _workspace_of(db, user), user_id=user.id)
 
             # Đối chiếu lại với dữ liệu vừa tạo: nếu ai đó đổi tên công ty trong
             # `eval_retrieval.py` mà quên sửa `SEED_COMPANY_NAMES` thì bước chống-nạp-chồng ở
@@ -538,7 +539,8 @@ async def run(reset: bool, *, email: str, password: str) -> int:
                 (
                     await db.execute(
                         select(Company.display_name).where(
-                            Company.user_id == user.id, Company.id.in_(corpus.labels)
+                            Company.workspace_id == corpus.workspace_id,
+                            Company.id.in_(corpus.labels),
                         )
                     )
                 )

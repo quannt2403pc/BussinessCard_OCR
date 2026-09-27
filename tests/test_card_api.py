@@ -27,6 +27,7 @@ from app.models.company import Company
 from app.models.user import User
 from app.routers import cards as cards_router
 from app.schemas.card import CardUpdateIn
+from tests.conftest import workspace_id_of
 
 NOW = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 
@@ -40,6 +41,7 @@ async def make_company(db_session, user: User, name: str = "Công ty TNHH Phú C
     """
     company = Company(
         id=uuid.uuid4(),
+        workspace_id=await workspace_id_of(db_session, user),
         user_id=user.id,
         display_name=name,
         name_normalized=f"phu co-{uuid.uuid4().hex[:8]}",
@@ -53,6 +55,7 @@ async def make_company(db_session, user: User, name: str = "Công ty TNHH Phú C
 async def make_card(db_session, user: User, **overrides) -> BusinessCard:
     values = {
         "id": uuid.uuid4(),
+        "workspace_id": await workspace_id_of(db_session, user),
         "user_id": user.id,
         "image_path": "ef/efg.jpg",
         "image_hash": uuid.uuid4().hex,
@@ -78,7 +81,7 @@ async def make_card(db_session, user: User, **overrides) -> BusinessCard:
 
 
 async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
-    db_session, user_a, embedder, monkeypatch
+    db_session, user_a, workspace_a, active_a, embedder, monkeypatch
 ):
     """I-18: thiếu hai tham số này thì quy tắc gộp theo tên miền của 3.8 không bao giờ chạy.
 
@@ -94,28 +97,37 @@ async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
     company = await make_company(db_session, user_a)
     seen: dict[str, object] = {}
 
-    async def fake_upsert(db, raw_name, *, user_id, email=None, website=None):
-        seen.update(raw_name=raw_name, user_id=user_id, email=email, website=website)
+    async def fake_upsert(db, raw_name, *, workspace_id, user_id, email=None, website=None):
+        seen.update(
+            raw_name=raw_name,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            email=email,
+            website=website,
+        )
         return company.id
 
     monkeypatch.setattr("app.services.company_matching.upsert_company", fake_upsert, raising=True)
 
-    result = await cards_router.confirm_card(card.id, db_session, user_a)
+    result = await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     assert result.company_matched is True
     assert seen == {
         "raw_name": "Công ty TNHH Phú Cơ",
+        "workspace_id": workspace_a,
         "user_id": user_a.id,
         "email": "c.le@phuco.vn",
         "website": "https://phuco.vn",
     }
 
 
-async def test_xac_nhan_van_xong_khi_the_khong_co_ten_cong_ty(db_session, user_a, embedder):
+async def test_xac_nhan_van_xong_khi_the_khong_co_ten_cong_ty(
+    db_session, user_a, active_a, embedder
+):
     """Không đọc ra tên công ty thì vẫn phải xác nhận được, và phải nói rõ vì sao chưa gắn."""
     card = await make_card(db_session, user_a, company_name_raw=None)
 
-    result = await cards_router.confirm_card(card.id, db_session, user_a)
+    result = await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     assert result.status == CardStatus.CONFIRMED
     assert result.company_matched is False
@@ -123,7 +135,7 @@ async def test_xac_nhan_van_xong_khi_the_khong_co_ten_cong_ty(db_session, user_a
 
 
 async def test_xac_nhan_khong_ghi_de_cong_ty_da_gan_tu_truoc(
-    db_session, user_a, embedder, monkeypatch
+    db_session, user_a, active_a, embedder, monkeypatch
 ):
     """Thẻ đã có `company_id` (người dùng gắn tay) thì lượt xác nhận không được gọi lại matching."""
     company = await make_company(db_session, user_a)
@@ -134,7 +146,7 @@ async def test_xac_nhan_khong_ghi_de_cong_ty_da_gan_tu_truoc(
 
     monkeypatch.setattr("app.services.company_matching.upsert_company", must_not_run)
 
-    result = await cards_router.confirm_card(card.id, db_session, user_a)
+    result = await cards_router.confirm_card(card.id, db_session, user_a, active_a)
 
     assert result.company_id == company.id
     assert result.company_matched is True
@@ -143,7 +155,7 @@ async def test_xac_nhan_khong_ghi_de_cong_ty_da_gan_tu_truoc(
 # --------------------------------------------------------------------- 4.2 sửa tay
 
 
-async def test_patch_chuan_hoa_sdt_va_email_giong_luc_quet(db_session, user_a):
+async def test_patch_chuan_hoa_sdt_va_email_giong_luc_quet(db_session, user_a, active_a):
     """Người gõ `0912 345 678` thì DB phải lưu `+84912345678`, y như đường đi của OCR."""
     card = await make_card(db_session, user_a, phone=None, email=None)
 
@@ -152,13 +164,14 @@ async def test_patch_chuan_hoa_sdt_va_email_giong_luc_quet(db_session, user_a):
         CardUpdateIn(phone="0912 345 678", email="  C.Le@PhuCo.VN  "),
         db_session,
         user_a,
+        active_a,
     )
 
     assert result.phone == "+84912345678"
     assert result.email == "c.le@phuco.vn"
 
 
-async def test_patch_chi_sua_phone_thi_khong_xoa_mat_phone_alt(db_session, user_a):
+async def test_patch_chi_sua_phone_thi_khong_xoa_mat_phone_alt(db_session, user_a, active_a):
     """Ranh giới của `_normalize_edits()`: sửa ô nào chỉ đổi ô đó.
 
     `normalize_card_fields()` lúc quét xử lý `phone`/`phone_alt` như một cặp và luôn ghi lại cả
@@ -167,26 +180,26 @@ async def test_patch_chi_sua_phone_thi_khong_xoa_mat_phone_alt(db_session, user_
     card = await make_card(db_session, user_a)
 
     result = await cards_router.update_card(
-        card.id, CardUpdateIn(phone="0333222111"), db_session, user_a
+        card.id, CardUpdateIn(phone="0333222111"), db_session, user_a, active_a
     )
 
     assert result.phone == "+84333222111"
     assert result.phone_alt == "+84987654321"
 
 
-async def test_patch_khong_co_truong_nao_thi_400(db_session, user_a):
+async def test_patch_khong_co_truong_nao_thi_400(db_session, user_a, active_a):
     card = await make_card(db_session, user_a)
 
     with pytest.raises(HTTPException) as exc:
-        await cards_router.update_card(card.id, CardUpdateIn(), db_session, user_a)
+        await cards_router.update_card(card.id, CardUpdateIn(), db_session, user_a, active_a)
 
     assert exc.value.status_code == 400
 
 
-async def test_patch_the_khong_ton_tai_thi_404(db_session, user_a):
+async def test_patch_the_khong_ton_tai_thi_404(db_session, user_a, active_a):
     with pytest.raises(HTTPException) as exc:
         await cards_router.update_card(
-            uuid.uuid4(), CardUpdateIn(job_title="X"), db_session, user_a
+            uuid.uuid4(), CardUpdateIn(job_title="X"), db_session, user_a, active_a
         )
 
     assert exc.value.status_code == 404
@@ -195,21 +208,21 @@ async def test_patch_the_khong_ton_tai_thi_404(db_session, user_a):
 # --------------------------------------------------------------------- 4.1 danh sách
 
 
-async def test_loc_theo_trang_thai_la_tra_400_chu_khong_tra_rong(db_session, user_a):
+async def test_loc_theo_trang_thai_la_tra_400_chu_khong_tra_rong(db_session, user_a, active_a):
     """Rỗng đọc như "chưa có danh thiếp nào" — người dùng sẽ đi tìm lỗi ở chỗ upload."""
     with pytest.raises(HTTPException) as exc:
-        await cards_router.list_cards(db_session, user_a, card_status="khong-ton-tai")
+        await cards_router.list_cards(db_session, user_a, active_a, card_status="khong-ton-tai")
 
     assert exc.value.status_code == 400
     assert "pending" in str(exc.value.detail)
 
 
-async def test_so_trang_tinh_tu_tong_khong_tu_so_dong_tra_ve(db_session, user_a):
+async def test_so_trang_tinh_tu_tong_khong_tu_so_dong_tra_ve(db_session, user_a, active_a):
     """Trang cuối rỗng vẫn phải biết còn bao nhiêu trang, nếu không nút *về trước* dẫn vào hư không."""
     for _ in range(3):
         await make_card(db_session, user_a, image_hash=uuid.uuid4().hex)
 
-    result = await cards_router.list_cards(db_session, user_a, size=2, page=1)
+    result = await cards_router.list_cards(db_session, user_a, active_a, size=2, page=1)
 
     assert result.total >= 3
     assert result.pages == max(1, -(-result.total // 2))

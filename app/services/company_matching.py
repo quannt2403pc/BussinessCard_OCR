@@ -92,6 +92,7 @@ async def upsert_company(
     raw_name: str,
     *,
     workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
     email: str | None = None,
     website: str | None = None,
 ) -> uuid.UUID:
@@ -105,9 +106,15 @@ async def upsert_company(
     **Phần còn lại của 12.6 vẫn là của T**: `repositories/company.py`, `routers/companies.py`,
     `services/enrich_jobs.py`, `repositories/enrich_job.py`, `routers/stats.py`, `routers/export.py`.
 
-    Gộp công ty **không bao giờ vượt qua ranh giới người dùng**: nếu ứng viên lấy toàn cục thì
-    danh thiếp của A có thể bị gắn vào công ty của B — vừa rò tên công ty của B qua giao diện của
-    A, vừa tạo ra một `company_id` mà mọi bộ lọc `workspace_id` sau đó đều coi là không tồn tại.
+    Gộp công ty **không bao giờ vượt qua ranh giới không gian làm việc**: nếu ứng viên lấy toàn
+    cục thì danh thiếp của tổ chức A có thể bị gắn vào công ty của tổ chức B — vừa rò tên công ty
+    của B qua giao diện của A, vừa tạo ra một `company_id` mà mọi bộ lọc `workspace_id` sau đó
+    đều coi là không tồn tại.
+
+    Hai tham số, hai việc khác hẳn nhau (`NEXT-05`): `workspace_id` quyết định **tìm trong phạm
+    vi nào và ghi vào phạm vi nào**, còn `user_id` chỉ đi vào cột người tạo của dòng mới. Công ty
+    tìm thấy sẵn thì `user_id` không được dùng tới — người tạo là người đầu tiên, không phải
+    người vừa xác nhận thêm một danh thiếp.
     """
     display_name = " ".join(raw_name.split())[:MAX_NAME_LENGTH]
     key = normalize_company_name(raw_name)[:MAX_NAME_LENGTH]
@@ -121,7 +128,7 @@ async def upsert_company(
         candidates = await _load_candidates(db, workspace_id)
         company_id = find_match(key, extract_domains(email, website), candidates)
     if company_id is None:
-        return await _insert_company(db, key, display_name, workspace_id)
+        return await _insert_company(db, key, display_name, workspace_id, user_id)
 
     await _remember_alias(db, company_id, display_name)
     return company_id
@@ -181,13 +188,14 @@ async def _load_candidates(db: AsyncSession, workspace_id: uuid.UUID) -> list[Ca
 
 
 async def _insert_company(
-    db: AsyncSession, key: str, display_name: str, workspace_id: uuid.UUID
+    db: AsyncSession, key: str, display_name: str, workspace_id: uuid.UUID, user_id: uuid.UUID
 ) -> uuid.UUID:
     inserted = await db.scalar(
         insert(Company)
         .values(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
+            user_id=user_id,
             name_normalized=key,
             display_name=display_name,
             aliases=[display_name],

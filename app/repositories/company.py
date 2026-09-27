@@ -128,7 +128,11 @@ async def save_profile(
     )
 
     statement = insert(CompanyProfile).values(
-        id=uuid.uuid4(), company_id=company_id, workspace_id=_workspace_of(company_id), **values
+        id=uuid.uuid4(),
+        company_id=company_id,
+        workspace_id=_workspace_of(company_id),
+        user_id=_creator_of(company_id),
+        **values,
     )
     statement = statement.on_conflict_do_update(
         constraint="uq_company_profiles_company_id",
@@ -256,6 +260,7 @@ async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
             id=uuid.uuid4(),
             company_id=company_id,
             workspace_id=_workspace_of(company_id),
+            user_id=_creator_of(company_id),
             status=ProfileStatus.DRAFT.value,
         )
         .on_conflict_do_nothing(constraint="uq_company_profiles_company_id")
@@ -276,6 +281,16 @@ def _workspace_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
     điều mà một tham số truyền tay thì luôn có thể làm sai.
     """
     return select(Company.workspace_id).where(Company.id == company_id).scalar_subquery()
+
+
+def _creator_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
+    """Người tạo công ty — đi vào `company_profiles.user_id`, vẫn `NOT NULL` từ `0005`.
+
+    `NEXT-05` đổi *phạm vi* của hồ sơ sang `workspace_id`, nhưng cột người tạo vẫn ở lại:
+    nó không còn dùng để lọc dữ liệu, chỉ để biết hồ sơ này ra đời từ tay ai. Hồ sơ do máy
+    sinh thì lấy người đã tạo công ty, vì đó là dấu vết gần nhất còn thật.
+    """
+    return select(Company.user_id).where(Company.id == company_id).scalar_subquery()
 
 
 async def discard_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> int:

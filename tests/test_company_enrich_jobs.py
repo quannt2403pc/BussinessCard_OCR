@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import current_user
+from app.core.workspace import ActiveWorkspace, require_workspace
 from app.models.company import Company, CompanyProfile, EnrichJob, EnrichJobItem
 from app.models.user import User
+from app.models.workspace import Role
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.routers import companies
@@ -48,7 +50,13 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+#: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
+WORKSPACE_ID = uuid.uuid4()
 OWNER = User(id=OWNER_ID, email="owner-enrich@example.com", password_hash="!")
+#: `require_workspace` tra bảng thành viên qua `get_db`, mà app nhỏ ở đây trỏ `get_db` vào
+#: `FakeSession` (không có `execute`). Ghi đè thẳng dependency: file này kiểm nghiệp vụ của
+#: job enrich, còn việc phân giải không gian làm việc có test riêng ở `test_isolation.py`.
+ACTIVE_WORKSPACE = ActiveWorkspace(id=WORKSPACE_ID, name="Không gian test", role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -63,6 +71,7 @@ async def owner(db_session: AsyncSession) -> User:
         db_session,
         "owner-company_enrich_jobs@example.com",
         "Chủ sở hữu dữ liệu test",
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
     )
 
@@ -105,6 +114,7 @@ async def client(session: FakeSession) -> AsyncIterator[httpx.AsyncClient]:
 
     app.dependency_overrides[get_db] = fake_db
     app.dependency_overrides[current_user] = lambda: OWNER
+    app.dependency_overrides[require_workspace] = lambda: ACTIVE_WORKSPACE
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -285,7 +295,13 @@ async def test_enrich_one_starts_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_company(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
-        return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
+        return Company(
+            workspace_id=WORKSPACE_ID,
+            user_id=OWNER_ID,
+            id=company_id,
+            display_name="ABC",
+            name_normalized="abc",
+        )
 
     async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         assert ids == [COMPANY_ID]
@@ -310,7 +326,13 @@ async def test_enrich_one_conflict_returns_existing_job(
     running_job = uuid.uuid4()
 
     async def fake_company(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
-        return Company(user_id=OWNER_ID, id=company_id, display_name="ABC", name_normalized="abc")
+        return Company(
+            workspace_id=WORKSPACE_ID,
+            user_id=OWNER_ID,
+            id=company_id,
+            display_name="ABC",
+            name_normalized="abc",
+        )
 
     async def fake_create(db: Any, ids: list[uuid.UUID], **_: Any) -> JobCreated:
         return JobCreated(job_id=JOB_ID, accepted=0, skipped=list(ids))
@@ -477,7 +499,13 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
             return 7
 
     async def fake_get_company(db: Any, cid: uuid.UUID) -> Company:
-        return Company(user_id=OWNER_ID, id=cid, display_name="ABC", name_normalized="abc")
+        return Company(
+            workspace_id=WORKSPACE_ID,
+            user_id=OWNER_ID,
+            id=cid,
+            display_name="ABC",
+            name_normalized="abc",
+        )
 
     async def fake_contacts(db: Any, cid: uuid.UUID) -> list[Any]:
         return []
@@ -534,6 +562,7 @@ async def test_enrich_and_save_indexes_after_commit(monkeypatch: pytest.MonkeyPa
 
 async def add_company(db: AsyncSession, display_name: str) -> Company:
     company = Company(
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
         display_name=display_name,
         name_normalized=normalize_company_name(display_name),
@@ -856,7 +885,11 @@ async def test_db_failed_regeneration_keeps_the_existing_profile(
     company = await add_company(db_session, "Alpha")
     db_session.add(
         CompanyProfile(
-            user_id=OWNER_ID, company_id=company.id, tax_code="0309999999", status="verified"
+            workspace_id=WORKSPACE_ID,
+            user_id=OWNER_ID,
+            company_id=company.id,
+            tax_code="0309999999",
+            status="verified",
         )
     )
     await db_session.flush()
@@ -945,7 +978,11 @@ async def test_db_cancelled_regeneration_keeps_the_existing_profile(
     company = await add_company(db_session, "Alpha")
     db_session.add(
         CompanyProfile(
-            user_id=OWNER_ID, company_id=company.id, tax_code="0309999999", status="verified"
+            workspace_id=WORKSPACE_ID,
+            user_id=OWNER_ID,
+            company_id=company.id,
+            tax_code="0309999999",
+            status="verified",
         )
     )
     await db_session.flush()

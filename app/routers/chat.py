@@ -107,6 +107,7 @@ async def chat(
             db,
             payload.question,
             workspace_id=workspace.id,
+            user_id=user.id,
             history=history,
             source_type=payload.filters.source_type,
             company_id=payload.filters.company_id,
