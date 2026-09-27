@@ -130,7 +130,11 @@ class CompanyProfileOut(CompanyProfileSchema):
 
 class CompanyListItem(BaseModel):
     id: uuid.UUID
+    #: Tên **như in trên danh thiếp**. Giao diện in nó làm chú thích nhỏ dưới bản Việt.
     display_name: str
+    #: Bản Việt hoá (`I-36`), `null` khi tên vốn đã là tiếng Việt. Giao diện đọc
+    #: `display_name_vi || display_name` — đúng lối `company_name_vi || company_name_raw` của thẻ.
+    display_name_vi: str | None = None
     name_normalized: str
     contact_count: int
     profile_status: ProfileStatus | None = None
@@ -153,6 +157,7 @@ class CompanyListOut(BaseModel):
 class CompanyRef(BaseModel):
     id: uuid.UUID
     display_name: str
+    display_name_vi: str | None = None
 
 
 class RelatedCompany(CompanyRef):
@@ -186,6 +191,7 @@ class StaleProfile(BaseModel):
 
     company_id: uuid.UUID
     display_name: str
+    display_name_vi: str | None = None
     checked_at: datetime | None = None
     days_since: int | None = Field(default=None, description="null = chưa từng đóng mốc kiểm tra.")
 

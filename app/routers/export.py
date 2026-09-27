@@ -97,6 +97,7 @@ def _companies_select(workspace_id: uuid.UUID) -> Select[Any]:
         select(
             Company.id.label("company_id"),
             Company.display_name,
+            Company.display_name_vi,
             Company.aliases,
             company_repo.contact_count().label("contact_count"),
             CompanyProfile.status.label("profile_status"),

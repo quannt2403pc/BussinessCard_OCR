@@ -93,15 +93,18 @@ async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
     Test bám vào **chữ ký lời gọi**, không bám vào kết quả gộp: kết quả là hành vi trong file
     của T và T có quyền đổi; điều Q phải giữ là truyền đủ dữ kiện xuống.
     """
-    card = await make_card(db_session, user_a)
+    card = await make_card(db_session, user_a, company_name_vi="Công ty TNHH Phú Cơ (VN)")
     company = await make_company(db_session, user_a)
     seen: dict[str, object] = {}
 
-    async def fake_upsert(db, raw_name, *, workspace_id, user_id, email=None, website=None):
+    async def fake_upsert(
+        db, raw_name, *, workspace_id, user_id, display_name_vi=None, email=None, website=None
+    ):
         seen.update(
             raw_name=raw_name,
             workspace_id=workspace_id,
             user_id=user_id,
+            display_name_vi=display_name_vi,
             email=email,
             website=website,
         )
@@ -116,6 +119,9 @@ async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
         "raw_name": "Công ty TNHH Phú Cơ",
         "workspace_id": workspace_a,
         "user_id": user_a.id,
+        # `I-36`: bản Việt hoá của thẻ phải đi xuống, không thì danh sách công ty hiện
+        # chữ gốc trong khi thẻ đã có sẵn bản dịch từ `EX-02`.
+        "display_name_vi": "Công ty TNHH Phú Cơ (VN)",
         "email": "c.le@phuco.vn",
         "website": "https://phuco.vn",
     }

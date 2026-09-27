@@ -616,6 +616,9 @@ async def confirm_card(
             raw_name,
             workspace_id=workspace.id,
             user_id=user.id,
+            # `I-36`: bản Việt hoá đã có sẵn trên thẻ từ `EX-02`, chép thẳng sang công ty thay
+            # vì để danh sách `/companies` hiện chữ Hàn/Trung/Ả Rập.
+            display_name_vi=card.company_name_vi,
             email=card.email,
             website=card.website,
         )
@@ -878,6 +881,7 @@ async def _upsert_company(
     *,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
+    display_name_vi: str | None = None,
     email: str | None = None,
     website: str | None = None,
 ) -> tuple[uuid.UUID | None, str | None]:
@@ -912,6 +916,7 @@ async def _upsert_company(
             raw_name,
             workspace_id=workspace_id,
             user_id=user_id,
+            display_name_vi=display_name_vi,
             email=email,
             website=website,
         ), None

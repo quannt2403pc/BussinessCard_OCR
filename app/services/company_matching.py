@@ -93,6 +93,7 @@ async def upsert_company(
     *,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
+    display_name_vi: str | None = None,
     email: str | None = None,
     website: str | None = None,
 ) -> uuid.UUID:
@@ -115,6 +116,13 @@ async def upsert_company(
     vi nào và ghi vào phạm vi nào**, còn `user_id` chỉ đi vào cột người tạo của dòng mới. Công ty
     tìm thấy sẵn thì `user_id` không được dùng tới — người tạo là người đầu tiên, không phải
     người vừa xác nhận thêm một danh thiếp.
+
+    `display_name_vi` (`I-36`) là bản Việt hoá của chính `raw_name`, lấy từ
+    `business_cards.company_name_vi` — **không gọi model ở đây**, bản dịch đã có sẵn từ `EX-02`.
+    Công ty tìm thấy sẵn mà đang thiếu bản Việt thì được **lấp vào**: thẻ đầu tiên của một công
+    ty có thể là thẻ chưa dịch, và không có bước lấp này thì cái tên chữ Hán ấy nằm lại mãi dù
+    thẻ thứ hai đã có bản dịch. Đã có rồi thì không ghi đè — bản đầu là bản người dùng đã nhìn
+    thấy trong danh sách.
     """
     display_name = " ".join(raw_name.split())[:MAX_NAME_LENGTH]
     key = normalize_company_name(raw_name)[:MAX_NAME_LENGTH]
@@ -128,9 +136,12 @@ async def upsert_company(
         candidates = await _load_candidates(db, workspace_id)
         company_id = find_match(key, extract_domains(email, website), candidates)
     if company_id is None:
-        return await _insert_company(db, key, display_name, workspace_id, user_id)
+        return await _insert_company(
+            db, key, display_name, workspace_id, user_id, _vi_of(display_name, display_name_vi)
+        )
 
     await _remember_alias(db, company_id, display_name)
+    await _fill_missing_vi(db, company_id, _vi_of(display_name, display_name_vi))
     return company_id
 
 
@@ -188,7 +199,12 @@ async def _load_candidates(db: AsyncSession, workspace_id: uuid.UUID) -> list[Ca
 
 
 async def _insert_company(
-    db: AsyncSession, key: str, display_name: str, workspace_id: uuid.UUID, user_id: uuid.UUID
+    db: AsyncSession,
+    key: str,
+    display_name: str,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    display_name_vi: str | None,
 ) -> uuid.UUID:
     inserted = await db.scalar(
         insert(Company)
@@ -198,6 +214,7 @@ async def _insert_company(
             user_id=user_id,
             name_normalized=key,
             display_name=display_name,
+            display_name_vi=display_name_vi,
             aliases=[display_name],
         )
         # Index unique đổi thành `(workspace_id, name_normalized)` ở revision `0005`; `index_elements`
@@ -223,4 +240,26 @@ async def _remember_alias(db: AsyncSession, company_id: uuid.UUID, name: str) ->
     aliases = company.aliases or []
     if name not in aliases:
         company.aliases = [*aliases, name]
+        await db.flush()
+
+
+def _vi_of(display_name: str, display_name_vi: str | None) -> str | None:
+    """Bản Việt hoá đáng lưu, hoặc `None` (`I-36`).
+
+    Trùng y hệt tên gốc thì trả `None`: tên vốn đã là tiếng Việt, mà lưu lại một bản chép y
+    nguyên thì giao diện in hai dòng giống hệt nhau — xem `display()` ở `schemas/company.py`.
+    """
+    cleaned = " ".join((display_name_vi or "").split())[:MAX_NAME_LENGTH]
+    if not cleaned or cleaned.casefold() == display_name.casefold():
+        return None
+    return cleaned
+
+
+async def _fill_missing_vi(db: AsyncSession, company_id: uuid.UUID, name_vi: str | None) -> None:
+    """Lấp bản Việt cho công ty đã có mà còn trống. Không ghi đè bản đang có — xem `upsert_company()`."""
+    if name_vi is None:
+        return
+    company = await db.get_one(Company, company_id)
+    if not company.display_name_vi:
+        company.display_name_vi = name_vi
         await db.flush()

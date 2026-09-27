@@ -188,9 +188,17 @@ async def get_company(
             CompanyProfileOut.model_validate(profile, from_attributes=True) if profile else None
         ),
         contacts=[CardOut.model_validate(card) for card in contacts],
-        same_tax_code=[CompanyRef(id=c.id, display_name=c.display_name) for c in twins],
+        same_tax_code=[
+            CompanyRef(id=c.id, display_name=c.display_name, display_name_vi=c.display_name_vi)
+            for c in twins
+        ],
         same_domain=[
-            RelatedCompany(id=c.id, display_name=c.display_name, domains=domains)
+            RelatedCompany(
+                id=c.id,
+                display_name=c.display_name,
+                display_name_vi=c.display_name_vi,
+                domains=domains,
+            )
             for c, domains in neighbours
         ],
     )
@@ -361,6 +369,7 @@ def to_list_item(row: company_repo.CompanyRow) -> CompanyListItem:
     return CompanyListItem(
         id=row.company.id,
         display_name=row.company.display_name,
+        display_name_vi=row.company.display_name_vi,
         name_normalized=row.company.name_normalized,
         contact_count=row.contact_count,
         profile_status=ProfileStatus(row.profile_status) if row.profile_status else None,

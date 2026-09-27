@@ -169,6 +169,12 @@
     return node;
   }
 
+  // I-36: tên để hiện ra — bản Việt nếu có, không thì bản gốc. Khớp `Company.vi_name` ở
+  // phía server; hai bên phải cùng một luật, nếu không danh sách và file xuất ra lệch nhau.
+  function shownName(row) {
+    return row.display_name_vi || row.display_name || "(chưa có tên)";
+  }
+
   // Thân hàm ở static/js/toast.js (14.8): tin vui tự tắt sau 4s, tin xấu ở lại.
   function message(text, kind, retry) {
     toastShow($("message"), text, kind, retry);
@@ -291,17 +297,24 @@
     box.disabled = isBusy(company);
     if (box.disabled) box.title = "Đang tạo hồ sơ, không chọn được";
     box.addEventListener("change", () => {
-      if (box.checked) selected.set(company.id, company.display_name);
+      if (box.checked) selected.set(company.id, shownName(company));
       else selected.delete(company.id);
       updateSelection();
     });
     pick.append(box);
     tr.append(pick);
 
+    // I-36: bản Việt to, bản gốc làm chú thích nhỏ — đúng khuôn `cards/list.html` đang dùng
+    // cho `full_name_vi` / `full_name`. Một bảng trộn `삼성전자주식회사`, `华为技术有限公司` và
+    // `TẬP ĐOÀN FPT` thì không đọc lướt được dòng nào, mà đọc lướt chính là việc người ta làm
+    // với một bảng danh sách.
     const name = el("td", "px-4 py-3");
-    const open = el("a", "link font-medium text-brand-700 hover:underline", company.display_name);
+    const open = el("a", "link font-medium text-brand-700 hover:underline", shownName(company));
     open.href = `/companies/${company.id}`;
     name.append(open);
+    if (company.display_name_vi) {
+      name.append(el("div", "text-xs text-muted", company.display_name));
+    }
     name.append(el("div", "text-xs text-muted", company.name_normalized));
     tr.append(name);
 
@@ -412,11 +425,11 @@
     try {
       const res = await fetch(`/api/companies/${company.id}/enrich/cancel`, { method: "POST" });
       if (res.status === 409) {
-        message(`${company.display_name} không còn lượt tạo hồ sơ nào đang chạy.`, "info");
+        message(`${shownName(company)} không còn lượt tạo hồ sơ nào đang chạy.`, "info");
       } else if (!res.ok) {
         throw new Error(await readError(res));
       } else {
-        message(`Đã huỷ lượt tạo hồ sơ của ${company.display_name}.`, "ok");
+        message(`Đã huỷ lượt tạo hồ sơ của ${shownName(company)}.`, "ok");
       }
     } catch (err) {
       message(`Không huỷ được: ${err.message}`, "error");
@@ -514,7 +527,7 @@
       const res = await fetch(`/api/companies/${company.id}/enrich`, { method: "POST" });
       body = await res.json();
       if (res.status === 409) {
-        message(`${company.display_name} đang được tạo hồ sơ, đợi lượt đang chạy xong.`, "info");
+        message(`${shownName(company)} đang được tạo hồ sơ, đợi lượt đang chạy xong.`, "info");
         if (body.existing_id) trackJob(body.existing_id);
         return;
       }
@@ -524,9 +537,9 @@
       return;
     }
 
-    markPending(company.id, company.display_name);
+    markPending(company.id, shownName(company));
     renderRows();
-    message(`Đang tạo lại hồ sơ cho ${company.display_name}.`, "info");
+    message(`Đang tạo lại hồ sơ cho ${shownName(company)}.`, "info");
     trackJob(body.job_id);
   }
 
@@ -607,7 +620,7 @@
 
     const head = el("div", "flex flex-wrap items-center gap-2 border-b border-line px-4 py-2");
     const link = el("a", "link font-medium text-brand-ink hover:text-brand-700",
-                    entry.display_name);
+                    shownName(entry));
     link.href = "/companies/" + entry.company_id;
     head.append(link);
     head.append(el("span", "text-xs text-muted", formatDate(entry.detected_at)));
@@ -646,7 +659,7 @@
     } catch (err) {
       return;  // không đọc được thì cứ để trang chạy như cũ
     }
-    stale = new Map(data.items.map((item) => [item.company_id, item.display_name]));
+    stale = new Map(data.items.map((item) => [item.company_id, shownName(item)]));
     $("stale-section").classList.toggle("hidden", !data.total);
     if (!data.total) return;
 
@@ -655,8 +668,8 @@
     $("stale-list").replaceChildren(...data.items.slice(0, 8).map((item) => {
       const chip = el("li", "rounded-full border border-amber-300 bg-white px-2 py-0.5");
       chip.textContent = item.days_since === null
-        ? item.display_name + " · chưa từng kiểm"
-        : `${item.display_name} · ${item.days_since} ngày`;
+        ? shownName(item) + " · chưa từng kiểm"
+        : `${shownName(item)} · ${item.days_since} ngày`;
       return chip;
     }));
   }

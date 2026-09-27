@@ -8,6 +8,8 @@
   <div>
     <a href="/companies" class="link inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">{{ icon("arrow-left") }} Doanh nghiệp</a>
     <h1 id="company-name" class="mt-1 text-2xl font-semibold text-slate-900">Đang tải…</h1>
+    {# I-36: tên như in trên thẻ, chỉ hiện khi khác tên đang in ở trên. #}
+    <p id="company-name-raw" class="hidden text-sm text-slate-500"></p>
     <p id="company-meta" class="mt-1 text-sm text-slate-500"></p>
     <div id="aliases" class="mt-2 flex flex-wrap gap-1"></div>
   </div>
@@ -185,6 +187,11 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = text;
     return node;
+  }
+
+  // I-36: tên để hiện ra — khớp `Company.vi_name` phía server.
+  function shownName(row) {
+    return row.display_name_vi || row.display_name || "(chưa có tên)";
   }
 
   // Thân hàm ở static/js/toast.js (14.8): tin vui tự tắt sau 4s, tin xấu ở lại.
@@ -395,7 +402,9 @@
       return;
     }
 
-    $("company-name").textContent = company.display_name;
+    $("company-name").textContent = shownName(company);
+    $("company-name-raw").textContent = company.display_name;
+    $("company-name-raw").classList.toggle("hidden", !company.display_name_vi);
     $("company-meta").textContent =
       `${company.contact_count} danh thiếp · tên chuẩn hoá: ${company.name_normalized}`;
     $("aliases").replaceChildren(...company.aliases.map((alias) =>
@@ -408,7 +417,7 @@
   function companyLinks(companies, withDomains) {
     const wrap = el("span", "inline-flex flex-wrap gap-x-3 gap-y-1");
     companies.forEach((ref) => {
-      const link = el("a", "link font-medium text-brand-700 hover:underline", ref.display_name);
+      const link = el("a", "link font-medium text-brand-700 hover:underline", shownName(ref));
       link.href = `/companies/${ref.id}`;
       const item = el("span");
       item.append(link);

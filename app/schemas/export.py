@@ -84,6 +84,10 @@ class CardExportRow(ExportRow):
 class CompanyExportRow(ExportRow):
     company_id: uuid.UUID
     display_name: str
+    #: Bản Việt hoá (`I-36`), `null` khi tên vốn đã là tiếng Việt. Xuất **cả hai cột** chứ không
+    #: thay thế, đúng lối `CardExportRow` đã làm với `full_name` / `full_name_vi`: người nhận file
+    #: cần bản Việt để đọc, và bản gốc để đối chiếu với chứng từ.
+    display_name_vi: str | None = None
     aliases: list[str] = Field(default_factory=list)
     contact_count: int
     profile_status: ProfileStatus | None = None

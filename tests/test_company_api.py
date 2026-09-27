@@ -182,6 +182,7 @@ def test_list_item_from_row() -> None:
     assert to_list_item(row).model_dump(mode="json") == {
         "id": str(COMPANY_ID),
         "display_name": "Công ty TNHH ABC",
+        "display_name_vi": None,
         "name_normalized": "abc",
         "contact_count": 3,
         "profile_status": "generated",
@@ -860,7 +861,14 @@ async def test_db_detail_lists_same_tax_code_and_same_domain(
         "Công ty Cổ phần FPT Việt Nam"
     ]
     assert body["same_domain"] == [
-        {"id": str(japan.id), "display_name": "FPTジャパン株式会社", "domains": ["fpt.com"]}
+        {
+            "id": str(japan.id),
+            "display_name": "FPTジャパン株式会社",
+            # `I-36`: công ty dựng thẳng bằng ORM ở test này không đi qua `upsert_company()`
+            # nên không có bản Việt — giao diện rơi về tên gốc.
+            "display_name_vi": None,
+            "domains": ["fpt.com"],
+        }
     ]
 
 
