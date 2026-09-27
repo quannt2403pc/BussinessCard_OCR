@@ -28,6 +28,7 @@ Xây dựng hệ thống giúp doanh nghiệp chuyển hoá danh thiếp thu th�
 | F1 | **Số hoá danh thiếp qua ảnh** | Upload/scan ảnh danh thiếp → LLM Vision (Gemini Flash) trích xuất: công ty, họ tên người đưa danh thiếp, chức vụ, email, SĐT, địa chỉ, website, ngày upload… → lưu DB, cho phép người dùng review/sửa. |
 | F2 | **Hồ sơ doanh nghiệp đối tác** | **Người dùng chủ động tích chọn 1 hoặc nhiều công ty** đã thu được từ danh thiếp rồi bấm “Tạo hồ sơ doanh nghiệp” — hệ thống **không** tự sinh. Với mỗi công ty được chọn, dùng LLM + tìm kiếm Internet tổng hợp: mã số thuế, tên pháp lý, quy mô, ngành nghề, sản phẩm/dịch vụ, địa chỉ, website, nguồn trích dẫn → sinh Hồ sơ doanh nghiệp. |
 | F3 | **Trợ lý AI hỏi–đáp (RAG)** | Chat hỏi đáp trên Knowledge Base gồm **danh thiếp đã nhập liệu + hồ sơ doanh nghiệp đã tạo**, trả lời kèm trích dẫn nguồn. |
+| F5 | **Không gian làm việc & phân quyền** *(bổ sung 2026-09-27, `NEXT-05`)* | Dữ liệu thuộc **không gian làm việc**, không thuộc người tạo ra nó. Mỗi người có thể là thành viên của nhiều không gian với vai trò **quản trị / thành viên / chỉ xem**. Quản trị mời và gỡ thành viên; **gỡ một người không làm mất dữ liệu họ đã nhập** — dữ liệu ở lại với tổ chức, chỉ phần *được giao* cho họ là phải chuyển giao. Mỗi danh thiếp có thể gắn **người phụ trách**. |
 | F4 | **Tài khoản & tách dữ liệu theo người dùng** *(bổ sung 2026-09-21, làm ở D12–D13)* | Đăng ký – đăng nhập – đăng xuất bằng email + mật khẩu. Mỗi người dùng **chỉ thấy danh thiếp, công ty, hồ sơ và lịch sử chat của chính mình**; Knowledge Base của RAG cũng cắt theo người dùng. Mỗi người **tự bấm nút kết nối OAuth CLIProxy bằng tài khoản Google của mình**, lời gọi LLM đi bằng credential của chính người đó. |
 
 ### 1.3 Trong phạm vi
@@ -64,8 +65,12 @@ Xây dựng hệ thống giúp doanh nghiệp chuyển hoá danh thiếp thu th�
 - Không làm app mobile native (dùng web + thuộc tính `capture` của trình duyệt để chụp ảnh).
 - ~~Không quản lý người dùng/phân quyền phức tạp (single-user demo).~~
   **Đảo ngược 2026-09-21:** nay **có** đăng nhập nhiều người dùng và tách dữ liệu theo người dùng (F4).
-  Phần vẫn ngoài phạm vi: phân quyền theo vai trò (admin/member), mời thành viên, chia sẻ dữ liệu giữa
-  các tài khoản, xác thực email, quên mật khẩu qua email, đăng nhập bằng mạng xã hội, 2FA.
+  ~~Phần vẫn ngoài phạm vi: phân quyền theo vai trò (admin/member), mời thành viên, chia sẻ dữ liệu giữa
+  các tài khoản~~, xác thực email, quên mật khẩu qua email, đăng nhập bằng mạng xã hội, 2FA.
+  **Đảo ngược lần hai 2026-09-27 (`NEXT-05`, chủ dự án duyệt):** nay **có** không gian làm việc,
+  phân quyền theo vai trò (quản trị / thành viên / chỉ xem), mời thành viên, và **dữ liệu thuộc
+  tổ chức chứ không thuộc cá nhân** — xem F5 ở mục 1.2 và tiêu chí **A9** đã viết lại.
+  Phần vẫn ngoài phạm vi: xác thực email, quên mật khẩu qua email, đăng nhập bằng mạng xã hội, 2FA.
 - Không tích hợp CRM bên ngoài (chỉ export CSV/JSON).
 - Chưa làm trong demo (ghi nhận cho giai đoạn sau): danh thiếp 2 mặt ghép 1 bản ghi, nhập KB từ file CSV có sẵn, dark mode / responsive mobile.
 
@@ -237,13 +242,26 @@ GET  /health  → { "status": "ok", "model": "...", "dim": 384 }
 ## 3. Thiết kế dữ liệu (PostgreSQL)
 
 ```
+workspaces                     -- F5, thêm 2026-09-27 (revision 0015)
+  id (uuid, pk), name, created_at, updated_at
+
+workspace_members              -- F5 (revision 0015)
+  workspace_id (fk -> workspaces.id, on delete cascade),
+  user_id (fk -> users.id, on delete cascade),
+  role (admin | member | viewer), joined_at
+  -- khoá chính (workspace_id, user_id); mỗi không gian phải luôn còn ít nhất một `admin`
+
 users                          -- F4, thêm ở D12 (revision 0005)
   id (uuid, pk), email (unique, lowercase), password_hash, display_name,
   is_active (bool), cliproxy_auth_file (text, nullable),   -- tên file credential ở auth-files[].name
+  retention_days (int, nullable),                          -- NEXT-07 (revision 0012)
+  active_workspace_id (fk -> workspaces.id, nullable),     -- F5: không gian đang mở
   last_login_at, created_at, updated_at
 
 business_cards
-  user_id (fk -> users.id, NOT NULL)                       -- thêm ở D12
+  workspace_id (fk -> workspaces.id, NOT NULL)             -- F5: **khoá tách dữ liệu** (revision 0015)
+  user_id (fk -> users.id, NOT NULL)                       -- nay là *người tạo*, KHÔNG còn là khoá tách
+  assigned_to_user_id (fk -> users.id, nullable, SET NULL) -- người phụ trách, F5
   id (uuid, pk), image_path, image_hash, uploaded_at, ocr_raw_json (jsonb),
   full_name, job_title, company_name_raw, email, phone, phone_alt, address,
   website, language_detected, confidence (jsonb),
@@ -310,7 +328,28 @@ Hai index **partial** thêm ở đợt `NEXT` (2026-09-24) — chỉ số hoá �
 | `ix_business_cards_merged_into` (`merged_into_id`) | `WHERE merged_into_id IS NOT NULL` | Gần hết bảng để `NULL` ở cột này; câu duy nhất cần tới index là "liệt kê những thẻ đã gộp vào thẻ X" (`NEXT-04`) |
 | `ix_profile_changes_unseen` (`user_id`, `detected_at`) | `WHERE acknowledged_at IS NULL` | Màn hình chỉ hỏi "còn thay đổi nào chưa xem không"; dòng đã xem là phần lớn bảng sau vài tuần (`NEXT-06`) |
 
-**Đổi ràng buộc unique ở D12 — đây là chỗ dễ hỏng nhất khi lên đa người dùng.** Hai ràng buộc dưới đây
+**Đổi khoá tách dữ liệu ở `NEXT-05` — đây là chỗ dễ hỏng nhất của cả dự án.**
+
+Từ D12 tới 2026-09-26, `user_id` vừa là *người tạo* vừa là *khoá tách dữ liệu*. `NEXT-05` tách
+hai vai trò ấy ra: `workspace_id` là khoá tách, `user_id` chỉ còn là người tạo. Hệ quả bắt buộc:
+
+| Chỗ | Trước | Từ `NEXT-05` |
+|-----|-------|--------------|
+| Mọi câu `WHERE` lọc dữ liệu | `user_id = :current_user` | `workspace_id = :active_workspace` |
+| Chống trùng ảnh | `unique(user_id, image_hash)` | `unique(workspace_id, image_hash)` |
+| Chống trùng công ty | `unique(user_id, name_normalized)` | `unique(workspace_id, name_normalized)` |
+
+⚠️ **Hai ràng buộc unique phải đổi theo, không được quên.** Để nguyên theo `user_id` thì hai
+thành viên cùng một không gian quét đúng một tấm thẻ sẽ tạo ra **hai bản ghi** — đúng loại
+trùng lặp mà `NEXT-04` sinh ra để dọn, và lần này do chính hệ thống tạo ra.
+
+⚠️ **Ba thứ vẫn thuộc về cá nhân, không chuyển sang không gian làm việc:**
+`users.cliproxy_auth_file` (credential OAuth là của riêng người đó — task 13.2, nên lời gọi LLM
+của ai tiêu hạn mức của người ấy), `user_model_prefs` (chọn model là sở thích cá nhân), và
+`users.retention_days`. Đẩy chúng sang không gian là đem quota và khoá của một người cho cả
+nhóm dùng.
+
+**Đổi ràng buộc unique ở D12 — chỗ dễ hỏng nhất khi lên đa người dùng.** Hai ràng buộc dưới đây
 đang là **unique toàn cục**; để nguyên thì người dùng B upload đúng tấm danh thiếp mà A đã upload sẽ bị
 hệ thống từ chối và còn **lộ ra rằng A đã có tấm thẻ đó**:
 
@@ -328,6 +367,8 @@ Migration `0005` phải **gán dữ liệu cũ về một tài khoản khởi t�
 
 | Nhóm | Endpoint | Mô tả |
 |------|----------|-------|
+| **Không gian làm việc** *(F5, NEXT-05)* | `GET /api/workspaces` · `POST /api/workspaces` · `POST /api/workspaces/{id}/activate` · `GET /api/workspaces/{id}/members` · `POST /api/workspaces/{id}/members` · `PATCH /api/workspaces/{id}/members/{user_id}` · `DELETE /api/workspaces/{id}/members/{user_id}` | Mời theo email của người đã có tài khoản. Chỉ **quản trị** gọi được nhóm mời/gỡ/đổi vai trò. Gỡ thành viên **không xoá dữ liệu**; phần *được giao* cho họ chuyển sang người khác hoặc về trống |
+| **Người phụ trách** *(F5, NEXT-05)* | `PATCH /api/contacts/{card_id}` thêm trường `assigned_to_user_id` | Giao một liên hệ cho một thành viên trong cùng không gian. `null` = chưa giao |
 | **Auth** *(D12)* | `GET /auth/register` · `POST /auth/register` · `GET /auth/login` · `POST /auth/login` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/change-password` | F4. Trả HTML (form) cho trình duyệt; session nằm trong cookie ký, `HttpOnly` + `SameSite=Lax` (+ `Secure` khi chạy sau HTTPS) |
 | Integration | `GET /api/integration/status` · `POST /api/integration/connect` · `POST /api/integration/disconnect` · `POST /api/integration/test` | Nút OAuth CLIProxy. **Từ D13: mọi endpoint chỉ thao tác trên credential của chính người đang đăng nhập** |
 | Cards | `POST /api/cards/upload` · `POST /api/cards/batch-upload` · `GET /api/cards` (filter/search/paging) · `GET /api/cards/{id}` · `PATCH /api/cards/{id}` · `POST /api/cards/{id}/confirm` · `DELETE /api/cards/{id}` · `GET /api/cards/export.csv` | F1 |
@@ -468,7 +509,8 @@ Chi tiết công việc từng ngày: xem **[Task.md](./Task.md)**.
 | A6 | Trợ lý AI trả lời đúng ≥ 8/10 câu hỏi mẫu về danh thiếp & doanh nghiệp trong KB, có trích dẫn | Bộ câu hỏi kiểm thử |
 | A7 | Toàn bộ mã nguồn trên Git, có README hướng dẫn cài đặt & chạy | Review repo |
 | **A8** *(D12)* | Đăng ký được tài khoản mới, đăng nhập/đăng xuất chạy đúng; **chưa đăng nhập thì không vào được bất kỳ trang hay API nào** ngoài `/auth/*` và `/health` | Thao tác tay + test tự động |
-| **A9** *(D12)* | **Tách dữ liệu tuyệt đối**: hai tài khoản A và B, mỗi bên upload danh thiếp + tạo hồ sơ riêng → A không thấy gì của B ở danh sách, tìm kiếm, dashboard, export, **và cả câu trả lời của trợ lý AI**; gọi thẳng `GET /api/cards/{id của B}` bằng phiên của A trả `404` | Test tự động (bắt buộc có ca trợ lý AI — rò rỉ qua RAG là đường rò khó thấy nhất) |
+| ~~**A9** *(D12)*~~ | ~~**Tách dữ liệu tuyệt đối**: hai tài khoản A và B, mỗi bên upload danh thiếp + tạo hồ sơ riêng → A không thấy gì của B ở danh sách, tìm kiếm, dashboard, export, **và cả câu trả lời của trợ lý AI**; gọi thẳng `GET /api/cards/{id của B}` bằng phiên của A trả `404`~~ **Thay bằng A9′ ngày 2026-09-27** — xem dòng dưới. Bản cũ nói *tách theo tài khoản*, mà `NEXT-05` đảo ngược đúng điều đó | ~~Test tự động~~ |
+| **A9′** *(NEXT-05, 2026-09-27)* | **Tách dữ liệu theo không gian làm việc, và chia sẻ bên trong nó.** Hai mặt, phải đạt cả hai: **(a) Cách nhau** — không gian X và Y, mỗi bên có dữ liệu riêng → thành viên của X không thấy gì của Y ở danh sách, tìm kiếm, số liệu, export **và cả câu trả lời của trợ lý AI**; gọi thẳng `GET /api/cards/{id thuộc Y}` bằng phiên của một thành viên X trả `404`. **(b) Cùng nhau** — hai người **cùng** một không gian thì thấy **đúng cùng một dữ liệu**, kể cả thứ người kia vừa nhập; gỡ một người khỏi không gian **không làm mất bản ghi nào** họ đã tạo. Cộng thêm: **chỉ xem** không ghi được gì (`403`), và **thành viên** không mời được ai | Test tự động (giữ nguyên ca trợ lý AI — rò rỉ qua RAG vẫn là đường rò khó thấy nhất; thêm ca *cùng không gian thì thấy nhau*, vì luật mới sai theo **cả hai** chiều được) |
 | **A10** *(D13)* | Mỗi người dùng tự bấm nút kết nối OAuth bằng tài khoản Google của mình; lời gọi LLM của A đi bằng credential của A; A bấm "Ngắt kết nối" **không** làm mất kết nối của B | Thao tác tay, 2 trình duyệt, 2 tài khoản Google. *(Nếu spike 12.1 kết luận CLIProxy không làm được — xem R8 — thì tiêu chí này hạ xuống theo phương án đã chốt, ghi rõ trong ADR)* |
 | **A11** *(D13)* | `https://ocrximi.io.vn` mở được từ máy ngoài mạng, chứng chỉ hợp lệ, HTTP tự chuyển sang HTTPS; **không cổng nào khác mở ra Internet** | Quét cổng từ máy ngoài (`nmap`), kiểm chứng chỉ trên trình duyệt |
 | **A12** *(D13)* | Merge một PR vào `main` → CI xanh → **tự deploy lên VPS** → smoke test `https://ocrximi.io.vn/health` xanh, không cần thao tác tay | Merge thật một thay đổi nhỏ và xem workflow chạy |
