@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.card import BusinessCard
 from app.models.kb import KBSourceType
 from app.repositories import duplicate as duplicate_repo
@@ -76,7 +76,7 @@ async def list_duplicates(
 
 @router.post("/merge", response_model=MergeOut)
 async def merge_duplicates(
-    body: MergeIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    body: MergeIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> MergeOut:
     """Gộp các bản trùng vào một thẻ chính do **người dùng chỉ định**.
 
@@ -110,7 +110,7 @@ async def merge_duplicates(
 
 @router.post("/unmerge", response_model=UnmergeOut)
 async def unmerge_duplicates(
-    body: UnmergeIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    body: UnmergeIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> UnmergeOut:
     """Trả các thẻ đã gộp về làm thẻ độc lập, và nạp lại chúng vào Knowledge Base."""
     restored = await duplicate_repo.unmerge(db, body.card_ids, workspace_id=workspace.id)

@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.company import ProfileChange
 from app.repositories import company as company_repo
 from app.schemas.company import (
@@ -135,7 +135,7 @@ async def list_changes(
 
 @router.post("/changes/{change_id}/ack", status_code=status.HTTP_204_NO_CONTENT)
 async def acknowledge(
-    change_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    change_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> None:
     """Đánh dấu *đã xem*. Dòng nhật ký ở lại, chỉ thôi nằm trong danh sách cần đọc."""
     done = await company_repo.acknowledge_change(

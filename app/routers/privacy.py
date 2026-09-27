@@ -29,7 +29,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.privacy import PrivacyAction, PrivacyLog
 from app.repositories import privacy as privacy_repo
 from app.schemas.privacy import (
@@ -127,7 +127,7 @@ async def get_retention(
 
 @router.put("/api/privacy/retention", response_model=RetentionOut)
 async def put_retention(
-    body: RetentionIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    body: RetentionIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> RetentionOut:
     """Đặt hoặc gỡ hạn lưu trữ. **Đặt hạn không xoá gì cả** — xoá là một cú bấm riêng."""
     await privacy_repo.set_retention(db, user, body.days)
@@ -136,7 +136,7 @@ async def put_retention(
 
 
 @router.post("/api/privacy/purge", response_model=PurgeOut)
-async def purge_expired(db: Session, user: CurrentUser, workspace: CurrentWorkspace) -> PurgeOut:
+async def purge_expired(db: Session, user: CurrentUser, workspace: WriterWorkspace) -> PurgeOut:
     """Xoá những danh thiếp đã quá hạn lưu trữ đang đặt. Không có hạn thì không xoá gì."""
     if not user.retention_days:
         return PurgeOut(days=0, erased=0, images_removed=0)
@@ -180,7 +180,7 @@ async def find_subject(
 
 @router.post("/api/privacy/erase", response_model=EraseOut)
 async def erase_subject(
-    body: SubjectIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    body: SubjectIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EraseOut:
     """Xoá **vĩnh viễn** mọi dữ liệu của một chủ thể: hàng, ảnh, ghi chú, chunk Knowledge Base.
 

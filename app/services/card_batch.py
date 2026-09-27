@@ -107,10 +107,12 @@ class BatchJob:
     """Một lượt upload hàng loạt."""
 
     id: uuid.UUID
-    #: Người bấm nút upload. `GET /api/cards/batch-jobs/{id}` đối chiếu trường này: `job_id` là
-    #: UUID khó đoán, nhưng "khó đoán" không phải kiểm soát truy cập — tiến trình quét của người
-    #: khác vẫn là dữ liệu của người khác.
+    #: Không gian nhận lô này. `GET /api/cards/batch-jobs/{id}` đối chiếu trường **này**:
+    #: `job_id` là UUID khó đoán, nhưng "khó đoán" không phải kiểm soát truy cập — tiến trình
+    #: quét của tổ chức khác vẫn là dữ liệu của tổ chức khác.
     workspace_id: uuid.UUID
+    #: Người bấm nút. Không dùng để phân quyền (`NEXT-05`), chỉ để chọn credential CLIProxy và
+    #: model OCR của đúng người ấy — xem `_process()`.
     user_id: uuid.UUID
     items: list[BatchItem]
     created_at: datetime

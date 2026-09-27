@@ -1,0 +1,318 @@
+{# Không gian làm việc: danh sách, tạo, chuyển, và thành viên của không gian đang mở. #}
+{# Chủ sở hữu: T | Task: NEXT-05 | xem Task.md #}
+{#
+  Một trang, hai khối, và thứ tự đó là có chủ đích: khối trên trả lời "tôi đang ở đâu", khối
+  dưới "ai làm chung với tôi". Đảo lại thì người vừa được mời vào hai tổ chức sẽ sửa thành viên
+  của nhầm nơi.
+
+  Mọi thao tác thành viên chạy trên **không gian đang mở** — API từ chối id khác (xem
+  `routers/workspaces.py::_require_active`). Vì vậy bấm *Chuyển* là nạp lại cả hai khối.
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+
+{% block title %}Không gian làm việc{% endblock %}
+
+{% block content %}
+<div>
+  <h1 class="text-2xl font-semibold text-brand-ink">Không gian làm việc</h1>
+  <p class="mt-1 text-sm text-muted">
+    Danh thiếp, công ty và hồ sơ thuộc về <strong>không gian làm việc</strong>, không thuộc về
+    tài khoản. Mọi thành viên trong cùng một không gian nhìn thấy cùng một dữ liệu.
+  </p>
+</div>
+
+<section class="mt-6 rounded-lg border border-line bg-white p-5" aria-label="Danh sách không gian">
+  <div class="flex flex-wrap items-center gap-3">
+    <h2 class="text-sm font-semibold text-brand-ink">Của tôi</h2>
+    <form id="create-form" class="ml-auto flex flex-wrap items-center gap-2">
+      <label class="sr-only" for="create-name">Tên không gian mới</label>
+      <input id="create-name" type="text" maxlength="120" required placeholder="Tên không gian mới"
+             class="w-56 rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+      <button type="submit" class="btn">{{ icon("plus") }} Tạo</button>
+    </form>
+  </div>
+  <div id="ws-list" class="mt-3 divide-y divide-line text-sm">
+    <p class="py-4 text-muted">Đang tải…</p>
+  </div>
+</section>
+
+<section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Thành viên">
+  <h2 class="text-sm font-semibold text-brand-ink">
+    Thành viên của <span id="mem-workspace">không gian đang mở</span>
+  </h2>
+  <p class="mt-1 text-xs text-muted">
+    <strong>Quản trị</strong> mời, gỡ và đổi vai trò · <strong>Thành viên</strong> đọc và ghi dữ
+    liệu · <strong>Chỉ xem</strong> đọc thôi.
+  </p>
+
+  <form id="invite-form" class="mt-3 hidden flex-wrap items-end gap-2">
+    <label class="text-sm">
+      <span class="text-slate-600">Email tài khoản đã đăng ký</span>
+      <input id="invite-email" type="email" required placeholder="nguoi@congty.vn"
+             class="mt-1 block w-64 rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+    </label>
+    <label class="text-sm">
+      <span class="text-slate-600">Vai trò</span>
+      <select id="invite-role"
+              class="mt-1 block rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+        <option value="member">Thành viên</option>
+        <option value="viewer">Chỉ xem</option>
+        <option value="admin">Quản trị</option>
+      </select>
+    </label>
+    <button type="submit" class="btn">{{ icon("plus") }} Thêm</button>
+  </form>
+  <p id="invite-note" class="mt-2 hidden text-xs text-muted">
+    Người được mời phải tự đăng ký tài khoản trước — hệ thống không gửi thư mời.
+  </p>
+
+  <div id="mem-list" class="mt-3 divide-y divide-line text-sm">
+    <p class="py-4 text-muted">Đang tải…</p>
+  </div>
+</section>
+
+<div id="message" class="hidden" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    const ROLE_LABELS = { admin: "Quản trị", member: "Thành viên", viewer: "Chỉ xem" };
+
+    function say(text, kind) {
+      toastShow($("message"), text, kind || "info");
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = text;
+      return node;
+    }
+
+    // Đọc `detail` của FastAPI khi có, vì đó là câu nói đúng việc cần làm ("nhờ họ đăng ký
+    // trước", "phải còn ít nhất một quản trị"). Chỉ khi không có mới rơi về câu chung chung.
+    async function call(path, options) {
+      const res = await fetch(path, options);
+      if (res.status === 204) return null;
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (err) {
+        body = null;
+      }
+      if (!res.ok) throw new Error((body && body.detail) || "Lỗi HTTP " + res.status);
+      return body;
+    }
+
+    // --- không gian --------------------------------------------------------
+
+    function workspaceRow(item) {
+      const row = el("div", "flex flex-wrap items-center gap-3 py-3");
+      const left = el("div", "min-w-0 flex-1");
+      const title = el("p", "truncate font-medium text-brand-ink", item.name);
+      if (item.is_active) {
+        title.append(el("span", "ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700", "đang mở"));
+      }
+      left.append(title);
+      left.append(el("p", "text-xs text-muted",
+        `${ROLE_LABELS[item.role] || item.role} · ${item.member_count} thành viên`));
+      row.append(left);
+
+      if (item.is_active && item.role === "admin") {
+        const rename = el("button", "btn", "Đổi tên");
+        rename.type = "button";
+        rename.addEventListener("click", () => renameWorkspace(item));
+        row.append(rename);
+      }
+      if (!item.is_active) {
+        const open = el("button", "btn", "Chuyển sang");
+        open.type = "button";
+        open.addEventListener("click", () => activate(item.id));
+        row.append(open);
+      }
+      return row;
+    }
+
+    async function loadWorkspaces() {
+      const list = $("ws-list");
+      try {
+        const data = await call("/api/workspaces");
+        list.replaceChildren();
+        if (!data.items.length) {
+          list.append(el("p", "py-4 text-muted", "Chưa có không gian nào. Tạo một cái để bắt đầu."));
+          return;
+        }
+        data.items.forEach((item) => list.append(workspaceRow(item)));
+      } catch (err) {
+        list.replaceChildren(el("p", "py-4 text-muted", "Không đọc được danh sách không gian."));
+      }
+    }
+
+    async function activate(id) {
+      try {
+        const data = await call(`/api/workspaces/${id}/activate`, { method: "POST" });
+        say(`Đang làm việc trong “${data.name}”.`, "ok");
+        await loadWorkspaces();
+        await loadMembers();
+      } catch (err) {
+        say(err.message, "error");
+      }
+    }
+
+    async function renameWorkspace(item) {
+      const name = window.prompt("Tên mới của không gian làm việc:", item.name);
+      if (name === null) return;
+      try {
+        await call(`/api/workspaces/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        say("Đã đổi tên.", "ok");
+        await loadWorkspaces();
+        await loadMembers();
+      } catch (err) {
+        say(err.message, "error");
+      }
+    }
+
+    $("create-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const name = $("create-name").value.trim();
+      if (!name) return;
+      try {
+        const data = await call("/api/workspaces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        $("create-name").value = "";
+        say(`Đã tạo “${data.name}” và chuyển sang nó.`, "ok");
+        await loadWorkspaces();
+        await loadMembers();
+      } catch (err) {
+        say(err.message, "error");
+      }
+    });
+
+    // --- thành viên --------------------------------------------------------
+
+    function memberRow(member, myRole) {
+      const row = el("div", "flex flex-wrap items-center gap-3 py-3");
+      const left = el("div", "min-w-0 flex-1");
+      left.append(el("p", "truncate font-medium text-brand-ink",
+        member.display_name || member.email));
+      left.append(el("p", "truncate text-xs text-muted",
+        member.is_me ? `${member.email} · bạn` : member.email));
+      row.append(left);
+
+      if (myRole !== "admin") {
+        row.append(el("span", "text-sm text-slate-600", ROLE_LABELS[member.role] || member.role));
+        return row;
+      }
+
+      const select = el("select",
+        "rounded-md border border-line px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600");
+      Object.entries(ROLE_LABELS).forEach(([value, label]) => {
+        const option = el("option", "", label);
+        option.value = value;
+        if (value === member.role) option.selected = true;
+        select.append(option);
+      });
+      select.addEventListener("change", () => changeRole(member, select));
+      row.append(select);
+
+      const remove = el("button", "btn", member.is_me ? "Rời khỏi" : "Gỡ");
+      remove.type = "button";
+      remove.addEventListener("click", () => removeMember(member));
+      row.append(remove);
+      return row;
+    }
+
+    async function loadMembers() {
+      const list = $("mem-list");
+      try {
+        const active = await call("/api/workspaces");
+        if (!active.active_id) {
+          $("mem-workspace").textContent = "—";
+          $("invite-form").classList.add("hidden");
+          $("invite-note").classList.add("hidden");
+          list.replaceChildren(el("p", "py-4 text-muted", "Chưa ở không gian nào."));
+          return;
+        }
+        const data = await call(`/api/workspaces/${active.active_id}/members`);
+        $("mem-workspace").textContent = data.name;
+        const isAdmin = data.my_role === "admin";
+        $("invite-form").classList.toggle("hidden", !isAdmin);
+        $("invite-form").classList.toggle("flex", isAdmin);
+        $("invite-note").classList.toggle("hidden", !isAdmin);
+        list.replaceChildren();
+        data.items.forEach((member) => list.append(memberRow(member, data.my_role)));
+      } catch (err) {
+        list.replaceChildren(el("p", "py-4 text-muted", "Không đọc được danh sách thành viên."));
+      }
+    }
+
+    async function activeId() {
+      const data = await call("/api/workspaces");
+      return data.active_id;
+    }
+
+    async function changeRole(member, select) {
+      try {
+        await call(`/api/workspaces/${await activeId()}/members/${member.user_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: select.value }),
+        });
+        say(`${member.email}: ${ROLE_LABELS[select.value]}.`, "ok");
+      } catch (err) {
+        say(err.message, "error");
+      }
+      await loadMembers();
+    }
+
+    async function removeMember(member) {
+      const question = member.is_me
+        ? "Rời khỏi không gian này? Dữ liệu bạn đã nhập vẫn ở lại với tổ chức."
+        : `Gỡ ${member.email} khỏi không gian? Dữ liệu họ đã nhập vẫn ở lại.`;
+      if (!window.confirm(question)) return;
+      try {
+        await call(`/api/workspaces/${await activeId()}/members/${member.user_id}`, {
+          method: "DELETE",
+        });
+        say("Đã gỡ khỏi không gian làm việc.", "ok");
+      } catch (err) {
+        say(err.message, "error");
+      }
+      await loadWorkspaces();
+      await loadMembers();
+    }
+
+    $("invite-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await call(`/api/workspaces/${await activeId()}/members`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: $("invite-email").value, role: $("invite-role").value }),
+        });
+        $("invite-email").value = "";
+        say(`Đã thêm ${data.email} với vai trò ${ROLE_LABELS[data.role]}.`, "ok");
+      } catch (err) {
+        say(err.message, "error");
+      }
+      await loadWorkspaces();
+      await loadMembers();
+    });
+
+    loadWorkspaces();
+    loadMembers();
+  })();
+</script>
+{% endblock %}

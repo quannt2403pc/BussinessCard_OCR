@@ -19,9 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace, membership
 from app.models.card import BusinessCard, RelationshipStatus
 from app.repositories import contact as contact_repo
+from app.repositories import user as user_repo
 from app.schemas.contact import (
     RELATIONSHIP_LABELS,
     DueContact,
@@ -56,8 +57,17 @@ async def _follow_up_out(db: AsyncSession, card: BusinessCard) -> FollowUpOut:
         relationship_status=RelationshipStatus(card.relationship_status),
         relationship_label=_label(card.relationship_status),
         follow_up_at=card.follow_up_at,
+        assigned_to_user_id=card.assigned_to_user_id,
+        assigned_to_name=await _assignee_name(db, card.assigned_to_user_id),
         notes=[NoteOut.model_validate(note) for note in notes],
     )
+
+
+async def _assignee_name(db: AsyncSession, user_id: uuid.UUID | None) -> str | None:
+    if user_id is None:
+        return None
+    assignee = await user_repo.get_by_id(db, user_id)
+    return None if assignee is None else (assignee.display_name or assignee.email)
 
 
 @router.get("/due", response_model=DueListOut)
@@ -108,25 +118,39 @@ async def update_follow_up(
     body: FollowUpIn,
     db: Session,
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> FollowUpOut:
-    """Đổi trạng thái quan hệ và/hoặc ngày hẹn. Gửi `follow_up_at: null` là **xoá hẹn**."""
+    """Đổi trạng thái quan hệ, ngày hẹn, người phụ trách. Gửi `null` là **xoá** trường đó.
+
+    Người phụ trách phải là **thành viên của chính không gian này** (`NEXT-05`). Không kiểm thì
+    một id bất kỳ ghi được xuống cột ấy: liên hệ hiện ra là "đang giao cho ai đó", nhưng người
+    ấy không mở nổi nó, và không ai trong tổ chức hiểu vì sao.
+    """
     card = await _card(db, card_id, workspace)
     if not body.model_fields_set:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
+    if body.assigned_to_user_id is not None and not await membership(
+        db, user_id=body.assigned_to_user_id, workspace_id=workspace.id
+    ):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Người phụ trách phải là thành viên của không gian làm việc này.",
+        )
     card = await contact_repo.set_follow_up(
         db,
         card,
         relationship_status=body.relationship_status,
         follow_up_at=body.follow_up_at,
         clear_follow_up=body.clears_follow_up(),
+        assigned_to_user_id=body.assigned_to_user_id,
+        clear_assignee=body.clears_assignee(),
     )
     return await _follow_up_out(db, card)
 
 
 @router.post("/{card_id}/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)
 async def add_note(
-    card_id: uuid.UUID, body: NoteIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    card_id: uuid.UUID, body: NoteIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> NoteOut:
     card = await _card(db, card_id, workspace)
     note = await contact_repo.add_note(
@@ -141,7 +165,7 @@ async def delete_note(
     note_id: uuid.UUID,
     db: Session,
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> None:
     await _card(db, card_id, workspace)
     if not await contact_repo.delete_note(db, note_id, workspace_id=workspace.id):

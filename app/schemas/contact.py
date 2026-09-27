@@ -33,9 +33,16 @@ class FollowUpIn(BaseModel):
 
     relationship_status: RelationshipStatus | None = None
     follow_up_at: date | None = None
+    #: Người phụ trách (`NEXT-05`). `null` = **bỏ giao**, cùng lối phân biệt với `follow_up_at`.
+    #: Trường này chỉ có nghĩa từ khi dữ liệu thuộc tổ chức: trước đó mỗi bản ghi thuộc đúng một
+    #: người nên không có ai khác để giao — xem ghi chú "cắt khỏi phạm vi" ở `NEXT-01`.
+    assigned_to_user_id: uuid.UUID | None = None
 
     def clears_follow_up(self) -> bool:
         return "follow_up_at" in self.model_fields_set and self.follow_up_at is None
+
+    def clears_assignee(self) -> bool:
+        return "assigned_to_user_id" in self.model_fields_set and self.assigned_to_user_id is None
 
 
 class NoteIn(BaseModel):
@@ -68,6 +75,9 @@ class FollowUpOut(BaseModel):
     relationship_status: RelationshipStatus
     relationship_label: str
     follow_up_at: date | None = None
+    assigned_to_user_id: uuid.UUID | None = None
+    #: Tên hiển thị của người phụ trách, để giao diện khỏi phải gọi thêm một API nữa.
+    assigned_to_name: str | None = None
     notes: list[NoteOut] = Field(default_factory=list)
 
 
@@ -80,6 +90,7 @@ class DueContact(BaseModel):
     relationship_status: RelationshipStatus
     relationship_label: str
     follow_up_at: date
+    assigned_to_name: str | None = None
     overdue_days: int = Field(description="0 = đến hạn hôm nay; > 0 = trễ bấy nhiêu ngày.")
 
 

@@ -59,6 +59,8 @@ async def set_follow_up(
     relationship_status: RelationshipStatus | None = None,
     follow_up_at: date | None = None,
     clear_follow_up: bool = False,
+    assigned_to_user_id: uuid.UUID | None = None,
+    clear_assignee: bool = False,
 ) -> BusinessCard:
     """Đổi trạng thái quan hệ và/hoặc ngày hẹn.
 
@@ -73,6 +75,10 @@ async def set_follow_up(
         values["follow_up_at"] = None
     elif follow_up_at is not None:
         values["follow_up_at"] = follow_up_at
+    if clear_assignee:
+        values["assigned_to_user_id"] = None
+    elif assigned_to_user_id is not None:
+        values["assigned_to_user_id"] = assigned_to_user_id
 
     if values:
         await db.execute(update(BusinessCard).where(BusinessCard.id == card.id).values(**values))

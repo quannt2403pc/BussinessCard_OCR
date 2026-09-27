@@ -20,6 +20,6 @@ File nào chưa có nghĩa là task tương ứng chưa làm.
 | `bugs-f1-f3.md` | Q | 10.1 | Nhật ký bug F1 + F3 |
 | `bugs-f2.md` | T | 10.6 | Nhật ký bug F2 |
 | `qa-testset.md` | T | 8.7 | 10 câu hỏi kiểm thử trợ lý AI |
-| `test-scenarios.md` | T | 10.5 | 10 kịch bản test đầu–cuối |
+| `test-scenarios.md` | T | 10.5 | 11 kịch bản test đầu–cuối (TS-11 thêm ở `NEXT-05`) |
 | `user-guide.md` | T | 11.6 | Hướng dẫn sử dụng |
 | `demo-runbook.md` | T | 11.7 | Kịch bản demo 10 phút |

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.company import Company, EnrichJob, EnrichJobItem
 from app.models.kb import KBSourceType
 from app.repositories import company as company_repo
@@ -126,7 +126,7 @@ async def list_companies(
     tags=["companies"],
 )
 async def enrich_batch(
-    body: EnrichBatchIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    body: EnrichBatchIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichBatchOut:
     owned = await job_repo.existing_company_ids(db, body.company_ids, workspace_id=workspace.id)
     missing = set(body.company_ids) - owned
@@ -156,7 +156,7 @@ async def get_enrich_job(
     "/api/companies/enrich-jobs/{job_id}/cancel", response_model=EnrichJobOut, tags=["companies"]
 )
 async def cancel_enrich_job(
-    job_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    job_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichJobOut:
     job = await job_repo.get_job(db, job_id, workspace_id=workspace.id)
     if job is None:
@@ -215,7 +215,7 @@ async def list_company_contacts(
     tags=["companies"],
 )
 async def enrich_company(
-    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichStartOut | JSONResponse:
     await owned_company(db, company_id, workspace)
     created = await enrich_jobs.create_job(db, [company_id])
@@ -240,7 +240,7 @@ async def enrich_company(
     tags=["companies"],
 )
 async def cancel_company_enrich(
-    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichCancelOut:
     await owned_company(db, company_id, workspace)
     cancelled = await enrich_jobs.cancel(db, company_id=company_id)
@@ -261,7 +261,7 @@ async def cancel_company_enrich(
     tags=["companies"],
 )
 async def archive_company_profile(
-    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> CompanyProfileOut:
     await owned_company(db, company_id, workspace)
     profile = await company_repo.get_profile(db, company_id)
@@ -291,7 +291,7 @@ async def archive_company_profile(
     tags=["companies"],
 )
 async def restore_company_profile(
-    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> CompanyProfileOut:
     await owned_company(db, company_id, workspace)
     profile = await company_repo.get_profile(db, company_id)
@@ -315,7 +315,7 @@ async def restore_company_profile(
 async def update_company_profile(
     db: Session,
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
     company_id: uuid.UUID,
     body: CompanyProfileUpdateIn,
 ) -> CompanyProfileOut | JSONResponse:

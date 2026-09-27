@@ -54,7 +54,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.card import BusinessCard, CardStatus
 from app.models.kb import KBSourceType
 from app.repositories import card as card_repo
@@ -187,7 +187,7 @@ async def upload_card(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
     file: Annotated[UploadFile, File(description="Ảnh danh thiếp: JPEG/PNG/WEBP/BMP/TIFF/GIF")],
 ) -> CardUploadOut:
     """Nhận 1 ảnh → tiền xử lý → gọi Gemini Vision → lưu `business_cards`.
@@ -285,7 +285,7 @@ async def upload_card(
 async def batch_upload_cards(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
     files: Annotated[list[UploadFile], File(description="Nhiều ảnh danh thiếp")],
 ) -> BatchUploadOut:
     """Nhận nhiều ảnh → lưu hết ngay → trả `job_id`, việc quét chạy nền (task 5.2).
@@ -342,11 +342,13 @@ async def get_batch_job(
 ) -> BatchJobOut:
     """Tiến trình một lượt batch — `templates/cards/batch.html` poll endpoint này (task 5.3).
 
-    Job của người khác trả **404 y như job không tồn tại** (task 12.5): phân biệt hai ca
-    đó là tự xác nhận "có một lượt quét mang id này, chỉ không phải của bạn".
+    Job của **không gian khác** trả 404 y như job không tồn tại (task 12.5, đổi khoá ở
+    `NEXT-05`): phân biệt hai ca đó là tự xác nhận "có một lượt quét mang id này, chỉ không phải
+    của bạn". Đối chiếu theo không gian chứ không theo người bấm nút: từ `NEXT-05` danh thiếp
+    quét ra thuộc về tổ chức, nên đồng nghiệp phải theo dõi được tiến trình của chính lô ấy.
     """
     job = card_batch.get_job(job_id)
-    if job is not None and job.user_id != user.id:
+    if job is not None and job.workspace_id != workspace.id:
         job = None
     if job is None:
         # Nói thẳng job sống trong bộ nhớ: 404 trơ ở đây đọc như "ID sai", trong khi nguyên nhân
@@ -461,7 +463,7 @@ async def update_card(
     payload: CardUpdateIn,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> CardDetailOut:
     """Sửa tay các trường sau khi review (task 4.2).
 
@@ -508,7 +510,7 @@ async def translate_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> CardDetailOut:
     """Việt hoá lại danh thiếp — nút *Dịch lại* ở màn hình review (task EX-04).
 
@@ -550,7 +552,7 @@ async def delete_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> Response:
     """Xoá một danh thiếp và file ảnh của nó (task 4.2).
 
@@ -586,7 +588,7 @@ async def confirm_card(
     card_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
 ) -> CardConfirmOut:
     """Người dùng duyệt xong → `confirmed` + gắn `company_id` (task 4.3).
 

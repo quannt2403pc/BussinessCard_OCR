@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.workspace import CurrentWorkspace
+from app.core.workspace import WriterWorkspace
 from app.repositories import kb as kb_repo
 from app.schemas.kb import ReindexOut, ReindexScope
 from app.services import embeddings, kb
@@ -55,7 +55,7 @@ _reindex_lock = asyncio.Lock()
 @router.post("/reindex", response_model=ReindexOut)
 async def reindex(
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace: CurrentWorkspace,
+    workspace: WriterWorkspace,
     scope: Annotated[
         ReindexScope | None,
         Query(description="Chỉ index một loại nguồn. Bỏ trống = cả danh thiếp lẫn hồ sơ DN."),

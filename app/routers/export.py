@@ -50,7 +50,7 @@ RelationshipQuery = Annotated[
 
 
 def _cards_select(
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
 ) -> Select[Any]:
@@ -82,7 +82,7 @@ def _cards_select(
         .outerjoin(Company, Company.id == BusinessCard.company_id)
         # Bản trùng đã gộp không nằm trong bản xuất (task NEXT-04) — xuất ra thì công cụ nhận
         # file lại dựng lại đúng cặp trùng mà người dùng vừa gộp xong.
-        .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None))
+        .where(BusinessCard.workspace_id == workspace_id, BusinessCard.merged_into_id.is_(None))
         .order_by(BusinessCard.uploaded_at, BusinessCard.id)
     )
     if card_status is not None:
@@ -92,7 +92,7 @@ def _cards_select(
     return stmt
 
 
-def _companies_select(user_id: uuid.UUID) -> Select[Any]:
+def _companies_select(workspace_id: uuid.UUID) -> Select[Any]:
     return (
         select(
             Company.id.label("company_id"),
@@ -117,19 +117,19 @@ def _companies_select(user_id: uuid.UUID) -> Select[Any]:
             CompanyProfile.generated_at,
         )
         .outerjoin(CompanyProfile, CompanyProfile.company_id == Company.id)
-        .where(Company.user_id == user_id)
+        .where(Company.workspace_id == workspace_id)
         .order_by(Company.display_name, Company.id)
     )
 
 
 async def count_cards(
     db: AsyncSession,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
 ) -> int:
     stmt = select(func.count(BusinessCard.id)).where(
-        BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None)
+        BusinessCard.workspace_id == workspace_id, BusinessCard.merged_into_id.is_(None)
     )
     if card_status is not None:
         stmt = stmt.where(BusinessCard.status == card_status)
@@ -138,20 +138,20 @@ async def count_cards(
     return int(await db.scalar(stmt) or 0)
 
 
-async def count_companies(db: AsyncSession, user_id: uuid.UUID) -> int:
-    stmt = select(func.count(Company.id)).where(Company.user_id == user_id)
+async def count_companies(db: AsyncSession, workspace_id: uuid.UUID) -> int:
+    stmt = select(func.count(Company.id)).where(Company.workspace_id == workspace_id)
     return int(await db.scalar(stmt) or 0)
 
 
 async def iter_cards(
     db: AsyncSession,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     card_status: str | None,
     relationship: str | None = None,
 ) -> AsyncIterator[CardExportRow]:
     cursor: tuple[datetime, uuid.UUID] | None = None
     while True:
-        stmt = _cards_select(user_id, card_status, relationship).limit(EXPORT_BATCH_SIZE)
+        stmt = _cards_select(workspace_id, card_status, relationship).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(BusinessCard.uploaded_at, BusinessCard.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -162,23 +162,25 @@ async def iter_cards(
         cursor = (rows[-1].uploaded_at, rows[-1].id)
 
 
-async def one_card(db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID) -> CardExportRow:
+async def one_card(db: AsyncSession, workspace_id: uuid.UUID, card_id: uuid.UUID) -> CardExportRow:
     """Một danh thiếp **của đúng người này**, dựng qua cùng câu `SELECT` với bản xuất cả lô.
 
     Dùng lại `_cards_select()` chứ không `card_repo.get()`: chỉ câu này mới `JOIN` sẵn tên công ty,
     và đi chung một đường thì bản xuất một liên hệ không bao giờ lệch nội dung với bản xuất cả lô.
     """
-    stmt = _cards_select(user_id, None).where(BusinessCard.id == card_id)
+    stmt = _cards_select(workspace_id, None).where(BusinessCard.id == card_id)
     row = (await db.execute(stmt)).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
     return CardExportRow.model_validate(row)
 
 
-async def iter_companies(db: AsyncSession, user_id: uuid.UUID) -> AsyncIterator[CompanyExportRow]:
+async def iter_companies(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> AsyncIterator[CompanyExportRow]:
     cursor: tuple[str, uuid.UUID] | None = None
     while True:
-        stmt = _companies_select(user_id).limit(EXPORT_BATCH_SIZE)
+        stmt = _companies_select(workspace_id).limit(EXPORT_BATCH_SIZE)
         if cursor is not None:
             stmt = stmt.where(tuple_(Company.display_name, Company.id) > cursor)
         rows = (await db.execute(stmt)).all()
@@ -312,7 +314,7 @@ async def export_cards_csv(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = counter.watch(iter_cards(db, user_id, selected, stage))
+            rows = counter.watch(iter_cards(db, workspace_id, selected, stage))
             async for chunk in _csv_body(rows, CardExportRow.columns()):
                 yield chunk
 
@@ -341,9 +343,9 @@ async def export_cards_json(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            total = await count_cards(db, user_id, selected, stage)
+            total = await count_cards(db, workspace_id, selected, stage)
             meta = _meta(total, _filters(selected, stage))
-            rows = counter.watch(iter_cards(db, user_id, selected, stage))
+            rows = counter.watch(iter_cards(db, workspace_id, selected, stage))
             async for chunk in _json_body(rows, meta):
                 yield chunk
 
@@ -377,7 +379,7 @@ async def export_cards_vcf(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = counter.watch(iter_cards(db, user_id, selected, stage))
+            rows = counter.watch(iter_cards(db, workspace_id, selected, stage))
             async for chunk in _vcard_body(rows):
                 yield chunk
 
@@ -397,7 +399,7 @@ async def export_card_vcf(
 ) -> Response:
     """Một danh thiếp dưới dạng vCard. Thẻ của người khác trả **404**, không phải 403."""
     async with SessionLocal() as db:
-        row = await one_card(db, user.id, card_id)
+        row = await one_card(db, workspace.id, card_id)
         await privacy_repo.log(
             db,
             workspace_id=workspace.id,
@@ -422,7 +424,7 @@ async def export_companies_csv(user: CurrentUser, workspace: CurrentWorkspace) -
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            rows = counter.watch(iter_companies(db, user_id))
+            rows = counter.watch(iter_companies(db, workspace_id))
             async for chunk in _csv_body(rows, CompanyExportRow.columns()):
                 yield chunk
 
@@ -444,8 +446,8 @@ async def export_companies_json(
 
     async def body() -> AsyncIterator[str]:
         async with SessionLocal() as db:
-            meta = _meta(await count_companies(db, user_id), {})
-            async for chunk in _json_body(counter.watch(iter_companies(db, user_id)), meta):
+            meta = _meta(await count_companies(db, workspace_id), {})
+            async for chunk in _json_body(counter.watch(iter_companies(db, workspace_id)), meta):
                 yield chunk
 
     return StreamingResponse(

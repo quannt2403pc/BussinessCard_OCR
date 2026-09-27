@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng
 
-> Chủ sở hữu: **T** · Task: **11.6**, **13.1** · Dành cho: người dùng cuối (không cần biết lập trình) · Cập nhật: 2026-09-22
+> Chủ sở hữu: **T** · Task: **11.6**, **13.1**, **NEXT-05** · Dành cho: người dùng cuối (không cần biết lập trình) · Cập nhật: 2026-09-27
 > Cài đặt và chạy hệ thống: xem `README.md` (Q). Kịch bản trình diễn: `docs/demo-runbook.md`.
 
 BusinessCard OCR biến danh thiếp thu được ở hội thảo thành **hồ sơ đối tác có nguồn**, theo ba bước:
@@ -10,6 +10,7 @@ BusinessCard OCR biến danh thiếp thu được ở hội thảo thành **hồ
 3. **Hỏi trợ lý AI** về danh thiếp và hồ sơ đã có → câu trả lời luôn kèm nguồn bấm được.
 
 Mở trình duyệt tại **http://localhost:8000**. Thanh trên cùng có ba mục: *Danh thiếp*, *Doanh nghiệp*, *Cài đặt*.
+Làm việc chung với đồng nghiệp: xem mục 8, *Không gian làm việc*.
 Trợ lý AI không nằm trên thanh này mà là **bong bóng tròn ở góc phải dưới**, bấm được từ bất kỳ trang nào.
 
 ---
@@ -136,7 +137,40 @@ Các nút trên đầu trang:
 
 File CSV mở thẳng bằng Excel, không vỡ chữ tiếng Việt, Nhật, Hàn.
 
-## 8. Khi gặp sự cố
+## 8. Làm việc chung — *Không gian làm việc*
+
+**Danh thiếp, công ty và hồ sơ thuộc về không gian làm việc, không thuộc về tài khoản bạn.** Mọi thành viên trong cùng
+một không gian nhìn thấy cùng một dữ liệu; hai không gian khác nhau thì không đường nào đọc sang nhau, kể cả qua trợ lý
+AI hay file xuất ra.
+
+Lần đầu đăng nhập, hệ thống tạo sẵn cho bạn một không gian riêng mang tên bạn, và bạn là **quản trị** của nó. Muốn làm
+việc một mình thì không cần đụng tới mục này.
+
+Mở bằng **biểu tượng người** trên thanh trên cùng → **Không gian làm việc**.
+
+| Vai trò | Làm được gì |
+|---------|-------------|
+| **Quản trị** | Mọi thứ *Thành viên* làm được, cộng thêm: mời người mới, gỡ người, đổi vai trò, đổi tên không gian |
+| **Thành viên** | Quét, sửa, xoá danh thiếp; tạo hồ sơ; hỏi trợ lý; xuất dữ liệu |
+| **Chỉ xem** | Chỉ đọc và xuất dữ liệu — không sửa được gì |
+
+**Mời người khác vào cùng làm:**
+
+1. Người bạn muốn mời **tự đăng ký tài khoản trước** — hệ thống không gửi thư mời.
+2. Bạn (quản trị) gõ đúng email họ đã đăng ký, chọn vai trò, bấm **Thêm**.
+3. Họ đăng nhập, mở cùng trang này, bấm **Chuyển sang** không gian của bạn.
+
+**Giao việc:** trong trang một danh thiếp, panel *Theo dõi liên hệ* có ô **người phụ trách** — chỉ chọn được người đang
+ở trong không gian.
+
+**Gỡ một người:** dữ liệu họ đã nhập **ở lại** với tổ chức, chỉ những liên hệ đang giao cho họ được trả về *chưa giao*
+để người khác nhận. Không gian luôn phải còn ít nhất một quản trị, nên người quản trị cuối cùng không tự rời được —
+hãy nâng người khác lên quản trị trước.
+
+**Tạo thêm không gian** (nút *Tạo*) khi bạn cần tách dữ liệu của hai việc khác hẳn nhau. Không gian mới bắt đầu rỗng,
+và bạn chuyển qua lại bất cứ lúc nào.
+
+## 9. Khi gặp sự cố
 
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |------------|------------------------|------------|

@@ -9,9 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.templates import BASE_DIR
+from app.core.workspace import ActiveWorkspace
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
+from app.models.workspace import Role
 from app.routers import stats
 from tests.conftest import make_user
 
@@ -21,6 +23,9 @@ from tests.conftest import make_user
 OWNER_ID = uuid.uuid4()
 #: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
 WORKSPACE_ID = uuid.uuid4()
+#: Không gian ấy dưới dạng dependency đã phân giải — `get_stats()` nhận thẳng nó từ
+#: `NEXT-05`, vì số liệu là của **tổ chức**, không phải của người đang xem.
+ACTIVE_WORKSPACE = ActiveWorkspace(id=WORKSPACE_ID, name="Không gian test", role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -111,7 +116,7 @@ async def test_stats_counts_cards_companies_and_profiles(
     )
     await db_session.flush()
 
-    result = await stats.get_stats(db_session, owner)
+    result = await stats.get_stats(db_session, owner, ACTIVE_WORKSPACE)
 
     assert result.total_cards == 4
     assert result.confirmed_cards == 2
@@ -122,7 +127,7 @@ async def test_stats_counts_cards_companies_and_profiles(
 
 
 async def test_stats_on_empty_database(db_session: AsyncSession, owner: User) -> None:
-    result = await stats.get_stats(db_session, owner)
+    result = await stats.get_stats(db_session, owner, ACTIVE_WORKSPACE)
 
     # Chia cho 0 là lỗi duy nhất mà endpoint này có thể tự gây ra.
     assert result.review_rate == 0.0
