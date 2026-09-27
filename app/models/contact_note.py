@@ -27,6 +27,18 @@ class ContactNote(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     #: Suy ra được qua `card_id`, nhưng vẫn gắn thẳng: mọi truy vấn đều lọc theo người dùng
     #: (12.6), mà phải JOIN thêm một bảng mới biết của ai là chỗ dễ quên — quên một chỗ là rò.
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),

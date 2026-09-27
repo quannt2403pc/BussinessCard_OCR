@@ -35,10 +35,26 @@ class PrivacyLog(Base):
     __table_args__ = (
         # Màn hình chỉ hỏi "gần đây tôi đã làm gì với dữ liệu" — tên và thứ tự cột khớp từng
         # chữ với revision `0012`, xem cảnh báo I-16 ở đầu `models/card.py`.
-        Index("ix_privacy_logs_user_id_created_at", "user_id", text("created_at DESC")),
+        Index(
+            "ix_privacy_logs_workspace_id_created_at",
+            "workspace_id",
+            text("created_at DESC"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

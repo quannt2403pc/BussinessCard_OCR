@@ -6,7 +6,7 @@ Chủ sở hữu: T | Task: NEXT-07 | xem Task.md
 là một người nên gộp mềm mới đúng; ở đây chủ thể dữ liệu **yêu cầu** xoá, và quyền đó không
 được phục vụ bằng một cờ ẩn. Xoá cả hàng, ảnh, ghi chú và chunk Knowledge Base.
 
-**Mọi hàm bắt buộc `user_id`** — cùng lối đã chốt ở 12.6.
+**Mọi hàm bắt buộc `workspace_id`** — cùng lối đã chốt ở 12.6.
 """
 
 import logging
@@ -37,12 +37,16 @@ MAX_RETENTION_DAYS = 3650
 async def log(
     db: AsyncSession,
     *,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     action: PrivacyAction,
     detail: dict[str, Any],
     record_count: int,
 ) -> PrivacyLog:
+    # `workspace_id` là **người thao tác**, `workspace_id` là **nơi bị động tới** (task NEXT-05).
+    # Nhật ký bảo vệ dữ liệu cá nhân phải trả lời được cả "ai" lẫn "ở đâu".
     entry = PrivacyLog(
+        workspace_id=workspace_id,
         user_id=user_id,
         action=action.value,
         detail=detail,
@@ -54,11 +58,11 @@ async def log(
 
 
 async def recent_logs(
-    db: AsyncSession, *, user_id: uuid.UUID, limit: int = LOG_LIMIT
+    db: AsyncSession, *, workspace_id: uuid.UUID, limit: int = LOG_LIMIT
 ) -> Sequence[PrivacyLog]:
     rows = await db.scalars(
         select(PrivacyLog)
-        .where(PrivacyLog.user_id == user_id)
+        .where(PrivacyLog.workspace_id == workspace_id)
         .order_by(PrivacyLog.created_at.desc(), PrivacyLog.id.desc())
         .limit(limit)
     )
@@ -84,18 +88,18 @@ def subject_filter(term: str) -> Any:
 
 
 async def find_subject_cards(
-    db: AsyncSession, term: str, *, user_id: uuid.UUID
+    db: AsyncSession, term: str, *, workspace_id: uuid.UUID
 ) -> Sequence[BusinessCard]:
     rows = await db.scalars(
         select(BusinessCard)
-        .where(BusinessCard.user_id == user_id, subject_filter(term))
+        .where(BusinessCard.workspace_id == workspace_id, subject_filter(term))
         .order_by(BusinessCard.uploaded_at)
     )
     return list(rows.all())
 
 
 async def erase_cards(
-    db: AsyncSession, cards: Sequence[BusinessCard], *, user_id: uuid.UUID
+    db: AsyncSession, cards: Sequence[BusinessCard], *, workspace_id: uuid.UUID
 ) -> list[str]:
     """Xoá hẳn một loạt danh thiếp. Trả về đường dẫn ảnh để router xoá file.
 
@@ -114,13 +118,15 @@ async def erase_cards(
     card_ids = [card.id for card in cards]
     await db.execute(
         delete(KBChunk).where(
-            KBChunk.user_id == user_id,
+            KBChunk.workspace_id == workspace_id,
             KBChunk.source_type == str(KBSourceType.CARD),
             KBChunk.source_id.in_(card_ids),
         )
     )
     await db.execute(
-        delete(BusinessCard).where(BusinessCard.user_id == user_id, BusinessCard.id.in_(card_ids))
+        delete(BusinessCard).where(
+            BusinessCard.workspace_id == workspace_id, BusinessCard.id.in_(card_ids)
+        )
     )
     # Liên hệ nhập từ chữ ký không có ảnh để xoá (task NEXT-08) — bỏ qua, không phải lỗi.
     return [card.image_path for card in cards if card.image_path]
@@ -135,7 +141,7 @@ async def set_retention(db: AsyncSession, user: User, days: int | None) -> None:
 
 
 async def expired_cards(
-    db: AsyncSession, *, user_id: uuid.UUID, days: int, now: datetime
+    db: AsyncSession, *, workspace_id: uuid.UUID, days: int, now: datetime
 ) -> Sequence[BusinessCard]:
     """Danh thiếp quét trước mốc `now - days`.
 
@@ -145,7 +151,7 @@ async def expired_cards(
     rows = await db.scalars(
         select(BusinessCard)
         .where(
-            BusinessCard.user_id == user_id,
+            BusinessCard.workspace_id == workspace_id,
             BusinessCard.uploaded_at < now.replace(tzinfo=None) - timedelta(days=days),
         )
         .order_by(BusinessCard.uploaded_at)
@@ -153,26 +159,30 @@ async def expired_cards(
     return list(rows.all())
 
 
-async def count_expired(db: AsyncSession, *, user_id: uuid.UUID, days: int, now: datetime) -> int:
+async def count_expired(
+    db: AsyncSession, *, workspace_id: uuid.UUID, days: int, now: datetime
+) -> int:
     total = await db.scalar(
         select(func.count())
         .select_from(BusinessCard)
         .where(
-            BusinessCard.user_id == user_id,
+            BusinessCard.workspace_id == workspace_id,
             BusinessCard.uploaded_at < now.replace(tzinfo=None) - timedelta(days=days),
         )
     )
     return int(total or 0)
 
 
-async def count_contacts(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+async def count_contacts(db: AsyncSession, *, workspace_id: uuid.UUID) -> int:
     total = await db.scalar(
-        select(func.count()).select_from(BusinessCard).where(BusinessCard.user_id == user_id)
+        select(func.count())
+        .select_from(BusinessCard)
+        .where(BusinessCard.workspace_id == workspace_id)
     )
     return int(total or 0)
 
 
-async def oldest_upload(db: AsyncSession, *, user_id: uuid.UUID) -> datetime | None:
+async def oldest_upload(db: AsyncSession, *, workspace_id: uuid.UUID) -> datetime | None:
     return await db.scalar(
-        select(func.min(BusinessCard.uploaded_at)).where(BusinessCard.user_id == user_id)
+        select(func.min(BusinessCard.uploaded_at)).where(BusinessCard.workspace_id == workspace_id)
     )

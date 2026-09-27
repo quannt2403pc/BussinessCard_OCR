@@ -13,10 +13,10 @@ ACTIVE_PREDICATE = text("status IN ('pending', 'running')")
 
 
 async def existing_company_ids(
-    db: AsyncSession, company_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    db: AsyncSession, company_ids: Sequence[uuid.UUID], *, workspace_id: uuid.UUID
 ) -> set[uuid.UUID]:
     rows = await db.scalars(
-        select(Company.id).where(Company.user_id == user_id, Company.id.in_(company_ids))
+        select(Company.id).where(Company.workspace_id == workspace_id, Company.id.in_(company_ids))
     )
     return set(rows)
 
@@ -99,11 +99,13 @@ async def cancel_items(db: AsyncSession, item_ids: Sequence[uuid.UUID], message:
     return int(getattr(result, "rowcount", 0) or 0)
 
 
-async def get_job(db: AsyncSession, job_id: uuid.UUID, *, user_id: uuid.UUID) -> EnrichJob | None:
+async def get_job(
+    db: AsyncSession, job_id: uuid.UUID, *, workspace_id: uuid.UUID
+) -> EnrichJob | None:
     owned = (
         select(EnrichJobItem.id)
         .join(Company, Company.id == EnrichJobItem.company_id)
-        .where(EnrichJobItem.job_id == EnrichJob.id, Company.user_id == user_id)
+        .where(EnrichJobItem.job_id == EnrichJob.id, Company.workspace_id == workspace_id)
         .exists()
     )
     return await db.scalar(select(EnrichJob).where(EnrichJob.id == job_id, owned))

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.models.card import BusinessCard, RelationshipStatus
 from app.repositories import contact as contact_repo
 from app.schemas.contact import (
@@ -37,8 +38,8 @@ Session = Annotated[AsyncSession, Depends(get_db)]
 NOT_FOUND = "not found"
 
 
-async def _card(db: AsyncSession, card_id: uuid.UUID, user: CurrentUser) -> BusinessCard:
-    card = await contact_repo.get_card(db, card_id, user_id=user.id)
+async def _card(db: AsyncSession, card_id: uuid.UUID, workspace: CurrentWorkspace) -> BusinessCard:
+    card = await contact_repo.get_card(db, card_id, workspace_id=workspace.id)
     if card is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
     return card
@@ -49,7 +50,7 @@ def _label(value: str) -> str:
 
 
 async def _follow_up_out(db: AsyncSession, card: BusinessCard) -> FollowUpOut:
-    notes = await contact_repo.list_notes(db, card.id, user_id=card.user_id)
+    notes = await contact_repo.list_notes(db, card.id, workspace_id=card.workspace_id)
     return FollowUpOut(
         card_id=card.id,
         relationship_status=RelationshipStatus(card.relationship_status),
@@ -63,6 +64,7 @@ async def _follow_up_out(db: AsyncSession, card: BusinessCard) -> FollowUpOut:
 async def due_contacts(
     db: Session,
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     on: Annotated[date | None, Query(description="Mặc định: hôm nay")] = None,
 ) -> DueListOut:
     """Liên hệ **đến hạn hoặc quá hạn** — nguồn của khối *Cần liên hệ hôm nay* trên trang chủ.
@@ -72,7 +74,7 @@ async def due_contacts(
     """
     today = on or date.today()
     items: list[DueContact] = []
-    for card, company_name in await contact_repo.due_cards(db, user_id=user.id, on=today):
+    for card, company_name in await contact_repo.due_cards(db, workspace_id=workspace.id, on=today):
         if card.follow_up_at is None:  # không xảy ra: truy vấn đã lọc, ở đây để kiểu khỏi lỏng
             continue
         items.append(
@@ -88,22 +90,28 @@ async def due_contacts(
         )
     return DueListOut(
         on=today,
-        total=await contact_repo.due_count(db, user_id=user.id, on=today),
+        total=await contact_repo.due_count(db, workspace_id=workspace.id, on=today),
         items=items,
     )
 
 
 @router.get("/{card_id}", response_model=FollowUpOut)
-async def get_follow_up(card_id: uuid.UUID, db: Session, user: CurrentUser) -> FollowUpOut:
-    return await _follow_up_out(db, await _card(db, card_id, user))
+async def get_follow_up(
+    card_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> FollowUpOut:
+    return await _follow_up_out(db, await _card(db, card_id, workspace))
 
 
 @router.patch("/{card_id}", response_model=FollowUpOut)
 async def update_follow_up(
-    card_id: uuid.UUID, body: FollowUpIn, db: Session, user: CurrentUser
+    card_id: uuid.UUID,
+    body: FollowUpIn,
+    db: Session,
+    user: CurrentUser,
+    workspace: CurrentWorkspace,
 ) -> FollowUpOut:
     """Đổi trạng thái quan hệ và/hoặc ngày hẹn. Gửi `follow_up_at: null` là **xoá hẹn**."""
-    card = await _card(db, card_id, user)
+    card = await _card(db, card_id, workspace)
     if not body.model_fields_set:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
     card = await contact_repo.set_follow_up(
@@ -117,16 +125,24 @@ async def update_follow_up(
 
 
 @router.post("/{card_id}/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)
-async def add_note(card_id: uuid.UUID, body: NoteIn, db: Session, user: CurrentUser) -> NoteOut:
-    card = await _card(db, card_id, user)
-    note = await contact_repo.add_note(db, card, body.body, user_id=user.id)
+async def add_note(
+    card_id: uuid.UUID, body: NoteIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> NoteOut:
+    card = await _card(db, card_id, workspace)
+    note = await contact_repo.add_note(
+        db, card, body.body, workspace_id=workspace.id, user_id=user.id
+    )
     return NoteOut.model_validate(note)
 
 
 @router.delete("/{card_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_note(
-    card_id: uuid.UUID, note_id: uuid.UUID, db: Session, user: CurrentUser
+    card_id: uuid.UUID,
+    note_id: uuid.UUID,
+    db: Session,
+    user: CurrentUser,
+    workspace: CurrentWorkspace,
 ) -> None:
-    await _card(db, card_id, user)
-    if not await contact_repo.delete_note(db, note_id, user_id=user.id):
+    await _card(db, card_id, workspace)
+    if not await contact_repo.delete_note(db, note_id, workspace_id=workspace.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.repositories import kb as kb_repo
 from app.schemas.kb import ReindexOut, ReindexScope
 from app.services import embeddings, kb
@@ -56,6 +57,7 @@ _reindex_lock = asyncio.Lock()
 async def reindex(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     scope: Annotated[
         ReindexScope | None,
         Query(description="Chỉ index một loại nguồn. Bỏ trống = cả danh thiếp lẫn hồ sơ DN."),
@@ -106,7 +108,7 @@ async def reindex(
             await db.commit()
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        total_chunks = await kb_repo.count_chunks(db, user_id=user.id)
+        total_chunks = await kb_repo.count_chunks(db, workspace_id=workspace.id)
         logger.info(
             "Reindex KB: %d danh thiếp + %d hồ sơ → %d chunk (%d bỏ qua) trong %dms",
             cards,
@@ -127,7 +129,7 @@ async def reindex(
 
 
 async def _reindex_cards(
-    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+    db: AsyncSession, http: httpx.AsyncClient, workspace_id: uuid.UUID
 ) -> tuple[int, int, int]:
     """Duyệt hết danh thiếp đã xác nhận. Trả `(số nguồn, số chunk, số nguồn rỗng)`.
 
@@ -138,7 +140,7 @@ async def _reindex_cards(
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.card_batch(db, user_id=user_id, after=after)
+        rows = await kb_repo.card_batch(db, workspace_id=workspace_id, after=after)
         if not rows:
             break
         documents = [
@@ -159,14 +161,14 @@ async def _reindex_cards(
 
 
 async def _reindex_profiles(
-    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+    db: AsyncSession, http: httpx.AsyncClient, workspace_id: uuid.UUID
 ) -> tuple[int, int, int]:
     """Duyệt hết hồ sơ DN đã sinh xong. Trả `(số nguồn, số chunk, số nguồn rỗng)`."""
     after: uuid.UUID | None = None
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.profile_batch(db, user_id=user_id, after=after)
+        rows = await kb_repo.profile_batch(db, workspace_id=workspace_id, after=after)
         if not rows:
             break
         documents = [kb.build_profile_document(company, profile) for profile, company in rows]

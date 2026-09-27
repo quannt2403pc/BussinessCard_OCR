@@ -70,14 +70,19 @@ class BusinessCard(Base):
         # Chống trùng ảnh **theo từng người dùng**, không toàn cục (task 12.3, Plan.md mục 3).
         # Để unique toàn cục thì B upload đúng tấm thẻ A đã có sẽ bị từ chối, và câu từ chối đó
         # tự khai ra rằng A có tấm thẻ ấy. Đây cũng là index phục vụ `get_by_hash()`.
-        Index("ix_business_cards_user_id_image_hash", "user_id", "image_hash", unique=True),
+        Index(
+            "ix_business_cards_workspace_id_image_hash",
+            "workspace_id",
+            "image_hash",
+            unique=True,
+        ),
         # Khối *Cần liên hệ hôm nay* của trang chủ hỏi đúng một câu:
         # `WHERE user_id = ? AND follow_up_at <= ?` (task NEXT-01). Phần lớn thẻ không có hẹn nên
         # index **partial** — chỉ số hoá đúng những dòng có hẹn. Tên và mệnh đề `WHERE` phải khớp
         # từng chữ với revision `0008`, xem cảnh báo I-16 ở đầu file.
         Index(
             "ix_business_cards_follow_up",
-            "user_id",
+            "workspace_id",
             "follow_up_at",
             postgresql_where=text("follow_up_at IS NOT NULL"),
         ),
@@ -89,12 +94,30 @@ class BusinessCard(Base):
             "merged_into_id",
             postgresql_where=text("merged_into_id IS NOT NULL"),
         ),
+        # Khối *việc của tôi*: `WHERE workspace_id = ? AND assigned_to_user_id = ?`. Partial vì
+        # phần lớn liên hệ chưa giao cho ai (task NEXT-05).
+        Index(
+            "ix_business_cards_assigned_to",
+            "workspace_id",
+            "assigned_to_user_id",
+            postgresql_where=text("assigned_to_user_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    # Chủ sở hữu bản ghi (task 12.3). `CASCADE`: xoá tài khoản là xoá sạch dữ liệu của tài khoản
-    # đó, không để lại danh thiếp mồ côi mà không ai truy cập được nữa.
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -166,6 +189,15 @@ class BusinessCard(Base):
         index=True,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+    #: Người phụ trách liên hệ này (task NEXT-05). `NULL` = chưa giao, và đó là mặc định.
+    #: `SET NULL`: xoá một tài khoản thì liên hệ **ở lại với tổ chức**, chỉ mất người phụ trách
+    #: — đó chính là điểm của cả task này. `NEXT-01` cố ý hoãn trường này lại tới đây, vì khi
+    #: dữ liệu còn thuộc về từng cá nhân thì không có ai khác để giao.
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
 
     # --- Theo dõi quan hệ (task NEXT-01 của T; T sửa file của Q, Q review PR) ---
     #

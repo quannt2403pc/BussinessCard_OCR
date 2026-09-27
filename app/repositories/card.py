@@ -5,8 +5,12 @@ Chủ sở hữu: Q | Task: 3.5, 12.5 | xem Task.md
 Lớp mỏng giữa router và ORM: router lo HTTP, file này lo câu truy vấn. Mục đích thật là để
 `routers/cards.py` không phình ra khi thêm danh sách/lọc/phân trang ở task 4.1.
 
-**Từ task 12.5, `user_id` là tham số BẮT BUỘC của mọi hàm ở đây** — keyword-only, không có giá
-trị mặc định. Đó là chủ ý: một `user_id: uuid.UUID | None = None` sẽ khiến "quên truyền" trở
+**Từ task NEXT-05, khoá lọc là `workspace_id`, không còn là `user_id`.** Dữ liệu thuộc tổ
+chức; `user_id` ở lại chỉ với vai trò *người tạo* (tham số của `create_card`).
+
+**Khoá lọc là tham số BẮT BUỘC của mọi hàm ở đây** (task 12.5, nay áp cho `workspace_id`) —
+keyword-only, không có giá trị mặc định. Đó là chủ ý: một `workspace_id: uuid.UUID | None = None`
+sẽ khiến "quên truyền" trở
 thành "đọc dữ liệu của tất cả mọi người", tức mặc định MỞ. Kiểu như hiện tại thì quên truyền là
 `TypeError` ngay lần chạy đầu tiên.
 
@@ -83,22 +87,26 @@ class DuplicateImageError(RuntimeError):
         self.image_hash = image_hash
 
 
-async def get(db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID) -> BusinessCard | None:
+async def get(
+    db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
+) -> BusinessCard | None:
     """Một danh thiếp **của đúng người này**, hoặc `None`.
 
     Không dùng `db.get()` nữa: nó tra theo khoá chính nên không nhận thêm điều kiện, mà "lấy rồi
-    so `card.user_id` trong Python" là đúng cái bẫy đã nói ở đầu file — chỉ cần một chỗ gọi quên
+    so `card.workspace_id` trong Python" là đúng cái bẫy đã nói ở đầu file — chỉ cần một chỗ quên
     so là rò. Thẻ của người khác trả `None`, và router biến `None` thành **404** chứ không 403
     (Plan.md mục 4: 403 là tự khai rằng bản ghi đó tồn tại).
     """
     result = await db.execute(
-        select(BusinessCard).where(BusinessCard.id == card_id, BusinessCard.user_id == user_id)
+        select(BusinessCard).where(
+            BusinessCard.id == card_id, BusinessCard.workspace_id == workspace_id
+        )
     )
     return result.scalar_one_or_none()
 
 
 async def get_by_hash(
-    db: AsyncSession, image_hash: str, *, user_id: uuid.UUID
+    db: AsyncSession, image_hash: str, *, workspace_id: uuid.UUID
 ) -> BusinessCard | None:
     """Tra theo SHA-256 của file gốc — chống upload trùng **trong phạm vi một người** (12.3).
 
@@ -107,7 +115,7 @@ async def get_by_hash(
     """
     result = await db.execute(
         select(BusinessCard).where(
-            BusinessCard.user_id == user_id, BusinessCard.image_hash == image_hash
+            BusinessCard.workspace_id == workspace_id, BusinessCard.image_hash == image_hash
         )
     )
     return result.scalar_one_or_none()
@@ -116,7 +124,7 @@ async def get_by_hash(
 async def list_cards(
     db: AsyncSession,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     q: str | None = None,
     status: str | None = None,
     company_id: uuid.UUID | None = None,
@@ -135,7 +143,7 @@ async def list_cards(
     có bản ghi hiện hai lần / mất hẳn.
     """
     conditions = _list_conditions(
-        user_id=user_id, q=q, status=status, company_id=company_id, language=language
+        workspace_id=workspace_id, q=q, status=status, company_id=company_id, language=language
     )
     size = max(1, min(size, MAX_PAGE_SIZE))
     page = max(1, page)
@@ -166,6 +174,7 @@ async def delete_card(db: AsyncSession, card: BusinessCard) -> None:
 async def create_card(
     db: AsyncSession,
     *,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     image_path: str | None,
     image_hash: str,
@@ -181,6 +190,7 @@ async def create_card(
     buộc unique trong DB mới là thật.
     """
     card = BusinessCard(
+        workspace_id=workspace_id,
         user_id=user_id,
         image_path=image_path,
         image_hash=image_hash,
@@ -230,7 +240,7 @@ async def update_fields(
 
 def _list_conditions(
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     q: str | None,
     status: str | None,
     company_id: uuid.UUID | None,
@@ -238,11 +248,11 @@ def _list_conditions(
 ) -> list[ColumnElement[bool]]:
     """Điều kiện WHERE dùng chung cho cả câu đếm lẫn câu lấy trang (xem `list_cards`).
 
-    `user_id` là điều kiện **đầu tiên và không thể tắt** — nó không đến từ tham số URL nào, nên
+    `workspace_id` là điều kiện **đầu tiên và không thể tắt** — nó không đến từ tham số URL nào, nên
     không có ô nhập nào của người dùng gỡ được nó ra.
     """
     conditions: list[ColumnElement[bool]] = [
-        BusinessCard.user_id == user_id,
+        BusinessCard.workspace_id == workspace_id,
         # Thẻ đã gộp vào thẻ khác biến khỏi danh sách (task NEXT-04 của T; T sửa file của Q, Q
         # review PR). Bản ghi vẫn còn và mở ra đọc được, nó chỉ không bị đếm hai lần nữa.
         BusinessCard.merged_into_id.is_(None),
@@ -276,7 +286,9 @@ def _is_duplicate_hash(exc: IntegrityError) -> bool:
     Nuốt nhầm một `IntegrityError` khác (khoá ngoại `company_id` chẳng hạn) rồi báo "ảnh trùng"
     sẽ khiến người dùng đi tìm một bản ghi cũ không hề tồn tại.
 
-    Tên index đổi ở revision `0005` (`…_user_id_image_hash`); vẫn kiểm cả chuỗi `image_hash` để
+    Tên index đổi ở revision `0015` (`…_workspace_id_image_hash`); vẫn kiểm cả chuỗi `image_hash`
     hàm này không phụ thuộc vào đúng một tên index.
     """
-    return "ix_business_cards_user_id_image_hash" in str(exc.orig) or "image_hash" in str(exc.orig)
+    return "ix_business_cards_workspace_id_image_hash" in str(exc.orig) or "image_hash" in str(
+        exc.orig
+    )

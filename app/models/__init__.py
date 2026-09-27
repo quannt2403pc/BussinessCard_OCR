@@ -22,6 +22,7 @@ from app.models.kb import KBChunk, KBSourceType
 from app.models.model_pref import UserModelPref
 from app.models.privacy import PrivacyAction, PrivacyLog
 from app.models.user import User
+from app.models.workspace import Role, Workspace, WorkspaceMember
 
 __all__ = [
     "BusinessCard",
@@ -36,7 +37,10 @@ __all__ = [
     "KBSourceType",
     "PrivacyAction",
     "PrivacyLog",
+    "Role",
     "User",
+    "Workspace",
+    "WorkspaceMember",
     "UserModelPref",
     "company",
 ]

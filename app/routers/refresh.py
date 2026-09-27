@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.models.company import ProfileChange
 from app.repositories import company as company_repo
 from app.schemas.company import (
@@ -93,11 +94,14 @@ def _change_out(change: ProfileChange, display_name: str) -> ProfileChangeOut:
 async def stale_profiles(
     db: Session,
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     days: Annotated[int, Query(ge=1, le=MAX_STALE_DAYS)] = DEFAULT_STALE_DAYS,
 ) -> StaleListOut:
     """Hồ sơ lâu rồi chưa đi tra lại — đưa thẳng danh sách này vào `enrich-batch` là xong."""
     now = datetime.now(UTC)
-    rows = await company_repo.stale_profiles(db, user_id=user.id, before=now - timedelta(days=days))
+    rows = await company_repo.stale_profiles(
+        db, workspace_id=workspace.id, before=now - timedelta(days=days)
+    )
     items = []
     for company, checked_at in rows:
         since = (now - _as_utc(checked_at)).days if checked_at is not None else None
@@ -116,10 +120,11 @@ async def stale_profiles(
 async def list_changes(
     db: Session,
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     unseen_only: Annotated[bool, Query()] = True,
 ) -> ChangeListOut:
     """Lần tra lại gần đây thấy gì khác. Đáng chú ý xếp trước, rồi tới mới nhất."""
-    rows = await company_repo.list_changes(db, user_id=user.id, unseen_only=unseen_only)
+    rows = await company_repo.list_changes(db, workspace_id=workspace.id, unseen_only=unseen_only)
     items = [_change_out(change, name) for change, name in rows]
     return ChangeListOut(
         total=len(items),
@@ -129,10 +134,12 @@ async def list_changes(
 
 
 @router.post("/changes/{change_id}/ack", status_code=status.HTTP_204_NO_CONTENT)
-async def acknowledge(change_id: uuid.UUID, db: Session, user: CurrentUser) -> None:
+async def acknowledge(
+    change_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> None:
     """Đánh dấu *đã xem*. Dòng nhật ký ở lại, chỉ thôi nằm trong danh sách cần đọc."""
     done = await company_repo.acknowledge_change(
-        db, change_id, user_id=user.id, at=datetime.now(UTC)
+        db, change_id, workspace_id=workspace.id, at=datetime.now(UTC)
     )
     if not done:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)

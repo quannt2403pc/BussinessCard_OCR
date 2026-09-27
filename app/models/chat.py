@@ -30,6 +30,18 @@ class ChatSession(Base):
     # Chủ sở hữu phiên (task 12.3). `chat_messages` **không** có cột này: lượt chat luôn được
     # đọc qua phiên của nó, nên một khoá chủ sở hữu ở phiên là đủ và không có chỗ nào để hai
     # nguồn sự thật lệch nhau. Phần lọc đi qua `repositories/chat.py`.
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),

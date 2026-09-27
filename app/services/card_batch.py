@@ -86,7 +86,11 @@ class BatchItem:
     filename: str
     #: Chủ sở hữu bản ghi (task 12.5). Job chạy **sau** khi request đã trả 202, tức không còn
     #: cookie phiên nào để hỏi lại "ai đang upload" — người sở hữu phải đi kèm từng mục ngay từ
-    #: lúc xếp hàng, nếu không `card_repo.get()` (nay đòi `user_id`) không tra lại được bản ghi.
+    #: lúc xếp hàng, nếu không `card_repo.get()` (nay đòi `workspace_id`) không tra lại được bản ghi.
+    workspace_id: uuid.UUID | None = None
+    #: **Người bấm upload**, giữ riêng khỏi `workspace_id` (task NEXT-05). Lượt quét đi bằng
+    #: credential OAuth *của chính người đó* (13.2) và dùng model *họ* chọn — hai thứ ấy thuộc
+    #: về cá nhân, không thuộc về tổ chức.
     user_id: uuid.UUID | None = None
     card_id: uuid.UUID | None = None
     image_path: Path | None = None
@@ -106,6 +110,7 @@ class BatchJob:
     #: Người bấm nút upload. `GET /api/cards/batch-jobs/{id}` đối chiếu trường này: `job_id` là
     #: UUID khó đoán, nhưng "khó đoán" không phải kiểm soát truy cập — tiến trình quét của người
     #: khác vẫn là dữ liệu của người khác.
+    workspace_id: uuid.UUID
     user_id: uuid.UUID
     items: list[BatchItem]
     created_at: datetime
@@ -144,9 +149,15 @@ _JOBS: OrderedDict[uuid.UUID, BatchJob] = OrderedDict()
 _TASKS: set[asyncio.Task[None]] = set()
 
 
-def create_job(items: list[BatchItem], *, user_id: uuid.UUID) -> BatchJob:
+def create_job(items: list[BatchItem], *, workspace_id: uuid.UUID, user_id: uuid.UUID) -> BatchJob:
     """Ghi một job mới vào sổ và trả về. Chưa chạy gì — gọi `start()` để khởi động."""
-    job = BatchJob(id=uuid.uuid4(), user_id=user_id, items=items, created_at=datetime.now(UTC))
+    job = BatchJob(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        user_id=user_id,
+        items=items,
+        created_at=datetime.now(UTC),
+    )
     _JOBS[job.id] = job
     while len(_JOBS) > MAX_JOBS:
         evicted, _ = _JOBS.popitem(last=False)
@@ -265,17 +276,20 @@ async def _scan(item: BatchItem) -> None:
     except OSError as exc:
         raise BatchItemError(f"Không đọc được ảnh đã lưu: {exc}") from exc
 
-    if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
+    if item.workspace_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.workspace_id`)
         raise BatchItemError("Mục này không biết thuộc về ai.")
 
     async with SessionLocal() as db:
+        # `item.user_id`, KHÔNG phải `workspace_id`: model quét là lựa chọn cá nhân và
+        # credential OAuth cũng vậy (13.2 + NEXT-05).
+        assert item.user_id is not None
         model = await user_credentials.model_for_user_id(db, item.user_id, "ocr")
     # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
     # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
     result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME, model=model)
 
     async with SessionLocal() as db:
-        card = await card_repo.get(db, item.card_id, user_id=item.user_id)
+        card = await card_repo.get(db, item.card_id, workspace_id=item.workspace_id)
         if card is None:
             raise BatchItemError("Bản ghi đã bị xoá trong lúc chờ quét.")
 
@@ -306,18 +320,20 @@ def _fail(item: BatchItem, reason: str) -> None:
     if item.card_id is not None:
         # Hàm này đồng bộ (gọi từ cả `run_job` lẫn `_process`) nên không await được ở đây —
         # giao phần ghi DB cho một task rời.
-        task = asyncio.create_task(_note_failure(item.card_id, reason, user_id=item.user_id))
+        task = asyncio.create_task(
+            _note_failure(item.card_id, reason, workspace_id=item.workspace_id)
+        )
         _TASKS.add(task)
         task.add_done_callback(_TASKS.discard)
 
 
-async def _note_failure(card_id: uuid.UUID, reason: str, *, user_id: uuid.UUID | None) -> None:
+async def _note_failure(card_id: uuid.UUID, reason: str, *, workspace_id: uuid.UUID | None) -> None:
     """Ghi lý do quét hỏng vào `business_cards.notes`, giữ nguyên trạng thái `pending`."""
-    if user_id is None:
+    if workspace_id is None:
         return
     try:
         async with SessionLocal() as db:
-            card = await card_repo.get(db, card_id, user_id=user_id)
+            card = await card_repo.get(db, card_id, workspace_id=workspace_id)
             if card is None:
                 return
             card.notes = f"Quét hàng loạt thất bại: {reason}"

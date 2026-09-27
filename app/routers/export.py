@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 
 from app.core.db import SessionLocal
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
 from app.models.privacy import PrivacyAction
@@ -245,7 +246,12 @@ class _Counter:
 
 
 def _audit(
-    user_id: uuid.UUID, kind: str, fmt: str, filters: dict[str, str], counter: _Counter
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    kind: str,
+    fmt: str,
+    filters: dict[str, str],
+    counter: _Counter,
 ) -> BackgroundTask:
     """Ghi nhật ký **sau khi** file đã gửi xong (task NEXT-07).
 
@@ -257,6 +263,7 @@ def _audit(
         async with SessionLocal() as db:
             await privacy_repo.log(
                 db,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 action=PrivacyAction.EXPORT,
                 detail={"kind": kind, "format": fmt, "filters": filters},
@@ -293,11 +300,13 @@ def _filters(card_status: str | None, relationship: str | None) -> dict[str, str
 @router.get("/cards.csv")
 async def export_cards_csv(
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
+    workspace_id = workspace.id
     user_id = user.id
     counter = _Counter()
 
@@ -311,18 +320,22 @@ async def export_cards_csv(
         body(),
         media_type=CSV_MEDIA_TYPE,
         headers=_headers("cards", "csv"),
-        background=_audit(user_id, "cards", "csv", _filters(selected, stage), counter),
+        background=_audit(
+            workspace_id, user_id, "cards", "csv", _filters(selected, stage), counter
+        ),
     )
 
 
 @router.get("/cards.json", responses={200: {"model": CardsExportOut}})
 async def export_cards_json(
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
+    workspace_id = workspace.id
     user_id = user.id
     counter = _Counter()
 
@@ -338,13 +351,16 @@ async def export_cards_json(
         body(),
         media_type="application/json",
         headers=_headers("cards", "json"),
-        background=_audit(user_id, "cards", "json", _filters(selected, stage), counter),
+        background=_audit(
+            workspace_id, user_id, "cards", "json", _filters(selected, stage), counter
+        ),
     )
 
 
 @router.get("/cards.vcf")
 async def export_cards_vcf(
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     card_status: CardStatusQuery = None,
     relationship: RelationshipQuery = None,
 ) -> StreamingResponse:
@@ -355,6 +371,7 @@ async def export_cards_vcf(
     """
     selected = _validated_status(card_status)
     stage = _validated_relationship(relationship)
+    workspace_id = workspace.id
     user_id = user.id
     counter = _Counter()
 
@@ -368,17 +385,22 @@ async def export_cards_vcf(
         body(),
         media_type=VCARD_MEDIA_TYPE,
         headers=_headers("danh-thiep", "vcf"),
-        background=_audit(user_id, "cards", "vcf", _filters(selected, stage), counter),
+        background=_audit(
+            workspace_id, user_id, "cards", "vcf", _filters(selected, stage), counter
+        ),
     )
 
 
 @router.get("/cards/{card_id}.vcf")
-async def export_card_vcf(card_id: uuid.UUID, user: CurrentUser) -> Response:
+async def export_card_vcf(
+    card_id: uuid.UUID, user: CurrentUser, workspace: CurrentWorkspace
+) -> Response:
     """Một danh thiếp dưới dạng vCard. Thẻ của người khác trả **404**, không phải 403."""
     async with SessionLocal() as db:
         row = await one_card(db, user.id, card_id)
         await privacy_repo.log(
             db,
+            workspace_id=workspace.id,
             user_id=user.id,
             action=PrivacyAction.EXPORT,
             detail={"kind": "card", "format": "vcf", "card_id": str(card_id)},
@@ -393,7 +415,8 @@ async def export_card_vcf(card_id: uuid.UUID, user: CurrentUser) -> Response:
 
 
 @router.get("/companies.csv")
-async def export_companies_csv(user: CurrentUser) -> StreamingResponse:
+async def export_companies_csv(user: CurrentUser, workspace: CurrentWorkspace) -> StreamingResponse:
+    workspace_id = workspace.id
     user_id = user.id
     counter = _Counter()
 
@@ -407,12 +430,15 @@ async def export_companies_csv(user: CurrentUser) -> StreamingResponse:
         body(),
         media_type=CSV_MEDIA_TYPE,
         headers=_headers("companies", "csv"),
-        background=_audit(user_id, "companies", "csv", {}, counter),
+        background=_audit(workspace_id, user_id, "companies", "csv", {}, counter),
     )
 
 
 @router.get("/companies.json", responses={200: {"model": CompaniesExportOut}})
-async def export_companies_json(user: CurrentUser) -> StreamingResponse:
+async def export_companies_json(
+    user: CurrentUser, workspace: CurrentWorkspace
+) -> StreamingResponse:
+    workspace_id = workspace.id
     user_id = user.id
     counter = _Counter()
 
@@ -426,5 +452,5 @@ async def export_companies_json(user: CurrentUser) -> StreamingResponse:
         body(),
         media_type="application/json",
         headers=_headers("companies", "json"),
-        background=_audit(user_id, "companies", "json", {}, counter),
+        background=_audit(workspace_id, user_id, "companies", "json", {}, counter),
     )

@@ -34,10 +34,27 @@ class Company(Base):
         # là `INSERT` nào vào `companies` cũng chết (`NOT NULL`), kéo theo cả nút Xác nhận của F1.
         # **Phần lọc theo `user_id` ở F2 (repository / router / matching) vẫn là task 12.6 của T**
         # — ở đây cố ý không chạm dòng nghiệp vụ nào.
-        Index("ix_companies_user_id_name_normalized", "user_id", "name_normalized", unique=True),
+        Index(
+            "ix_companies_workspace_id_name_normalized",
+            "workspace_id",
+            "name_normalized",
+            unique=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -67,6 +84,18 @@ class CompanyProfile(Base):
     # Suy ra được qua `company_id`, nhưng `0005` vẫn gắn thẳng vào đây (xem `OWNED_TABLES` trong
     # revision): lọc mà phải JOIN thêm một bảng mới biết của ai là chỗ dễ quên, quên một chỗ là
     # rò dữ liệu. `services/kb.py` đọc đúng cột này để biết chunk hồ sơ thuộc về ai.
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -121,13 +150,25 @@ class ProfileChange(Base):
         # sau vài tuần, không đáng số hoá — tên và mệnh đề `WHERE` khớp từng chữ với `0011`.
         Index(
             "ix_profile_changes_unseen",
-            "user_id",
+            "workspace_id",
             "detected_at",
             postgresql_where=text("acknowledged_at IS NULL"),
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
+    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
+    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
+    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

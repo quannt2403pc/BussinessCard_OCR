@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.models.card import BusinessCard
 from app.models.kb import KBSourceType
 from app.repositories import duplicate as duplicate_repo
@@ -51,9 +52,11 @@ def _card_out(card: BusinessCard) -> DuplicateCard:
 
 
 @router.get("", response_model=DuplicateListOut)
-async def list_duplicates(db: Session, user: CurrentUser) -> DuplicateListOut:
+async def list_duplicates(
+    db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> DuplicateListOut:
     """Các nhóm thẻ trùng email hoặc số điện thoại — nguồn của khối *Liên hệ trùng*."""
-    groups = await duplicate_repo.find_groups(db, user_id=user.id)
+    groups = await duplicate_repo.find_groups(db, workspace_id=workspace.id)
     return DuplicateListOut(
         total_groups=len(groups),
         items=[
@@ -72,19 +75,21 @@ async def list_duplicates(db: Session, user: CurrentUser) -> DuplicateListOut:
 
 
 @router.post("/merge", response_model=MergeOut)
-async def merge_duplicates(body: MergeIn, db: Session, user: CurrentUser) -> MergeOut:
+async def merge_duplicates(
+    body: MergeIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> MergeOut:
     """Gộp các bản trùng vào một thẻ chính do **người dùng chỉ định**.
 
     Thẻ nào không còn sống (đã bị gộp trước đó, hoặc của người khác) thì trả **404** kèm tên
     trường — gộp một nửa rồi báo lỗi là trạng thái khó gỡ hơn hẳn việc không gộp gì cả.
     """
-    primary = await duplicate_repo.get_live(db, body.primary_id, user_id=user.id)
+    primary = await duplicate_repo.get_live(db, body.primary_id, workspace_id=workspace.id)
     if primary is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
 
     duplicates = []
     for card_id in body.duplicate_ids:
-        card = await duplicate_repo.get_live(db, card_id, user_id=user.id)
+        card = await duplicate_repo.get_live(db, card_id, workspace_id=workspace.id)
         if card is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
         duplicates.append(card)
@@ -95,18 +100,20 @@ async def merge_duplicates(body: MergeIn, db: Session, user: CurrentUser) -> Mer
     removed = 0
     for card in duplicates:
         removed += await kb_repo.delete_for_source(
-            db, user_id=user.id, source_type=KBSourceType.CARD, source_id=card.id
+            db, workspace_id=workspace.id, source_type=KBSourceType.CARD, source_id=card.id
         )
 
-    await duplicate_repo.merge(db, primary, duplicates, user_id=user.id)
+    await duplicate_repo.merge(db, primary, duplicates, workspace_id=workspace.id)
     logger.info("Đã gộp %d thẻ vào %s", len(duplicates), primary.id)
     return MergeOut(primary_id=primary.id, merged=len(duplicates), kb_chunks_removed=removed)
 
 
 @router.post("/unmerge", response_model=UnmergeOut)
-async def unmerge_duplicates(body: UnmergeIn, db: Session, user: CurrentUser) -> UnmergeOut:
+async def unmerge_duplicates(
+    body: UnmergeIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> UnmergeOut:
     """Trả các thẻ đã gộp về làm thẻ độc lập, và nạp lại chúng vào Knowledge Base."""
-    restored = await duplicate_repo.unmerge(db, body.card_ids, user_id=user.id)
+    restored = await duplicate_repo.unmerge(db, body.card_ids, workspace_id=workspace.id)
     if not restored:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
 
