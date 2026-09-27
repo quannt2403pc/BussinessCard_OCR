@@ -2,7 +2,10 @@
 
 Chủ sở hữu: T | Task: NEXT-01 | xem Task.md
 
-**Mọi hàm ở đây bắt buộc `user_id`, không có giá trị mặc định.** Cùng lối đã chốt ở 12.6: quên
+**Từ `NEXT-05` khoá lọc là `workspace_id`.** `user_id` chỉ còn ở `add_note()` với vai trò
+*người viết ghi chú* — dòng thời gian của một quan hệ thì phải biết ai nói câu nào.
+
+**Mọi hàm ở đây bắt buộc khoá lọc, không có giá trị mặc định.** Cùng lối đã chốt ở 12.6: quên
 truyền thì lỗi kiểu, chứ không phải rò dữ liệu của người khác.
 """
 
@@ -27,7 +30,7 @@ from app.models.contact_note import ContactNote
 DUE_LIMIT = 20
 
 
-def _owned(user_id: uuid.UUID) -> Select[tuple[BusinessCard, str | None]]:
+def _owned(workspace_id: uuid.UUID) -> Select[tuple[BusinessCard, str | None]]:
     # `outerjoin` nên tên công ty có thể `NULL`; SQLAlchemy vẫn suy ra `str`, cast cho khớp thật.
     company_name = cast(ColumnElement[str | None], Company.display_name)
     return (
@@ -35,15 +38,17 @@ def _owned(user_id: uuid.UUID) -> Select[tuple[BusinessCard, str | None]]:
         .outerjoin(Company, Company.id == BusinessCard.company_id)
         # Thẻ đã gộp không nhắc nữa (task NEXT-04): lời nhắc của nó đã theo sang thẻ chính,
         # nhắc cả hai là bắt người dùng gọi cùng một người hai lần.
-        .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None))
+        .where(BusinessCard.workspace_id == workspace_id, BusinessCard.merged_into_id.is_(None))
     )
 
 
 async def get_card(
-    db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> BusinessCard | None:
     return await db.scalar(
-        select(BusinessCard).where(BusinessCard.id == card_id, BusinessCard.user_id == user_id)
+        select(BusinessCard).where(
+            BusinessCard.id == card_id, BusinessCard.workspace_id == workspace_id
+        )
     )
 
 
@@ -54,6 +59,8 @@ async def set_follow_up(
     relationship_status: RelationshipStatus | None = None,
     follow_up_at: date | None = None,
     clear_follow_up: bool = False,
+    assigned_to_user_id: uuid.UUID | None = None,
+    clear_assignee: bool = False,
 ) -> BusinessCard:
     """Đổi trạng thái quan hệ và/hoặc ngày hẹn.
 
@@ -68,6 +75,10 @@ async def set_follow_up(
         values["follow_up_at"] = None
     elif follow_up_at is not None:
         values["follow_up_at"] = follow_up_at
+    if clear_assignee:
+        values["assigned_to_user_id"] = None
+    elif assigned_to_user_id is not None:
+        values["assigned_to_user_id"] = assigned_to_user_id
 
     if values:
         await db.execute(update(BusinessCard).where(BusinessCard.id == card.id).values(**values))
@@ -77,7 +88,7 @@ async def set_follow_up(
 
 
 async def due_cards(
-    db: AsyncSession, *, user_id: uuid.UUID, on: date, limit: int = DUE_LIMIT
+    db: AsyncSession, *, workspace_id: uuid.UUID, on: date, limit: int = DUE_LIMIT
 ) -> Sequence[tuple[BusinessCard, str | None]]:
     """Thẻ có hẹn **đến hạn hoặc quá hạn** tính tới ngày `on`, cũ nhất trước.
 
@@ -85,7 +96,7 @@ async def due_cards(
     Thẻ **đã ngã ngũ** không bao giờ vào đây — quan hệ đã dừng thì lời nhắc chỉ là nhiễu.
     """
     rows = await db.execute(
-        _owned(user_id)
+        _owned(workspace_id)
         .where(
             BusinessCard.follow_up_at.is_not(None),
             BusinessCard.follow_up_at <= on,
@@ -97,12 +108,12 @@ async def due_cards(
     return list(rows.tuples().all())
 
 
-async def due_count(db: AsyncSession, *, user_id: uuid.UUID, on: date) -> int:
+async def due_count(db: AsyncSession, *, workspace_id: uuid.UUID, on: date) -> int:
     total = await db.scalar(
         select(func.count())
         .select_from(BusinessCard)
         .where(
-            BusinessCard.user_id == user_id,
+            BusinessCard.workspace_id == workspace_id,
             BusinessCard.merged_into_id.is_(None),
             BusinessCard.follow_up_at.is_not(None),
             BusinessCard.follow_up_at <= on,
@@ -113,29 +124,38 @@ async def due_count(db: AsyncSession, *, user_id: uuid.UUID, on: date) -> int:
 
 
 async def list_notes(
-    db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> Sequence[ContactNote]:
     rows = await db.scalars(
         select(ContactNote)
-        .where(ContactNote.card_id == card_id, ContactNote.user_id == user_id)
+        .where(ContactNote.card_id == card_id, ContactNote.workspace_id == workspace_id)
         .order_by(ContactNote.created_at.desc(), ContactNote.id.desc())
     )
     return list(rows.all())
 
 
 async def add_note(
-    db: AsyncSession, card: BusinessCard, body: str, *, user_id: uuid.UUID
+    db: AsyncSession,
+    card: BusinessCard,
+    body: str,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> ContactNote:
-    note = ContactNote(user_id=user_id, card_id=card.id, body=body)
+    # `user_id` ở đây là **người viết**, không phải khoá lọc: dòng thời gian của một quan hệ
+    # trong một không gian nhiều người thì phải biết ai nói câu nào (task NEXT-05).
+    note = ContactNote(workspace_id=workspace_id, user_id=user_id, card_id=card.id, body=body)
     db.add(note)
     await db.commit()
     await db.refresh(note)
     return note
 
 
-async def delete_note(db: AsyncSession, note_id: uuid.UUID, *, user_id: uuid.UUID) -> bool:
+async def delete_note(db: AsyncSession, note_id: uuid.UUID, *, workspace_id: uuid.UUID) -> bool:
     note = await db.scalar(
-        select(ContactNote).where(ContactNote.id == note_id, ContactNote.user_id == user_id)
+        select(ContactNote).where(
+            ContactNote.id == note_id, ContactNote.workspace_id == workspace_id
+        )
     )
     if note is None:
         return False

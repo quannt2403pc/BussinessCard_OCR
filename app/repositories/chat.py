@@ -56,26 +56,34 @@ _CHRONOLOGICAL = (ChatMessage.created_at, _ROLE_ORDER, ChatMessage.id)
 
 
 async def create_session(
-    db: AsyncSession, *, user_id: uuid.UUID, title: str | None = None
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    title: str | None = None,
 ) -> ChatSession:
     """Mở một phiên hỏi–đáp mới. Chưa commit — xem ghi chú 1 ở đầu file."""
-    session = ChatSession(user_id=user_id, title=_title(title))
+    # `user_id` là **người mở phiên**, không phải khoá lọc (task NEXT-05): trong một không gian
+    # nhiều người, lịch sử hỏi đáp phải biết ai đã hỏi.
+    session = ChatSession(workspace_id=workspace_id, user_id=user_id, title=_title(title))
     db.add(session)
     await db.flush()
     return session
 
 
 async def get_session(
-    db: AsyncSession, session_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, session_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> ChatSession | None:
     """Một phiên **của đúng người này**, hoặc `None` (task 12.5).
 
-    Không `db.get()` nữa: tra khoá chính không nhận thêm điều kiện, mà nhớ so `session.user_id`
+    Không `db.get()` nữa: tra khoá chính không nhận thêm điều kiện, mà nhớ so `session.workspace_id`
     ở từng chỗ gọi là việc sẽ có người quên. Phiên của người khác trả `None` → router trả **404**,
     giống hệt khi id không tồn tại: không có cách nào dò xem một `session_id` có thật hay không.
     """
     result = await db.execute(
-        select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        select(ChatSession).where(
+            ChatSession.id == session_id, ChatSession.workspace_id == workspace_id
+        )
     )
     return result.scalar_one_or_none()
 
@@ -106,10 +114,10 @@ async def add_message(
 
 
 async def list_messages(
-    db: AsyncSession, session_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, session_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> Sequence[ChatMessage]:
     """Toàn bộ lượt của một phiên, cũ → mới (dùng cho `GET /api/chat/{session_id}`)."""
-    rows = await db.execute(_owned_messages(session_id, user_id).order_by(*_CHRONOLOGICAL))
+    rows = await db.execute(_owned_messages(session_id, workspace_id).order_by(*_CHRONOLOGICAL))
     return list(rows.scalars().all())
 
 
@@ -117,7 +125,7 @@ async def recent_messages(
     db: AsyncSession,
     session_id: uuid.UUID,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     limit: int,
 ) -> Sequence[ChatMessage]:
     """`limit` lượt **gần nhất**, trả về theo thứ tự cũ → mới để nhét vào prompt (task 8.3).
@@ -127,17 +135,17 @@ async def recent_messages(
     hội thoại bị cắt nhầm đầu này rồi ghép lại sai đầu kia — xem ghi chú 3.
     """
     rows = await db.execute(
-        _owned_messages(session_id, user_id)
+        _owned_messages(session_id, workspace_id)
         .order_by(*(column.desc() for column in _CHRONOLOGICAL))
         .limit(limit)
     )
     return list(reversed(list(rows.scalars().all())))
 
 
-def _owned_messages(session_id: uuid.UUID, user_id: uuid.UUID) -> Select[tuple[ChatMessage]]:
-    """Các lượt của một phiên, **kèm điều kiện phiên đó thuộc về `user_id`** (task 12.5).
+def _owned_messages(session_id: uuid.UUID, workspace_id: uuid.UUID) -> Select[tuple[ChatMessage]]:
+    """Các lượt của một phiên, **kèm điều kiện phiên đó thuộc về `workspace_id`** (task 12.5).
 
-    `chat_messages` không có cột `user_id` (xem `models/chat.py`) nên chủ sở hữu phải lấy qua
+    `chat_messages` không có cột `workspace_id` (xem `models/chat.py`) nên chủ sở hữu phải lấy qua
     `JOIN` tới phiên. Router vốn đã kiểm quyền bằng `get_session()` trước khi gọi hai hàm đọc ở
     đây, nhưng điều kiện này vẫn nằm trong SQL: một đường gọi mới quên bước kiểm kia sẽ nhận về
     danh sách rỗng, chứ không đọc được hội thoại của người khác.
@@ -145,7 +153,7 @@ def _owned_messages(session_id: uuid.UUID, user_id: uuid.UUID) -> Select[tuple[C
     return (
         select(ChatMessage)
         .join(ChatSession, ChatMessage.session_id == ChatSession.id)
-        .where(ChatMessage.session_id == session_id, ChatSession.user_id == user_id)
+        .where(ChatMessage.session_id == session_id, ChatSession.workspace_id == workspace_id)
     )
 
 

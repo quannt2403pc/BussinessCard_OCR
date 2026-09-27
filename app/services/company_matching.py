@@ -91,35 +91,44 @@ async def upsert_company(
     db: AsyncSession,
     raw_name: str,
     *,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     email: str | None = None,
     website: str | None = None,
 ) -> uuid.UUID:
-    """Tìm hoặc tạo công ty **trong phạm vi một người dùng** (task 3.8 + `user_id` từ D12).
+    """Tìm hoặc tạo công ty **trong phạm vi một người dùng** (task 3.8 + `workspace_id` từ D12).
 
     ⚠️ **Q sửa hàm này ở task 12.5 dù nó thuộc quyền T** (luật nới D12, quy ước 2 — T review PR).
-    Chỉ đúng phần *hợp đồng dùng chung*: thêm `user_id`, lọc ứng viên và gán cột khi chèn. Lý do
+    Chỉ đúng phần *hợp đồng dùng chung*: thêm `workspace_id`, lọc ứng viên và gán cột khi chèn. Lý do
     không chờ 12.6: đây là hàm `cards.confirm` (Q) gọi mỗi lần xác nhận danh thiếp, và
-    `companies.user_id` đã là `NOT NULL` trong DB từ revision `0005` — thiếu tham số này thì nút
+    `companies.workspace_id` đã là `NOT NULL` trong DB từ revision `0005` — thiếu tham số này thì nút
     Xác nhận của F1 **và** `scripts/seed.py` đều không ghi nổi một dòng nào.
     **Phần còn lại của 12.6 vẫn là của T**: `repositories/company.py`, `routers/companies.py`,
     `services/enrich_jobs.py`, `repositories/enrich_job.py`, `routers/stats.py`, `routers/export.py`.
 
-    Gộp công ty **không bao giờ vượt qua ranh giới người dùng**: nếu ứng viên lấy toàn cục thì
-    danh thiếp của A có thể bị gắn vào công ty của B — vừa rò tên công ty của B qua giao diện của
-    A, vừa tạo ra một `company_id` mà mọi bộ lọc `user_id` sau đó đều coi là không tồn tại.
+    Gộp công ty **không bao giờ vượt qua ranh giới không gian làm việc**: nếu ứng viên lấy toàn
+    cục thì danh thiếp của tổ chức A có thể bị gắn vào công ty của tổ chức B — vừa rò tên công ty
+    của B qua giao diện của A, vừa tạo ra một `company_id` mà mọi bộ lọc `workspace_id` sau đó
+    đều coi là không tồn tại.
+
+    Hai tham số, hai việc khác hẳn nhau (`NEXT-05`): `workspace_id` quyết định **tìm trong phạm
+    vi nào và ghi vào phạm vi nào**, còn `user_id` chỉ đi vào cột người tạo của dòng mới. Công ty
+    tìm thấy sẵn thì `user_id` không được dùng tới — người tạo là người đầu tiên, không phải
+    người vừa xác nhận thêm một danh thiếp.
     """
     display_name = " ".join(raw_name.split())[:MAX_NAME_LENGTH]
     key = normalize_company_name(raw_name)[:MAX_NAME_LENGTH]
 
     company_id = await db.scalar(
-        select(Company.id).where(Company.user_id == user_id, Company.name_normalized == key)
+        select(Company.id).where(
+            Company.workspace_id == workspace_id, Company.name_normalized == key
+        )
     )
     if company_id is None:
-        candidates = await _load_candidates(db, user_id)
+        candidates = await _load_candidates(db, workspace_id)
         company_id = find_match(key, extract_domains(email, website), candidates)
     if company_id is None:
-        return await _insert_company(db, key, display_name, user_id)
+        return await _insert_company(db, key, display_name, workspace_id, user_id)
 
     await _remember_alias(db, company_id, display_name)
     return company_id
@@ -156,15 +165,15 @@ def domains_overlap(left: frozenset[str], right: frozenset[str]) -> bool:
     return any(a == b or a.endswith(f".{b}") or b.endswith(f".{a}") for a in left for b in right)
 
 
-async def _load_candidates(db: AsyncSession, user_id: uuid.UUID) -> list[Candidate]:
+async def _load_candidates(db: AsyncSession, workspace_id: uuid.UUID) -> list[Candidate]:
     companies = (
         await db.execute(
-            select(Company.id, Company.name_normalized).where(Company.user_id == user_id)
+            select(Company.id, Company.name_normalized).where(Company.workspace_id == workspace_id)
         )
     ).all()
     contacts = await db.execute(
         select(BusinessCard.company_id, BusinessCard.email, BusinessCard.website).where(
-            BusinessCard.user_id == user_id, BusinessCard.company_id.is_not(None)
+            BusinessCard.workspace_id == workspace_id, BusinessCard.company_id.is_not(None)
         )
     )
 
@@ -179,29 +188,32 @@ async def _load_candidates(db: AsyncSession, user_id: uuid.UUID) -> list[Candida
 
 
 async def _insert_company(
-    db: AsyncSession, key: str, display_name: str, user_id: uuid.UUID
+    db: AsyncSession, key: str, display_name: str, workspace_id: uuid.UUID, user_id: uuid.UUID
 ) -> uuid.UUID:
     inserted = await db.scalar(
         insert(Company)
         .values(
             id=uuid.uuid4(),
+            workspace_id=workspace_id,
             user_id=user_id,
             name_normalized=key,
             display_name=display_name,
             aliases=[display_name],
         )
-        # Index unique đổi thành `(user_id, name_normalized)` ở revision `0005`; `index_elements`
+        # Index unique đổi thành `(workspace_id, name_normalized)` ở revision `0005`; `index_elements`
         # phải khớp **đúng** bộ cột đó, nếu không Postgres báo *no unique or exclusion constraint
         # matching the ON CONFLICT specification* — hai người xác nhận cùng một công ty cùng lúc
         # là gặp ngay.
-        .on_conflict_do_nothing(index_elements=[Company.user_id, Company.name_normalized])
+        .on_conflict_do_nothing(index_elements=[Company.workspace_id, Company.name_normalized])
         .returning(Company.id)
     )
     if inserted is not None:
         return inserted
 
     existing = await db.execute(
-        select(Company.id).where(Company.user_id == user_id, Company.name_normalized == key)
+        select(Company.id).where(
+            Company.workspace_id == workspace_id, Company.name_normalized == key
+        )
     )
     return existing.scalar_one()
 

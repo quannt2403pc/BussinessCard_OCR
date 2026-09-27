@@ -9,7 +9,8 @@ người. Học theo đúng cách chống trùng công ty ở `3.8` — chuẩn 
 Gộp là **gộp mềm**: bản trùng ở lại, mang `merged_into_id`, biến mất khỏi mọi danh sách nhưng
 vẫn mở ra đọc được và gỡ gộp được (xem docstring revision `0010`).
 
-**Mọi hàm bắt buộc `user_id`**, cùng lối đã chốt ở 12.6.
+**Mọi hàm bắt buộc `workspace_id`** — từ `NEXT-05` đây là khoá lọc, cùng lối đã chốt ở 12.6.
+Trong file này **không có chỗ nào** `user_id` mang nghĩa *người tạo*, nên đổi được trọn gói.
 """
 
 import uuid
@@ -109,18 +110,18 @@ class DuplicateGroup:
         return len(self.cards) >= LIKELY_SHARED_FROM
 
 
-def live_cards(user_id: uuid.UUID) -> Select[tuple[BusinessCard]]:
+def live_cards(workspace_id: uuid.UUID) -> Select[tuple[BusinessCard]]:
     """Thẻ **chưa bị gộp** của một người dùng — nền của mọi câu trong file này."""
     return select(BusinessCard).where(
-        BusinessCard.user_id == user_id, BusinessCard.merged_into_id.is_(None)
+        BusinessCard.workspace_id == workspace_id, BusinessCard.merged_into_id.is_(None)
     )
 
 
-async def _shared_values(db: AsyncSession, user_id: uuid.UUID, column: Any) -> list[str]:
+async def _shared_values(db: AsyncSession, workspace_id: uuid.UUID, column: Any) -> list[str]:
     rows = await db.scalars(
         select(column)
         .where(
-            BusinessCard.user_id == user_id,
+            BusinessCard.workspace_id == workspace_id,
             BusinessCard.merged_into_id.is_(None),
             column.is_not(None),
             column != "",
@@ -133,7 +134,7 @@ async def _shared_values(db: AsyncSession, user_id: uuid.UUID, column: Any) -> l
     return list(rows.all())
 
 
-async def find_groups(db: AsyncSession, *, user_id: uuid.UUID) -> list[DuplicateGroup]:
+async def find_groups(db: AsyncSession, *, workspace_id: uuid.UUID) -> list[DuplicateGroup]:
     """Nhóm thẻ trùng theo email hoặc số điện thoại **đã chuẩn hoá**.
 
     Chuẩn hoá đã xong từ lúc quét (`services/normalize.py` của Q chạy trong `ocr`), nên ở đây so
@@ -148,11 +149,11 @@ async def find_groups(db: AsyncSession, *, user_id: uuid.UUID) -> list[Duplicate
     """
     found: dict[frozenset[uuid.UUID], tuple[list[DuplicateReason], list[BusinessCard]]] = {}
     for kind, column in (("email", BusinessCard.email), ("phone", BusinessCard.phone)):
-        values = await _shared_values(db, user_id, column)
+        values = await _shared_values(db, workspace_id, column)
         if not values:
             continue
         rows = await db.scalars(
-            live_cards(user_id)
+            live_cards(workspace_id)
             .where(column.in_(values))
             .order_by(column, BusinessCard.uploaded_at, BusinessCard.id)
         )
@@ -175,18 +176,18 @@ async def find_groups(db: AsyncSession, *, user_id: uuid.UUID) -> list[Duplicate
 
 
 async def get_live(
-    db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> BusinessCard | None:
-    return await db.scalar(live_cards(user_id).where(BusinessCard.id == card_id))
+    return await db.scalar(live_cards(workspace_id).where(BusinessCard.id == card_id))
 
 
 async def merged_into(
-    db: AsyncSession, card_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> Sequence[BusinessCard]:
     """Những thẻ đã gộp vào thẻ này — câu duy nhất dùng tới index partial của `0010`."""
     rows = await db.scalars(
         select(BusinessCard)
-        .where(BusinessCard.user_id == user_id, BusinessCard.merged_into_id == card_id)
+        .where(BusinessCard.workspace_id == workspace_id, BusinessCard.merged_into_id == card_id)
         .order_by(BusinessCard.uploaded_at)
     )
     return list(rows.all())
@@ -206,7 +207,7 @@ async def merge(
     primary: BusinessCard,
     duplicates: Sequence[BusinessCard],
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
 ) -> BusinessCard:
     """Gộp `duplicates` vào `primary`. Trả về thẻ chính đã cập nhật.
 
@@ -253,12 +254,12 @@ async def merge(
     duplicate_ids = [card.id for card in ordered]
     await db.execute(
         update(ContactNote)
-        .where(ContactNote.user_id == user_id, ContactNote.card_id.in_(duplicate_ids))
+        .where(ContactNote.workspace_id == workspace_id, ContactNote.card_id.in_(duplicate_ids))
         .values(card_id=primary.id)
     )
     await db.execute(
         update(BusinessCard)
-        .where(BusinessCard.user_id == user_id, BusinessCard.id.in_(duplicate_ids))
+        .where(BusinessCard.workspace_id == workspace_id, BusinessCard.id.in_(duplicate_ids))
         .values(merged_into_id=primary.id)
     )
     await db.commit()
@@ -267,7 +268,7 @@ async def merge(
 
 
 async def unmerge(
-    db: AsyncSession, card_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    db: AsyncSession, card_ids: Sequence[uuid.UUID], *, workspace_id: uuid.UUID
 ) -> Sequence[BusinessCard]:
     """Gỡ gộp: thẻ quay lại làm thẻ độc lập. Trả về những thẻ thật sự đổi.
 
@@ -277,7 +278,7 @@ async def unmerge(
     """
     rows = await db.scalars(
         select(BusinessCard).where(
-            BusinessCard.user_id == user_id,
+            BusinessCard.workspace_id == workspace_id,
             BusinessCard.id.in_(card_ids),
             BusinessCard.merged_into_id.is_not(None),
         )

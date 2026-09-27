@@ -12,19 +12,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import current_user
+from app.core.workspace import ActiveWorkspace, require_workspace
 from app.models.card import BusinessCard, CardStatus, RelationshipStatus
 from app.models.company import Company, CompanyProfile
 from app.models.privacy import PrivacyAction, PrivacyLog
 from app.models.user import User
+from app.models.workspace import Role
 from app.routers import export
 from app.schemas.export import CardExportRow
-from tests.conftest import make_user
+from tests.conftest import make_user, workspace_id_of
 
 #: Chủ sở hữu của mọi bản ghi trong file này (task 12.8). `0005` đặt `user_id` là NOT NULL
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. Test ở đây không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+#: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
+WORKSPACE_ID = uuid.uuid4()
 OWNER = User(id=OWNER_ID, email="owner-export@example.com", password_hash="!")
+#: `require_workspace` tra bảng thành viên bằng `get_db`, mà app nhỏ trong file này không
+#: khai `get_db` — nó chỉ vá `export.SessionLocal`. Ghi đè thẳng dependency, vừa khỏi phải
+#: dựng session thứ hai vừa giữ đúng ý test: ở đây kiểm nội dung file xuất, không kiểm quyền.
+ACTIVE_WORKSPACE = ActiveWorkspace(id=WORKSPACE_ID, name="Không gian test", role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -36,7 +44,11 @@ async def owner(db_session: AsyncSession) -> User:
     `FakeSession` thì không cần — vì thế fixture này không autouse.
     """
     return await make_user(
-        db_session, "owner-export@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+        db_session,
+        "owner-export@example.com",
+        "Chủ sở hữu dữ liệu test",
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
     )
 
 
@@ -62,6 +74,7 @@ async def client(
     app = FastAPI()
     app.include_router(export.router)
     app.dependency_overrides[current_user] = lambda: OWNER
+    app.dependency_overrides[require_workspace] = lambda: ACTIVE_WORKSPACE
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -69,6 +82,7 @@ async def client(
 
 def card(**kwargs: object) -> BusinessCard:
     values: dict[str, object] = {
+        "workspace_id": WORKSPACE_ID,
         "user_id": OWNER_ID,
         "image_path": f"export/{uuid.uuid4().hex[:8]}.jpg",
         "image_hash": uuid.uuid4().hex * 2,
@@ -86,7 +100,12 @@ def read_csv(response: httpx.Response) -> list[list[str]]:
 async def test_cards_csv_keeps_bom_header_and_vietnamese(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(user_id=OWNER_ID, display_name="Công ty FPT", name_normalized="fpt")
+    company = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        display_name="Công ty FPT",
+        name_normalized="fpt",
+    )
     db_session.add(company)
     await db_session.flush()
     db_session.add(card(full_name="Nguyễn Văn A", job_title="Giám đốc", company_id=company.id))
@@ -237,7 +256,10 @@ async def test_companies_export_includes_company_without_profile(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
     company = Company(
-        user_id=OWNER_ID, display_name="Chưa có hồ sơ", name_normalized="chua co ho so"
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        display_name="Chưa có hồ sơ",
+        name_normalized="chua co ho so",
     )
     db_session.add(company)
     await db_session.flush()
@@ -255,7 +277,12 @@ async def test_companies_export_includes_company_without_profile(
 async def test_companies_export_profile_lists_and_sources(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(user_id=OWNER_ID, display_name="FPT Software", name_normalized="fpt software")
+    company = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        display_name="FPT Software",
+        name_normalized="fpt software",
+    )
     db_session.add(company)
     await db_session.flush()
     db_session.add_all(
@@ -263,6 +290,7 @@ async def test_companies_export_profile_lists_and_sources(
             card(company_id=company.id),
             card(company_id=company.id),
             CompanyProfile(
+                workspace_id=WORKSPACE_ID,
                 user_id=OWNER_ID,
                 company_id=company.id,
                 status="generated",
@@ -391,7 +419,12 @@ def test_vcard_prefers_vietnamese_name_and_keeps_the_original() -> None:
 async def test_cards_vcf_exports_every_card(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
-    company = Company(user_id=OWNER_ID, display_name="Công ty FPT", name_normalized="fpt")
+    company = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        display_name="Công ty FPT",
+        name_normalized="fpt",
+    )
     db_session.add(company)
     await db_session.flush()
     db_session.add_all(
@@ -432,12 +465,13 @@ async def test_cards_vcf_honours_the_status_filter(
     assert "FN:Đã xác nhận" in text
 
 
-async def test_one_card_vcf_and_other_users_card_is_404(
+async def test_one_card_vcf_and_another_workspaces_card_is_404(
     db_session: AsyncSession, owner: User, client: httpx.AsyncClient
 ) -> None:
     mine = card(full_name="Của tôi")
     stranger = await make_user(db_session, "nguoi-khac@example.com")
     theirs = BusinessCard(
+        workspace_id=await workspace_id_of(db_session, stranger),
         user_id=stranger.id,
         image_path="export/khac.jpg",
         image_hash=uuid.uuid4().hex * 2,

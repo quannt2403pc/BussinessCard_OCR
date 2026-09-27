@@ -237,7 +237,7 @@ async def search(
     db: AsyncSession,
     query: str,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     top_k: int = TOP_K,
     min_similarity: float = MIN_SIMILARITY,
     source_type: KBSourceType | str | None = None,
@@ -258,7 +258,7 @@ async def search(
 
     `hybrid=False` tắt nhánh full-text; chỉ dùng để **đo riêng từng nhánh** ở task 7.4.
 
-    `user_id` **không phải bộ lọc** như hai tham số trên, mà là ranh giới dữ liệu (task 12.5): nó
+    `workspace_id` **không phải bộ lọc** như hai tham số trên, mà là ranh giới dữ liệu (task 12.5): nó
     không đến từ lựa chọn nào trên giao diện, không tắt được, và đi xuống tận mệnh đề `WHERE` của
     cả hai nhánh. Tiêu chí **A9** đứng trên đúng một dòng này — A hỏi về công ty mà chỉ B có thì
     truy hồi phải trả **rỗng**, để prompt của 8.1 nói "không có thông tin".
@@ -271,7 +271,7 @@ async def search(
     vector_hits = await vector_search(
         db,
         text_query,
-        user_id=user_id,
+        workspace_id=workspace_id,
         top_k=candidates,
         min_similarity=min_similarity,
         source_type=source_type,
@@ -282,7 +282,7 @@ async def search(
         await text_search(
             db,
             text_query,
-            user_id=user_id,
+            workspace_id=workspace_id,
             top_k=candidates,
             source_type=source_type,
             company_id=company_id,
@@ -306,7 +306,7 @@ async def vector_search(
     db: AsyncSession,
     query: str,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     top_k: int = TOP_K,
     min_similarity: float = MIN_SIMILARITY,
     source_type: KBSourceType | str | None = None,
@@ -322,7 +322,12 @@ async def vector_search(
     """
     vector = await embeddings.embed_query(query, client=client)
     rows = await kb_repo.search_similar(
-        db, vector, user_id=user_id, top_k=top_k, source_type=source_type, company_id=company_id
+        db,
+        vector,
+        workspace_id=workspace_id,
+        top_k=top_k,
+        source_type=source_type,
+        company_id=company_id,
     )
 
     hits: list[Hit] = []
@@ -348,7 +353,7 @@ async def text_search(
     db: AsyncSession,
     query: str,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     top_k: int = TOP_K,
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
@@ -368,7 +373,7 @@ async def text_search(
     rows = await kb_repo.search_fulltext(
         db,
         query_terms(query),
-        user_id=user_id,
+        workspace_id=workspace_id,
         top_k=top_k,
         source_type=source_type,
         company_id=company_id,

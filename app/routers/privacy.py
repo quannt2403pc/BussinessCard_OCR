@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.privacy import PrivacyAction, PrivacyLog
 from app.repositories import privacy as privacy_repo
 from app.schemas.privacy import (
@@ -98,47 +99,56 @@ async def privacy_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/privacy/logs", response_model=LogListOut)
-async def list_logs(db: Session, user: CurrentUser) -> LogListOut:
-    entries = await privacy_repo.recent_logs(db, user_id=user.id)
+async def list_logs(db: Session, user: CurrentUser, workspace: CurrentWorkspace) -> LogListOut:
+    entries = await privacy_repo.recent_logs(db, workspace_id=workspace.id)
     return LogListOut(total=len(entries), items=[_log_out(entry) for entry in entries])
 
 
 @router.get("/api/privacy/retention", response_model=RetentionOut)
-async def get_retention(db: Session, user: CurrentUser) -> RetentionOut:
+async def get_retention(
+    db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> RetentionOut:
     now = datetime.now(UTC)
     expired = (
-        await privacy_repo.count_expired(db, user_id=user.id, days=user.retention_days, now=now)
+        await privacy_repo.count_expired(
+            db, workspace_id=workspace.id, days=user.retention_days, now=now
+        )
         if user.retention_days
         else 0
     )
-    oldest = await privacy_repo.oldest_upload(db, user_id=user.id)
+    oldest = await privacy_repo.oldest_upload(db, workspace_id=workspace.id)
     return RetentionOut(
         days=user.retention_days,
-        total_contacts=await privacy_repo.count_contacts(db, user_id=user.id),
+        total_contacts=await privacy_repo.count_contacts(db, workspace_id=workspace.id),
         expired=expired,
         oldest_upload=oldest.replace(tzinfo=UTC) if oldest else None,
     )
 
 
 @router.put("/api/privacy/retention", response_model=RetentionOut)
-async def put_retention(body: RetentionIn, db: Session, user: CurrentUser) -> RetentionOut:
+async def put_retention(
+    body: RetentionIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
+) -> RetentionOut:
     """Đặt hoặc gỡ hạn lưu trữ. **Đặt hạn không xoá gì cả** — xoá là một cú bấm riêng."""
     await privacy_repo.set_retention(db, user, body.days)
     await db.commit()
-    return await get_retention(db, user)
+    return await get_retention(db, user, workspace)
 
 
 @router.post("/api/privacy/purge", response_model=PurgeOut)
-async def purge_expired(db: Session, user: CurrentUser) -> PurgeOut:
+async def purge_expired(db: Session, user: CurrentUser, workspace: WriterWorkspace) -> PurgeOut:
     """Xoá những danh thiếp đã quá hạn lưu trữ đang đặt. Không có hạn thì không xoá gì."""
     if not user.retention_days:
         return PurgeOut(days=0, erased=0, images_removed=0)
 
     now = datetime.now(UTC)
-    cards = await privacy_repo.expired_cards(db, user_id=user.id, days=user.retention_days, now=now)
-    paths = await privacy_repo.erase_cards(db, cards, user_id=user.id)
+    cards = await privacy_repo.expired_cards(
+        db, workspace_id=workspace.id, days=user.retention_days, now=now
+    )
+    paths = await privacy_repo.erase_cards(db, cards, workspace_id=workspace.id)
     await privacy_repo.log(
         db,
+        workspace_id=workspace.id,
         user_id=user.id,
         action=PrivacyAction.RETENTION,
         detail={"days": user.retention_days},
@@ -152,13 +162,15 @@ async def purge_expired(db: Session, user: CurrentUser) -> PurgeOut:
 
 
 @router.post("/api/privacy/subject", response_model=SubjectOut)
-async def find_subject(body: SubjectIn, db: Session, user: CurrentUser) -> SubjectOut:
+async def find_subject(
+    body: SubjectIn, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> SubjectOut:
     """Tìm mọi danh thiếp của một chủ thể dữ liệu. **Chỉ tìm, không xoá.**
 
     Bước riêng là có chủ đích: người dùng phải nhìn thấy đúng bao nhiêu bản ghi sắp mất trước
     khi bấm xoá, vì sau đó không có đường nào lấy lại.
     """
-    cards = await privacy_repo.find_subject_cards(db, body.term, user_id=user.id)
+    cards = await privacy_repo.find_subject_cards(db, body.term, workspace_id=workspace.id)
     return SubjectOut(
         term=body.term,
         total=len(cards),
@@ -167,16 +179,19 @@ async def find_subject(body: SubjectIn, db: Session, user: CurrentUser) -> Subje
 
 
 @router.post("/api/privacy/erase", response_model=EraseOut)
-async def erase_subject(body: SubjectIn, db: Session, user: CurrentUser) -> EraseOut:
+async def erase_subject(
+    body: SubjectIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
+) -> EraseOut:
     """Xoá **vĩnh viễn** mọi dữ liệu của một chủ thể: hàng, ảnh, ghi chú, chunk Knowledge Base.
 
     Xoá thật chứ không gắn cờ ẩn, khác hẳn `merged_into_id` của `NEXT-04`: ở đó máy *đoán*, ở
     đây chủ thể dữ liệu **yêu cầu**, và quyền ấy không được phục vụ bằng một cờ.
     """
-    cards = await privacy_repo.find_subject_cards(db, body.term, user_id=user.id)
-    paths = await privacy_repo.erase_cards(db, cards, user_id=user.id)
+    cards = await privacy_repo.find_subject_cards(db, body.term, workspace_id=workspace.id)
+    paths = await privacy_repo.erase_cards(db, cards, workspace_id=workspace.id)
     await privacy_repo.log(
         db,
+        workspace_id=workspace.id,
         user_id=user.id,
         action=PrivacyAction.ERASE,
         detail={"term": body.term},

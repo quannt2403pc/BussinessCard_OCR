@@ -64,7 +64,7 @@ Gemini** (9 model) và **không** cho `claude-*`, `gpt-oss-*` — lần này **k
 | Kết quả tìm kiếm thay đổi theo ngày — một công ty 5/5 hôm nay có thể 4/5 lần sau | Thấp | Bình thường; A5 đo trên 10 công ty, không trên một công ty |
 | Một số trang chặn bot (`topcv.vn` → `403`) | Thấp | Nguồn vẫn hợp lệ với người dùng bấm từ trình duyệt; chỉ ảnh hưởng việc kiểm tự động |
 | Link redirect Vertex hết hạn | Đã xử lý | **Q3** lưu URL gốc ngay lúc tạo hồ sơ |
-| Tài khoản Google Workspace không lấy được `project_id` → mọi lời gọi `400` dù badge *Đã kết nối* | Trung bình | Người dùng: đăng nhập Gmail cá nhân (`docs/user-guide.md` mục 8) |
+| Tài khoản Google Workspace không lấy được `project_id` → mọi lời gọi `400` dù badge *Đã kết nối* | Trung bình | Người dùng: đăng nhập Gmail cá nhân (`docs/user-guide.md` mục 9) |
 
 ---
 

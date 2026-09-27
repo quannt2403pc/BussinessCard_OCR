@@ -1,7 +1,7 @@
 # Kịch bản kiểm thử đầu–cuối
 
 > Chủ sở hữu: **T** · Task: **10.5** · Chạy ở: **10.6** (T chạy phần F2) và **10.1** (Q chạy phần F1/F3)
-> Cập nhật: 2026-09-21
+> Cập nhật: 2026-09-27 (thêm TS-11 cho `NEXT-05` — không gian làm việc, tiêu chí A9′)
 
 ## 1. Nguyên tắc
 
@@ -27,7 +27,7 @@ docker compose exec api python -m scripts.seed
 Mở `http://localhost:8000/settings`, kết nối OAuth bằng **tài khoản Gmail cá nhân** (xem TS-02) rồi bấm
 *Kiểm tra kết nối*.
 
-## 3. Mười kịch bản
+## 3. Mười một kịch bản
 
 | # | Kịch bản | Tiêu chí | Module |
 |---|----------|----------|--------|
@@ -41,6 +41,7 @@ Mở `http://localhost:8000/settings`, kết nối OAuth bằng **tài khoản G
 | TS-08 | Huỷ lượt tạo hồ sơ, lỗi CLIProxy, chạy lại | A5 | T |
 | TS-09 | Sửa tay, ẩn và hiện lại hồ sơ | A5, R4 | T |
 | TS-10 | Trợ lý AI, export và dashboard | A6 | Q (chat) + T (export, dashboard) |
+| TS-11 | Không gian làm việc: hai người **cùng** một tổ chức, và hai tổ chức **tách** nhau | A9′ | T |
 
 ### TS-01 — Khởi động trên máy sạch (A1)
 
@@ -160,6 +161,33 @@ nghiệp* = 0 (ngoài các hồ sơ của bộ seed).
 3. Excel hiện đúng tiếng Việt, 山田 花子, 김민수 (CSV có BOM); cột `sources` là JSON đọc được.
 4. Số trên dashboard khớp danh sách; bấm ô *Hồ sơ doanh nghiệp* ra danh sách đã lọc sẵn.
 
+### TS-11 — Không gian làm việc (A9′, task `NEXT-05`)
+
+Kịch bản **duy nhất cần hai trình duyệt và hai tài khoản** — chạy cùng lúc với `13.3`. Nó kiểm cả
+hai vế của A9′, và vế nào cũng hỏng được theo chiều ngược lại: chặn nhầm người trong nhà, hoặc mở
+cửa cho người ngoài.
+
+1. Tài khoản **A** đăng nhập, quét một thẻ, mở menu tài khoản → **Không gian làm việc**.
+2. Tài khoản **B** tự đăng ký (hệ thống **không** gửi thư mời). A thêm B bằng đúng email đó, vai
+   trò *Thành viên*.
+3. B đăng nhập ở trình duyệt thứ hai → bấm **Chuyển sang** không gian của A.
+4. B mở thẻ A vừa quét, sửa chức vụ, rồi giao thẻ cho chính mình ở panel *Theo dõi liên hệ*.
+5. A đổi vai trò B thành *Chỉ xem*. B tải lại trang và thử sửa thẻ.
+6. A gỡ B khỏi không gian. B tải lại trang.
+7. A thử tự hạ vai trò mình xuống *Thành viên*, và thử tự rời khỏi không gian.
+8. B tạo không gian riêng của mình, quét một thẻ trong đó, rồi hỏi trợ lý AI về thẻ của A.
+
+**Đạt:**
+1. Danh sách hiện đúng một không gian, vai trò *Quản trị*, `1 thành viên`.
+2. Thêm được; mời một email chưa đăng ký thì báo *"Nhờ họ đăng ký trước rồi mời lại"*.
+3. Sau khi chuyển, B thấy **đúng** danh sách thẻ, công ty và số liệu của A.
+4. Sửa được, và cột *người nhập* vẫn là A — quyền không ghi đè lịch sử.
+5. B đọc được nhưng mọi nút ghi trả `403`; dữ liệu không đổi.
+6. B nhận `409` kèm lời mời tạo không gian mới, **không** phải `403`. Thẻ B đã nhập **ở lại** với
+   tổ chức của A; người phụ trách trống ra.
+7. Cả hai bị từ chối với *"Không gian làm việc phải còn ít nhất một quản trị."*
+8. Trợ lý trả lời *không có thông tin* — không một chi tiết nào của A lọt sang.
+
 ## 4. Ghi kết quả
 
 Chép bảng này xuống cuối file mỗi lượt chạy.
@@ -172,6 +200,7 @@ Ngày: ____  ·  Người chạy: ____  ·  Commit: ____  ·  LLM_MODEL: ____
 | TS-01 |      |           |               |
 | ...   |      |           |               |
 | TS-10 |      |           |               |
+| TS-11 |      |           |               |
 ```
 
 ## 5. Ghi chú cho Q
@@ -191,7 +220,7 @@ giờ; giao diện đã kiểm riêng trên trình duyệt ở 8.8 và 10.7.
 | TS | Đạt? | Thời gian | Bug / ghi chú |
 |----|------|-----------|---------------|
 | TS-01 | — | — | Chưa chạy: cần máy sạch, làm ở lượt 2 của 11.8 |
-| TS-02 | — | — | Chưa chạy lại; lỗi `project_id` với tài khoản Workspace đã gặp 2026-09-18, ghi ở `docs/user-guide.md` mục 8 |
+| TS-02 | — | — | Chưa chạy lại; lỗi `project_id` với tài khoản Workspace đã gặp 2026-09-18, ghi ở `docs/user-guide.md` mục 9 |
 | TS-03 | ✅ | 10 s quét | Đủ trường; ô điện thoại phụ trống vẫn bị tô vàng (I-28, Q) |
 | TS-04 | ✅ | 33 s / 6 thẻ | Anh, Nhật, Hàn đều đúng |
 | TS-05 | ✅ | — | Mọi công ty mới *Chưa có hồ sơ* sau khi xác nhận |

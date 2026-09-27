@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.security import current_user
 from app.core.templates import BASE_DIR
+from app.core.workspace import ActiveWorkspace, require_workspace
 from app.models.card import BusinessCard
 from app.models.company import Company, CompanyProfile
 from app.models.kb import KBChunk, KBSourceType
 from app.models.user import User
+from app.models.workspace import Role
 from app.repositories import company as company_repo
 from app.repositories import enrich_job as job_repo
 from app.repositories.company import CompanyRow
@@ -30,7 +32,13 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+#: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
+WORKSPACE_ID = uuid.uuid4()
 OWNER = User(id=OWNER_ID, email="owner-company_api@example.com", password_hash="!")
+#: `require_workspace` tra bảng thành viên qua `get_db`, mà app nhỏ ở đây trỏ `get_db` vào
+#: `FakeSession` (không có `execute`). Ghi đè thẳng dependency: file này kiểm nghiệp vụ của
+#: router, còn việc phân giải không gian làm việc có test riêng ở `test_isolation.py`.
+ACTIVE_WORKSPACE = ActiveWorkspace(id=WORKSPACE_ID, name="Không gian test", role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -42,7 +50,11 @@ async def owner(db_session: AsyncSession) -> User:
     `FakeSession` thì không cần — vì thế fixture này không autouse.
     """
     return await make_user(
-        db_session, "owner-company_api@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+        db_session,
+        "owner-company_api@example.com",
+        "Chủ sở hữu dữ liệu test",
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
     )
 
 
@@ -63,6 +75,7 @@ def indexed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
 def make_company(**overrides: Any) -> Company:
     values: dict[str, Any] = {
         "id": COMPANY_ID,
+        "workspace_id": WORKSPACE_ID,
         "user_id": OWNER_ID,
         "display_name": "Công ty TNHH ABC",
         "name_normalized": "abc",
@@ -74,6 +87,7 @@ def make_company(**overrides: Any) -> Company:
 
 def make_card() -> BusinessCard:
     return BusinessCard(
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
         id=uuid.uuid4(),
         status="confirmed",
@@ -128,6 +142,7 @@ async def client(
 
     app.dependency_overrides[get_db] = fake_db
     app.dependency_overrides[current_user] = lambda: OWNER
+    app.dependency_overrides[require_workspace] = lambda: ACTIVE_WORKSPACE
 
     async def owned(db: Any, company_id: uuid.UUID, **_: Any) -> Company:
         return make_company(id=company_id)
@@ -196,7 +211,7 @@ async def test_list_passes_filters_and_paginates(
 
     assert response.status_code == 200
     assert received == {
-        "user_id": OWNER_ID,
+        "workspace_id": WORKSPACE_ID,
         "q": "abc",
         "has_profile": False,
         "archived": False,
@@ -222,7 +237,7 @@ async def test_list_uses_defaults(
 
     assert response.status_code == 200
     assert received == {
-        "user_id": OWNER_ID,
+        "workspace_id": WORKSPACE_ID,
         "q": None,
         "has_profile": None,
         "archived": False,
@@ -245,6 +260,7 @@ async def test_detail_with_profile_and_contacts(
 
     async def fake_profile(db: Any, company_id: uuid.UUID, **_: Any) -> CompanyProfile:
         return CompanyProfile(
+            workspace_id=WORKSPACE_ID,
             user_id=OWNER_ID,
             company_id=company_id,
             tax_code="0301234567",
@@ -333,6 +349,7 @@ async def test_contacts_unknown_company(
 
 def make_profile(**overrides: Any) -> CompanyProfile:
     values: dict[str, Any] = {
+        "workspace_id": WORKSPACE_ID,
         "user_id": OWNER_ID,
         "company_id": COMPANY_ID,
         "tax_code": "0301234567",
@@ -478,6 +495,7 @@ async def db_client(db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient
 
     app.dependency_overrides[get_db] = real_db
     app.dependency_overrides[current_user] = lambda: OWNER
+    app.dependency_overrides[require_workspace] = lambda: ACTIVE_WORKSPACE
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
@@ -487,6 +505,7 @@ async def add_company(
     db: AsyncSession, display_name: str, aliases: list[str] | None = None
 ) -> Company:
     company = Company(
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
         display_name=display_name,
         name_normalized=normalize_company_name(display_name),
@@ -499,6 +518,7 @@ async def add_company(
 
 async def add_card(db: AsyncSession, company: Company, full_name: str) -> BusinessCard:
     card = BusinessCard(
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
         image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
         image_hash=uuid.uuid4().hex * 2,
@@ -513,7 +533,10 @@ async def add_card(db: AsyncSession, company: Company, full_name: str) -> Busine
 
 async def add_profile(db: AsyncSession, company: Company, **values: Any) -> CompanyProfile:
     profile = CompanyProfile(
-        user_id=OWNER_ID, company_id=company.id, **{"status": "generated", **values}
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        company_id=company.id,
+        **{"status": "generated", **values},
     )
     db.add(profile)
     await db.flush()
@@ -680,7 +703,7 @@ SOURCED = {"tax_code": [{"url": "https://masothue.com/0101248141"}]}
 async def add_kb_chunk(db: AsyncSession, company: Company) -> None:
     db.add(
         KBChunk(
-            user_id=OWNER_ID,
+            workspace_id=WORKSPACE_ID,
             source_type=KBSourceType.COMPANY_PROFILE.value,
             source_id=company.id,
             content="Hồ sơ FPT",
@@ -819,6 +842,7 @@ async def test_db_detail_lists_same_tax_code_and_same_domain(
     ):
         db_session.add(
             BusinessCard(
+                workspace_id=WORKSPACE_ID,
                 user_id=OWNER_ID,
                 image_path=f"test/{uuid.uuid4().hex[:8]}.jpg",
                 image_hash=uuid.uuid4().hex * 2,

@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import CurrentUser
+from app.core.workspace import WriterWorkspace
 from app.repositories import kb as kb_repo
 from app.schemas.kb import ReindexOut, ReindexScope
 from app.services import embeddings, kb
@@ -55,13 +55,17 @@ _reindex_lock = asyncio.Lock()
 @router.post("/reindex", response_model=ReindexOut)
 async def reindex(
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: CurrentUser,
+    workspace: WriterWorkspace,
     scope: Annotated[
         ReindexScope | None,
         Query(description="Chỉ index một loại nguồn. Bỏ trống = cả danh thiếp lẫn hồ sơ DN."),
     ] = None,
 ) -> ReindexOut:
     """Nhúng lại toàn bộ KB từ dữ liệu đang có trong DB.
+
+    Không nhận `CurrentUser`: từ `NEXT-05` phạm vi index là **không gian làm việc**, mà
+    `CurrentWorkspace` đã đòi đăng nhập rồi — giữ thêm một tham số không ai đọc chỉ mời gọi
+    ai đó lại index theo `user.id`, đúng cái lỗi vừa sửa ở đây.
 
     Chỉ lấy danh thiếp **đã xác nhận** và hồ sơ **generated/verified** — xem
     `repositories/kb.py::INDEXABLE_CARD_STATUSES`. Nguồn nào không còn trường nào có nội dung
@@ -86,11 +90,11 @@ async def reindex(
                 cards = chunks = skipped = 0
                 profiles = 0
                 if scope in (None, ReindexScope.CARD):
-                    cards, written, missing = await _reindex_cards(db, http, user.id)
+                    cards, written, missing = await _reindex_cards(db, http, workspace.id)
                     chunks += written
                     skipped += missing
                 if scope in (None, ReindexScope.COMPANY_PROFILE):
-                    profiles, written, missing = await _reindex_profiles(db, http, user.id)
+                    profiles, written, missing = await _reindex_profiles(db, http, workspace.id)
                     chunks += written
                     skipped += missing
         except EmbedderUnavailableError as exc:
@@ -106,7 +110,7 @@ async def reindex(
             await db.commit()
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        total_chunks = await kb_repo.count_chunks(db, user_id=user.id)
+        total_chunks = await kb_repo.count_chunks(db, workspace_id=workspace.id)
         logger.info(
             "Reindex KB: %d danh thiếp + %d hồ sơ → %d chunk (%d bỏ qua) trong %dms",
             cards,
@@ -127,7 +131,7 @@ async def reindex(
 
 
 async def _reindex_cards(
-    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+    db: AsyncSession, http: httpx.AsyncClient, workspace_id: uuid.UUID
 ) -> tuple[int, int, int]:
     """Duyệt hết danh thiếp đã xác nhận. Trả `(số nguồn, số chunk, số nguồn rỗng)`.
 
@@ -138,7 +142,7 @@ async def _reindex_cards(
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.card_batch(db, user_id=user_id, after=after)
+        rows = await kb_repo.card_batch(db, workspace_id=workspace_id, after=after)
         if not rows:
             break
         documents = [
@@ -159,14 +163,14 @@ async def _reindex_cards(
 
 
 async def _reindex_profiles(
-    db: AsyncSession, http: httpx.AsyncClient, user_id: uuid.UUID
+    db: AsyncSession, http: httpx.AsyncClient, workspace_id: uuid.UUID
 ) -> tuple[int, int, int]:
     """Duyệt hết hồ sơ DN đã sinh xong. Trả `(số nguồn, số chunk, số nguồn rỗng)`."""
     after: uuid.UUID | None = None
     sources = written = empty = 0
 
     for _ in range(MAX_BATCHES):
-        rows = await kb_repo.profile_batch(db, user_id=user_id, after=after)
+        rows = await kb_repo.profile_batch(db, workspace_id=workspace_id, after=after)
         if not rows:
             break
         documents = [kb.build_profile_document(company, profile) for profile, company in rows]

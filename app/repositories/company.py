@@ -47,10 +47,10 @@ async def get_company(db: AsyncSession, company_id: uuid.UUID) -> Company | None
 
 
 async def get_owned_company(
-    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, company_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> Company | None:
     return await db.scalar(
-        select(Company).where(Company.id == company_id, Company.user_id == user_id)
+        select(Company).where(Company.id == company_id, Company.workspace_id == workspace_id)
     )
 
 
@@ -59,10 +59,10 @@ async def get_profile(db: AsyncSession, company_id: uuid.UUID) -> CompanyProfile
 
 
 async def get_company_row(
-    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, company_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> CompanyRow | None:
     result = await db.execute(
-        _company_rows().where(Company.id == company_id, Company.user_id == user_id)
+        _company_rows().where(Company.id == company_id, Company.workspace_id == workspace_id)
     )
     row = result.tuples().one_or_none()
     return _to_company_row(*row) if row else None
@@ -71,7 +71,7 @@ async def get_company_row(
 async def list_companies(
     db: AsyncSession,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     q: str | None = None,
     has_profile: bool | None = None,
     archived: bool = False,
@@ -79,7 +79,7 @@ async def list_companies(
     size: int = 20,
 ) -> tuple[list[CompanyRow], int]:
     conditions = [
-        Company.user_id == user_id,
+        Company.workspace_id == workspace_id,
         *_list_conditions(q=q, has_profile=has_profile, archived=archived),
     ]
     size = max(1, min(size, MAX_PAGE_SIZE))
@@ -128,7 +128,11 @@ async def save_profile(
     )
 
     statement = insert(CompanyProfile).values(
-        id=uuid.uuid4(), company_id=company_id, user_id=_owner_of(company_id), **values
+        id=uuid.uuid4(),
+        company_id=company_id,
+        workspace_id=_workspace_of(company_id),
+        user_id=_creator_of(company_id),
+        **values,
     )
     statement = statement.on_conflict_do_update(
         constraint="uq_company_profiles_company_id",
@@ -182,7 +186,7 @@ async def record_change(
     db: AsyncSession, company_id: uuid.UUID, payload: dict[str, Any], *, notable: bool
 ) -> ProfileChange:
     change = ProfileChange(
-        user_id=await db.scalar(select(Company.user_id).where(Company.id == company_id)),
+        workspace_id=await db.scalar(select(Company.workspace_id).where(Company.id == company_id)),
         company_id=company_id,
         changes=payload,
         notable=notable,
@@ -193,7 +197,7 @@ async def record_change(
 
 
 async def stale_profiles(
-    db: AsyncSession, *, user_id: uuid.UUID, before: datetime, limit: int = 50
+    db: AsyncSession, *, workspace_id: uuid.UUID, before: datetime, limit: int = 50
 ) -> Sequence[tuple[Company, datetime | None]]:
     """Công ty có hồ sơ hoàn chỉnh mà **lâu rồi chưa đi tra lại**, cũ nhất trước.
 
@@ -205,7 +209,7 @@ async def stale_profiles(
         select(Company, checked.label("checked_at"))
         .join(CompanyProfile, CompanyProfile.company_id == Company.id)
         .where(
-            Company.user_id == user_id,
+            Company.workspace_id == workspace_id,
             CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES),
             or_(checked.is_(None), checked < _naive_utc(before)),
         )
@@ -216,13 +220,13 @@ async def stale_profiles(
 
 
 async def list_changes(
-    db: AsyncSession, *, user_id: uuid.UUID, unseen_only: bool = True, limit: int = 50
+    db: AsyncSession, *, workspace_id: uuid.UUID, unseen_only: bool = True, limit: int = 50
 ) -> Sequence[tuple[ProfileChange, str]]:
     """Nhật ký thay đổi kèm tên công ty. Đáng chú ý trước, rồi mới nhất trước."""
     stmt = (
         select(ProfileChange, Company.display_name)
         .join(Company, Company.id == ProfileChange.company_id)
-        .where(ProfileChange.user_id == user_id)
+        .where(ProfileChange.workspace_id == workspace_id)
     )
     if unseen_only:
         stmt = stmt.where(ProfileChange.acknowledged_at.is_(None))
@@ -233,12 +237,12 @@ async def list_changes(
 
 
 async def acknowledge_change(
-    db: AsyncSession, change_id: uuid.UUID, *, user_id: uuid.UUID, at: datetime
+    db: AsyncSession, change_id: uuid.UUID, *, workspace_id: uuid.UUID, at: datetime
 ) -> bool:
     change = await db.scalar(
         select(ProfileChange).where(
             ProfileChange.id == change_id,
-            ProfileChange.user_id == user_id,
+            ProfileChange.workspace_id == workspace_id,
             ProfileChange.acknowledged_at.is_(None),
         )
     )
@@ -255,24 +259,36 @@ async def ensure_draft_profile(db: AsyncSession, company_id: uuid.UUID) -> None:
         .values(
             id=uuid.uuid4(),
             company_id=company_id,
-            user_id=_owner_of(company_id),
+            workspace_id=_workspace_of(company_id),
+            user_id=_creator_of(company_id),
             status=ProfileStatus.DRAFT.value,
         )
         .on_conflict_do_nothing(constraint="uq_company_profiles_company_id")
     )
 
 
-def _owner_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
-    """`SELECT user_id FROM companies WHERE id = :company_id` — chủ sở hữu của hồ sơ sắp ghi.
+def _workspace_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
+    """`SELECT workspace_id FROM companies WHERE id = :company_id` — phạm vi của hồ sơ sắp ghi.
 
-    ⚠️ **Q thêm hàm này ở task 12.5 trong file của T** (luật nới D12, quy ước 2 — T review PR).
-    Chỉ để hai câu `INSERT` ở trên **ghi được**: `company_profiles.user_id` là `NOT NULL` từ
-    revision `0005`, nên thiếu nó thì luồng enrich của F2 chết ngay ở bước tạo hồ sơ nháp.
-    **Phần lọc theo `user_id` khi ĐỌC vẫn là task 12.6 của T** — ở đây không chạm câu `SELECT` nào.
+    ⚠️ **Q thêm hàm này ở task 12.5 trong file của T** (luật nới D12, quy ước 2 — T review PR),
+    khi đó nó còn lấy `user_id`. `NEXT-05` đổi nó sang `workspace_id`; ý tưởng giữ nguyên.
 
-    Lấy bằng truy vấn con thay vì thêm tham số `user_id`: chữ ký hai hàm không đổi nên không chỗ
-    gọi nào của T phải sửa, và **không có đường nào ghi một hồ sơ thuộc người khác với công ty
-    của nó** — điều mà một tham số truyền tay thì luôn có thể làm sai.
+    Chỉ để hai câu `INSERT` ở trên **ghi được**: `company_profiles.workspace_id` là `NOT NULL` từ
+    revision `0015`, nên thiếu nó thì luồng enrich của F2 chết ngay ở bước tạo hồ sơ nháp.
+
+    Lấy bằng truy vấn con thay vì thêm tham số: chữ ký hai hàm không đổi nên không chỗ gọi nào
+    phải sửa, và **không có đường nào ghi một hồ sơ thuộc không gian khác với công ty của nó** —
+    điều mà một tham số truyền tay thì luôn có thể làm sai.
+    """
+    return select(Company.workspace_id).where(Company.id == company_id).scalar_subquery()
+
+
+def _creator_of(company_id: uuid.UUID) -> ScalarSelect[uuid.UUID]:
+    """Người tạo công ty — đi vào `company_profiles.user_id`, vẫn `NOT NULL` từ `0005`.
+
+    `NEXT-05` đổi *phạm vi* của hồ sơ sang `workspace_id`, nhưng cột người tạo vẫn ở lại:
+    nó không còn dùng để lọc dữ liệu, chỉ để biết hồ sơ này ra đời từ tay ai. Hồ sơ do máy
+    sinh thì lấy người đã tạo công ty, vì đó là dấu vết gần nhất còn thật.
     """
     return select(Company.user_id).where(Company.id == company_id).scalar_subquery()
 
@@ -353,7 +369,7 @@ def restored_status(profile: CompanyProfile) -> ProfileStatus:
 
 
 async def same_tax_code(
-    db: AsyncSession, company_id: uuid.UUID, tax_code: str | None, *, user_id: uuid.UUID
+    db: AsyncSession, company_id: uuid.UUID, tax_code: str | None, *, workspace_id: uuid.UUID
 ) -> Sequence[Company]:
     code = (tax_code or "").strip()
     if not code:
@@ -362,7 +378,7 @@ async def same_tax_code(
         select(Company)
         .join(CompanyProfile, CompanyProfile.company_id == Company.id)
         .where(
-            Company.user_id == user_id,
+            Company.workspace_id == workspace_id,
             func.trim(CompanyProfile.tax_code) == code,
             Company.id != company_id,
         )
@@ -372,11 +388,11 @@ async def same_tax_code(
 
 
 async def same_domain(
-    db: AsyncSession, company_id: uuid.UUID, *, user_id: uuid.UUID
+    db: AsyncSession, company_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> list[tuple[Company, list[str]]]:
     rows = await db.execute(
         select(BusinessCard.company_id, BusinessCard.email, BusinessCard.website).where(
-            BusinessCard.user_id == user_id, BusinessCard.company_id.is_not(None)
+            BusinessCard.workspace_id == workspace_id, BusinessCard.company_id.is_not(None)
         )
     )
     domains: dict[uuid.UUID, set[str]] = {}
@@ -395,7 +411,7 @@ async def same_domain(
         return []
     companies = await db.scalars(
         select(Company)
-        .where(Company.user_id == user_id, Company.id.in_(shared))
+        .where(Company.workspace_id == workspace_id, Company.id.in_(shared))
         .order_by(Company.display_name, Company.id)
     )
     return [(company, shared[company.id]) for company in companies]

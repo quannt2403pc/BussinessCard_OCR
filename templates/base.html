@@ -139,6 +139,12 @@
             <a href="/account" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("user", "sm") }} Tài khoản
             </a>
+            {# NEXT-05 (T, Q review): một dòng duy nhất T thêm vào file của Q. Đặt trong menu tài
+               khoản chứ không lên nav: đổi không gian làm việc là việc vài tuần một lần, còn nav
+               giữ đúng 3 mục theo EX-09. #}
+            <a href="/workspaces" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
+              {{ icon("users", "sm") }} Không gian làm việc
+            </a>
             <a href="/docs" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("file", "sm") }} API
             </a>

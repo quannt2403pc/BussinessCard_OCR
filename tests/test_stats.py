@@ -9,9 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.templates import BASE_DIR
+from app.core.workspace import ActiveWorkspace
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.user import User
+from app.models.workspace import Role
 from app.routers import stats
 from tests.conftest import make_user
 
@@ -19,6 +21,11 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. Test ở đây không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+#: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
+WORKSPACE_ID = uuid.uuid4()
+#: Không gian ấy dưới dạng dependency đã phân giải — `get_stats()` nhận thẳng nó từ
+#: `NEXT-05`, vì số liệu là của **tổ chức**, không phải của người đang xem.
+ACTIVE_WORKSPACE = ActiveWorkspace(id=WORKSPACE_ID, name="Không gian test", role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -30,7 +37,11 @@ async def owner(db_session: AsyncSession) -> User:
     `FakeSession` thì không cần — vì thế fixture này không autouse.
     """
     return await make_user(
-        db_session, "owner-stats@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+        db_session,
+        "owner-stats@example.com",
+        "Chủ sở hữu dữ liệu test",
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
     )
 
 
@@ -46,6 +57,7 @@ async def page_client() -> AsyncIterator[httpx.AsyncClient]:
 
 def card(status: CardStatus) -> BusinessCard:
     return BusinessCard(
+        workspace_id=WORKSPACE_ID,
         user_id=OWNER_ID,
         image_path=f"stats/{uuid.uuid4().hex[:8]}.jpg",
         image_hash=uuid.uuid4().hex * 2,
@@ -67,8 +79,20 @@ async def test_dashboard_redirects_to_home(page_client: httpx.AsyncClient) -> No
 async def test_stats_counts_cards_companies_and_profiles(
     db_session: AsyncSession, owner: User
 ) -> None:
-    company = Company(user_id=OWNER_ID, id=uuid.uuid4(), display_name="ABC", name_normalized="abc")
-    other = Company(user_id=OWNER_ID, id=uuid.uuid4(), display_name="XYZ", name_normalized="xyz")
+    company = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        id=uuid.uuid4(),
+        display_name="ABC",
+        name_normalized="abc",
+    )
+    other = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        id=uuid.uuid4(),
+        display_name="XYZ",
+        name_normalized="xyz",
+    )
     db_session.add_all([company, other])
     await db_session.flush()
     db_session.add_all(
@@ -78,18 +102,21 @@ async def test_stats_counts_cards_companies_and_profiles(
             card(CardStatus.NEEDS_REVIEW),
             card(CardStatus.PENDING),
             CompanyProfile(
+                workspace_id=WORKSPACE_ID,
                 user_id=OWNER_ID,
                 company_id=company.id,
                 status="generated",
                 generated_at=datetime.now(UTC),
             ),
             # Hồ sơ `draft` là lượt đang chạy dở, chưa phải hồ sơ thật → không được đếm.
-            CompanyProfile(user_id=OWNER_ID, company_id=other.id, status="draft"),
+            CompanyProfile(
+                workspace_id=WORKSPACE_ID, user_id=OWNER_ID, company_id=other.id, status="draft"
+            ),
         ]
     )
     await db_session.flush()
 
-    result = await stats.get_stats(db_session, owner)
+    result = await stats.get_stats(db_session, owner, ACTIVE_WORKSPACE)
 
     assert result.total_cards == 4
     assert result.confirmed_cards == 2
@@ -100,7 +127,7 @@ async def test_stats_counts_cards_companies_and_profiles(
 
 
 async def test_stats_on_empty_database(db_session: AsyncSession, owner: User) -> None:
-    result = await stats.get_stats(db_session, owner)
+    result = await stats.get_stats(db_session, owner, ACTIVE_WORKSPACE)
 
     # Chia cho 0 là lỗi duy nhất mà endpoint này có thể tự gây ra.
     assert result.review_rate == 0.0

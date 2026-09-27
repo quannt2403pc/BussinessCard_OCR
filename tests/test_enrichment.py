@@ -34,6 +34,8 @@ from tests.conftest import make_user
 #: trên cả 6 bảng dữ liệu, nên object ORM nào ghi xuống DB cũng phải có nó. File này không
 #: kiểm việc tách dữ liệu (đó là 12.6/12.7 của T) nên một chủ sở hữu duy nhất là đủ.
 OWNER_ID = uuid.uuid4()
+#: Không gian của `OWNER_ID` (task NEXT-05) — khoá tách dữ liệu của mọi bản ghi ở đây.
+WORKSPACE_ID = uuid.uuid4()
 
 
 @pytest.fixture
@@ -45,7 +47,11 @@ async def owner(db_session: AsyncSession) -> User:
     `FakeSession` thì không cần — vì thế fixture này không autouse.
     """
     return await make_user(
-        db_session, "owner-enrichment@example.com", "Chủ sở hữu dữ liệu test", user_id=OWNER_ID
+        db_session,
+        "owner-enrichment@example.com",
+        "Chủ sở hữu dữ liệu test",
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
     )
 
 
@@ -281,6 +287,7 @@ async def test_resolve_redirects() -> None:
 def test_build_hints() -> None:
     cards = [
         BusinessCard(
+            workspace_id=WORKSPACE_ID,
             user_id=OWNER_ID,
             website="https://abc.vn",
             email="an@abc.vn",
@@ -289,6 +296,7 @@ def test_build_hints() -> None:
             language_detected="vi",
         ),
         BusinessCard(
+            workspace_id=WORKSPACE_ID,
             user_id=OWNER_ID,
             email="binh@gmail.com",
             address="1  Lê Lợi, Q1",
@@ -437,7 +445,12 @@ async def saved_profiles(db: AsyncSession, company: Company) -> list[CompanyProf
 
 
 async def add_company(db: AsyncSession) -> Company:
-    company = Company(user_id=OWNER_ID, display_name="Công ty TNHH ABC", name_normalized="abc")
+    company = Company(
+        workspace_id=WORKSPACE_ID,
+        user_id=OWNER_ID,
+        display_name="Công ty TNHH ABC",
+        name_normalized="abc",
+    )
     db.add(company)
     await db.flush()
     return company
@@ -494,6 +507,7 @@ async def test_db_regenerate_overwrites_manual_edit_in_place(
     company = await add_company(db_session)
     db_session.add(
         CompanyProfile(
+            workspace_id=WORKSPACE_ID,
             user_id=OWNER_ID,
             company_id=company.id,
             tax_code="0309999999",

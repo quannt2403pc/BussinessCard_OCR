@@ -21,7 +21,7 @@ from app.routers import kb as kb_router
 from app.services import enrich_jobs, retriever
 from app.services.company_matching import upsert_company
 from app.services.normalize_company import normalize_company_name
-from tests.conftest import CliProxyStub
+from tests.conftest import CliProxyStub, active_workspace_of, workspace_id_of
 
 ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
 
@@ -32,15 +32,24 @@ SHARED_DOMAIN = "shared-group.vn"
 
 @dataclass(frozen=True)
 class Tenant:
+    """Một **không gian làm việc** có dữ liệu, kèm một người dùng trong đó.
+
+    Trước `NEXT-05` đây là "một người dùng có dữ liệu". Đổi tên trường chứ không đổi ý: ranh giới
+    mà cả file này canh gác nay là `workspace_id`, còn `user` chỉ là người đăng nhập để gọi API.
+    """
+
     user: User
+    workspace_id: uuid.UUID
     card: BusinessCard
     company: Company
     profile: CompanyProfile
 
 
 async def seed_tenant(db: AsyncSession, user: User, company_name: str, person: str) -> Tenant:
+    workspace_id = await workspace_id_of(db, user)
     company = Company(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         display_name=company_name,
         name_normalized=normalize_company_name(company_name),
@@ -50,6 +59,7 @@ async def seed_tenant(db: AsyncSession, user: User, company_name: str, person: s
     await db.flush()
     profile = CompanyProfile(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         company_id=company.id,
         legal_name=company_name,
@@ -63,6 +73,7 @@ async def seed_tenant(db: AsyncSession, user: User, company_name: str, person: s
     )
     card = BusinessCard(
         id=uuid.uuid4(),
+        workspace_id=workspace_id,
         user_id=user.id,
         image_path=f"isolation/{uuid.uuid4().hex[:8]}.jpg",
         image_hash=uuid.uuid4().hex * 2,
@@ -78,8 +89,8 @@ async def seed_tenant(db: AsyncSession, user: User, company_name: str, person: s
     )
     db.add_all([profile, card])
     await db.flush()
-    await kb_router.reindex(db, user)
-    return Tenant(user, card, company, profile)
+    await kb_router.reindex(db, await active_workspace_of(db, user))
+    return Tenant(user, workspace_id, card, company, profile)
 
 
 @pytest.fixture
@@ -118,7 +129,7 @@ def leaked(text: str, other: Tenant) -> list[str]:
         ("DELETE", "/api/cards/{card}", None),
     ],
 )
-async def test_other_users_card_is_404(
+async def test_another_workspaces_card_is_404(
     db_session: AsyncSession,
     app_client: ClientFactory,
     tenants: tuple[Tenant, Tenant],
@@ -147,7 +158,7 @@ async def test_other_users_card_is_404(
         ("PATCH", "/api/companies/{company}/profile", {"tax_code": "0399999999"}),
     ],
 )
-async def test_other_users_company_is_404(
+async def test_another_workspaces_company_is_404(
     db_session: AsyncSession,
     app_client: ClientFactory,
     tenants: tuple[Tenant, Tenant],
@@ -172,7 +183,7 @@ async def test_other_users_company_is_404(
     assert items == 0
 
 
-async def test_enrich_batch_rejects_other_users_company(
+async def test_enrich_batch_rejects_another_workspaces_company(
     db_session: AsyncSession,
     app_client: ClientFactory,
     tenants: tuple[Tenant, Tenant],
@@ -191,7 +202,7 @@ async def test_enrich_batch_rejects_other_users_company(
     assert await db_session.scalar(select(func.count()).select_from(EnrichJobItem)) == 0
 
 
-async def test_other_users_enrich_job_is_404(
+async def test_another_workspaces_enrich_job_is_404(
     db_session: AsyncSession, app_client: ClientFactory, tenants: tuple[Tenant, Tenant]
 ) -> None:
     a, b = tenants
@@ -243,7 +254,7 @@ async def test_own_list_still_shows_own_data(
     assert str(a.card.id) in json.dumps(cards)
 
 
-async def test_related_companies_never_cross_users(
+async def test_related_companies_never_cross_workspaces(
     app_client: ClientFactory, tenants: tuple[Tenant, Tenant]
 ) -> None:
     a, b = tenants
@@ -260,7 +271,11 @@ async def test_stats_count_only_own_data(
 ) -> None:
     a, _ = tenants
     extra = Company(
-        id=uuid.uuid4(), user_id=a.user.id, display_name="Công ty phụ", name_normalized="phu"
+        id=uuid.uuid4(),
+        workspace_id=a.workspace_id,
+        user_id=a.user.id,
+        display_name="Công ty phụ",
+        name_normalized="phu",
     )
     db_session.add(extra)
     await db_session.flush()
@@ -317,7 +332,7 @@ async def own_chunk(db: AsyncSession, tenant: Tenant, source_type: str) -> str:
     rows = await kb_repo.search_similar(
         db,
         [0.0] * settings.embedding_dim,
-        user_id=tenant.user.id,
+        workspace_id=tenant.workspace_id,
         top_k=1,
         source_type=source_type,
     )
@@ -327,14 +342,14 @@ async def own_chunk(db: AsyncSession, tenant: Tenant, source_type: str) -> str:
 @pytest.mark.parametrize(
     "source_type", [KBSourceType.CARD.value, KBSourceType.COMPANY_PROFILE.value]
 )
-async def test_retrieval_never_returns_other_users_chunks(
+async def test_retrieval_never_returns_another_workspaces_chunks(
     db_session: AsyncSession, tenants: tuple[Tenant, Tenant], source_type: str
 ) -> None:
     a, b = tenants
     question = await own_chunk(db_session, b, source_type)
 
-    hits_a = await retriever.search(db_session, question, user_id=a.user.id)
-    hits_b = await retriever.search(db_session, question, user_id=b.user.id)
+    hits_a = await retriever.search(db_session, question, workspace_id=a.workspace_id)
+    hits_b = await retriever.search(db_session, question, workspace_id=b.workspace_id)
 
     other_sources = {b.card.id, b.company.id}
     assert [hit for hit in hits_a if hit.source_id in other_sources] == []
@@ -366,7 +381,7 @@ def model_calls(cliproxy: CliProxyStub) -> list[str]:
     ]
 
 
-async def test_assistant_has_no_information_about_other_users_company(
+async def test_assistant_has_no_information_about_another_workspaces_company(
     app_client: ClientFactory, tenants: tuple[Tenant, Tenant], cliproxy: CliProxyStub
 ) -> None:
     a, b = tenants
@@ -400,7 +415,7 @@ async def test_assistant_answers_the_owner_the_same_question(
     assert body["citations"]
 
 
-async def test_prompt_never_carries_other_users_chunks(
+async def test_prompt_never_carries_another_workspaces_chunks(
     app_client: ClientFactory,
     db_session: AsyncSession,
     tenants: tuple[Tenant, Tenant],
@@ -424,7 +439,7 @@ async def test_prompt_never_carries_other_users_chunks(
     )
 
 
-async def test_other_users_chat_session_is_404(
+async def test_another_workspaces_chat_session_is_404(
     app_client: ClientFactory,
     db_session: AsyncSession,
     tenants: tuple[Tenant, Tenant],
@@ -448,10 +463,39 @@ async def test_other_users_chat_session_is_404(
 
 
 async def test_same_company_name_creates_separate_companies(
-    db_session: AsyncSession, user_a: User, user_b: User
+    db_session: AsyncSession,
+    user_a: User,
+    workspace_a: uuid.UUID,
+    user_b: User,
+    workspace_b: uuid.UUID,
 ) -> None:
-    first = await upsert_company(db_session, "Công ty CP Sữa Việt Nam", user_id=user_a.id)
-    second = await upsert_company(db_session, "CÔNG TY CỔ PHẦN SỮA VIỆT NAM", user_id=user_b.id)
-    again = await upsert_company(db_session, "Công ty CP Sữa Việt Nam", user_id=user_a.id)
+    """Hai **không gian** gõ cùng một tên công ty thì ra hai bản ghi, không gộp vào nhau."""
+    first = await upsert_company(
+        db_session, "Công ty CP Sữa Việt Nam", workspace_id=workspace_a, user_id=user_a.id
+    )
+    second = await upsert_company(
+        db_session, "CÔNG TY CỔ PHẦN SỮA VIỆT NAM", workspace_id=workspace_b, user_id=user_b.id
+    )
+    again = await upsert_company(
+        db_session, "Công ty CP Sữa Việt Nam", workspace_id=workspace_a, user_id=user_a.id
+    )
     assert first != second
     assert again == first
+
+
+async def test_same_company_name_inside_one_workspace_is_one_row(
+    db_session: AsyncSession, user_a: User, workspace_a: uuid.UUID, teammate: User
+) -> None:
+    """Vế *cùng nhau* của A9′: hai người **một không gian** gõ cùng tên thì chỉ một bản ghi.
+
+    Ca này A9 cũ không thể có, và nó là nửa dễ hỏng nhất khi đổi khoá: chỉ cần `upsert_company()`
+    còn sót một chỗ lọc theo `user_id` là mỗi thành viên lại đẻ ra một công ty trùng tên, và
+    danh sách công ty của tổ chức thành một đống bản sao.
+    """
+    mine = await upsert_company(
+        db_session, "Công ty CP Sữa Việt Nam", workspace_id=workspace_a, user_id=user_a.id
+    )
+    theirs = await upsert_company(
+        db_session, "CÔNG TY CỔ PHẦN SỮA VIỆT NAM", workspace_id=workspace_a, user_id=teammate.id
+    )
+    assert mine == theirs

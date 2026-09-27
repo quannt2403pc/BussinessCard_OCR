@@ -47,9 +47,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401  — nạp đủ bảng vào Base.metadata trước khi create_all
+from app.core import workspace as workspace_dep
 from app.core.config import settings
 from app.core.db import Base, get_db
+from app.core.workspace import ActiveWorkspace
 from app.models.user import User
+from app.models.workspace import Role, Workspace, WorkspaceMember
 from app.services import auth
 
 # Windows: Python 3.12 mặc định dùng `ProactorEventLoop`, mà psycopg v3 ở chế độ async **không
@@ -202,6 +205,8 @@ async def make_user(
     *,
     user_id: uuid.UUID | None = None,
     connected: bool = True,
+    workspace_id: uuid.UUID | None = None,
+    role: str = Role.MEMBER,
 ) -> User:
     """Một người dùng thật trong DB, mật khẩu là `TEST_PASSWORD`.
 
@@ -211,6 +216,10 @@ async def make_user(
 
     `connected` (task 13.2): mặc định người dùng đã có credential CLIProxy riêng, vì từ 13.2 mọi
     lời gọi LLM đi bằng tên model có tiền tố của đúng người đó.
+
+    **Từ `NEXT-05` mỗi người dùng mới đi kèm một không gian làm việc riêng**, đúng như revision
+    `0015` làm với dữ liệu đang có: người dùng không thuộc không gian nào thì mọi endpoint trả
+    `409`, và gần như mọi test sẽ đỏ vì một lý do chẳng liên quan gì tới nó.
     """
     user = User(
         id=user_id or uuid.uuid4(),
@@ -221,7 +230,57 @@ async def make_user(
     )
     db.add(user)
     await db.flush()
+    if workspace_id is None:
+        await make_workspace(db, display_name or email, owner=user)
+    elif await db.get(Workspace, workspace_id) is None:
+        # Nhiều file test khai sẵn một hằng id ở tầng module rồi dựng object ORM quanh nó
+        # (`OWNER_ID`, `WORKSPACE_ID`). Tạo hộ không gian ấy nếu chưa có, để mỗi file chỉ phải
+        # thêm đúng một tham số thay vì dựng tay cả không gian lẫn tư cách thành viên.
+        await make_workspace(db, display_name or email, owner=user, workspace_id=workspace_id)
+    else:
+        await join_workspace(db, workspace_id, user, role=role)
+    await db.refresh(user)
     return user
+
+
+async def make_workspace(
+    db: AsyncSession, name: str, *, owner: User, workspace_id: uuid.UUID | None = None
+) -> Workspace:
+    """Một không gian làm việc thật, `owner` là quản trị và nó thành không gian đang mở của họ."""
+    workspace = Workspace(id=workspace_id or uuid.uuid4(), name=name)
+    db.add(workspace)
+    await db.flush()
+    await join_workspace(db, workspace.id, owner, role=Role.ADMIN)
+    return workspace
+
+
+async def join_workspace(
+    db: AsyncSession, workspace_id: uuid.UUID, user: User, *, role: str = Role.MEMBER
+) -> WorkspaceMember:
+    member = WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role=role)
+    db.add(member)
+    user.active_workspace_id = workspace_id
+    await db.flush()
+    return member
+
+
+async def workspace_id_of(db: AsyncSession, user: User) -> uuid.UUID:
+    """Không gian đang mở của một người dùng — thứ mọi test cần để dựng dữ liệu."""
+    await db.refresh(user)
+    assert user.active_workspace_id is not None
+    return user.active_workspace_id
+
+
+async def active_workspace_of(db: AsyncSession, user: User) -> ActiveWorkspace:
+    """`ActiveWorkspace` thật của một người dùng, cho test gọi thẳng hàm router.
+
+    Đi qua `workspace.resolve()` chứ không tự dựng dataclass: vai trò trong đó là vai trò thật
+    đọc từ bảng thành viên, nên test gọi trực tiếp không vô tình chạy với quyền mà DB không cho.
+    """
+    await db.refresh(user)
+    active = await workspace_dep.resolve(db, user)
+    assert active is not None, "Người dùng test chưa ở không gian nào"
+    return active
 
 
 @pytest.fixture
@@ -232,8 +291,53 @@ async def user_a(db_session: AsyncSession) -> User:
 
 @pytest.fixture
 async def user_b(db_session: AsyncSession) -> User:
-    """Người dùng B — dùng cho các ca tách dữ liệu của task 12.7 (tiêu chí A9)."""
+    """Người dùng B — **không gian riêng**, dùng cho vế *cách nhau* của A9′ (`NEXT-05`)."""
     return await make_user(db_session, "b@example.com", "Người dùng B")
+
+
+@pytest.fixture
+async def workspace_a(db_session: AsyncSession, user_a: User) -> uuid.UUID:
+    """Không gian của A — khoá dựng dữ liệu cho phần lớn test."""
+    return await workspace_id_of(db_session, user_a)
+
+
+@pytest.fixture
+async def workspace_b(db_session: AsyncSession, user_b: User) -> uuid.UUID:
+    return await workspace_id_of(db_session, user_b)
+
+
+@pytest.fixture
+async def active_a(db_session: AsyncSession, user_a: User) -> ActiveWorkspace:
+    """Không gian của A dưới dạng `ActiveWorkspace` — cho test gọi thẳng hàm router."""
+    return await active_workspace_of(db_session, user_a)
+
+
+@pytest.fixture
+async def teammate(db_session: AsyncSession, user_a: User) -> User:
+    """Người thứ hai **trong cùng không gian với A**, vai trò `member`.
+
+    Đây là thứ A9 cũ không có và A9′ bắt buộc phải có: luật mới sai được theo **cả hai** chiều,
+    nên phải kiểm cả *cách nhau* lẫn *cùng nhau*.
+    """
+    return await make_user(
+        db_session,
+        "teammate@example.com",
+        "Đồng nghiệp",
+        workspace_id=await workspace_id_of(db_session, user_a),
+        role=Role.MEMBER,
+    )
+
+
+@pytest.fixture
+async def viewer(db_session: AsyncSession, user_a: User) -> User:
+    """Người *chỉ xem* trong cùng không gian với A."""
+    return await make_user(
+        db_session,
+        "viewer@example.com",
+        "Chỉ xem",
+        workspace_id=await workspace_id_of(db_session, user_a),
+        role=Role.VIEWER,
+    )
 
 
 class _SessionHandle:

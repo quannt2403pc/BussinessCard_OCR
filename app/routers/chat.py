@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import CurrentUser
+from app.core.workspace import CurrentWorkspace
 from app.models.chat import ChatRole
 from app.repositories import chat as chat_repo
 from app.schemas.chat import (
@@ -78,6 +79,7 @@ async def chat(
     payload: ChatIn,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
+    workspace: CurrentWorkspace,
 ) -> ChatOut:
     """Hỏi trợ lý: truy hồi KB → dựng ngữ cảnh → gọi Gemini Flash → trả lời kèm trích dẫn.
 
@@ -89,14 +91,14 @@ async def chat(
     session = None
 
     if payload.session_id is not None:
-        session = await chat_repo.get_session(db, payload.session_id, user_id=user.id)
+        session = await chat_repo.get_session(db, payload.session_id, workspace_id=workspace.id)
         if session is None:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 detail=f"Không có phiên hội thoại {payload.session_id}.",
             )
         rows = await chat_repo.recent_messages(
-            db, session.id, user_id=user.id, limit=assistant.HISTORY_TURNS
+            db, session.id, workspace_id=workspace.id, limit=assistant.HISTORY_TURNS
         )
         history = [Turn(role=row.role, content=row.content) for row in rows]
 
@@ -104,6 +106,7 @@ async def chat(
         result = await assistant.answer(
             db,
             payload.question,
+            workspace_id=workspace.id,
             user_id=user.id,
             history=history,
             source_type=payload.filters.source_type,
@@ -120,7 +123,9 @@ async def chat(
 
     # Có câu trả lời rồi mới đụng tới DB — xem ghi chú thứ tự ghi ở đầu file.
     if session is None:
-        session = await chat_repo.create_session(db, user_id=user.id, title=payload.question)
+        session = await chat_repo.create_session(
+            db, workspace_id=workspace.id, user_id=user.id, title=payload.question
+        )
 
     # `dataclasses.asdict` chứ không `vars()`: `assistant.Citation` khai `slots=True` nên nó
     # không có `__dict__`, và `vars()` ném `TypeError` ngay lượt hỏi đầu tiên.
@@ -159,15 +164,16 @@ async def get_chat_session(
     session_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
+    workspace: CurrentWorkspace,
 ) -> ChatSessionOut:
     """Đọc lại toàn bộ một phiên hội thoại (task 8.3) — dùng khi mở lại trang bằng `?session=`."""
-    session = await chat_repo.get_session(db, session_id, user_id=user.id)
+    session = await chat_repo.get_session(db, session_id, workspace_id=workspace.id)
     if session is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail=f"Không có phiên hội thoại {session_id}."
         )
 
-    messages = await chat_repo.list_messages(db, session_id, user_id=user.id)
+    messages = await chat_repo.list_messages(db, session_id, workspace_id=workspace.id)
     return ChatSessionOut(
         session_id=session.id,
         title=session.title,

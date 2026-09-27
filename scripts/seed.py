@@ -94,6 +94,7 @@ from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.kb import KBChunk
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.repositories import card as card_repo
 from app.repositories import kb as kb_repo
 from app.repositories import user as user_repo
@@ -170,8 +171,25 @@ def demo_card_emails() -> tuple[str, ...]:
     return tuple(str(entry["email"]).lower() for entry in load_demo_cards())
 
 
+async def _workspace_of(db: AsyncSession, user: User) -> uuid.UUID:
+    """Không gian của người dùng khởi tạo. Seed luôn ghi vào đúng không gian ấy (task NEXT-05).
+
+    `ensure_user()` tạo tài khoản mới thì revision `0015` đã cho họ một không gian riêng; người
+    đã có sẵn thì lấy không gian đầu tiên họ có chân.
+    """
+    workspace_id = await db.scalar(
+        select(WorkspaceMember.workspace_id)
+        .where(WorkspaceMember.user_id == user.id)
+        .order_by(WorkspaceMember.joined_at)
+        .limit(1)
+    )
+    if workspace_id is None:
+        raise RuntimeError(f"Tài khoản {user.email} chưa ở không gian làm việc nào.")
+    return workspace_id
+
+
 async def seed_demo(
-    db: AsyncSession, *, user_id: uuid.UUID
+    db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID
 ) -> tuple[list[BusinessCard], list[CompanyProfile]]:
     """Dựng lại **trạng thái cuối buổi demo**: thẻ đã xác nhận + công ty + hồ sơ có nguồn.
 
@@ -212,6 +230,7 @@ async def seed_demo(
 
         card = await card_repo.create_card(
             db,
+            workspace_id=workspace_id,
             user_id=user_id,
             image_path=relative_path,
             image_hash=image_hash,
@@ -229,6 +248,7 @@ async def seed_demo(
         card.company_id = await company_matching.upsert_company(
             db,
             str(entry["company"]),
+            workspace_id=workspace_id,
             user_id=user_id,
             email=fields.get("email"),
             website=fields.get("website"),
@@ -238,7 +258,7 @@ async def seed_demo(
         await db.refresh(card)
         cards.append(card)
 
-    profiles = await _seed_demo_profiles(db, user_id=user_id)
+    profiles = await _seed_demo_profiles(db, workspace_id=workspace_id, creator_id=user_id)
 
     for card in cards:
         await kb.ingest_card(db, card)
@@ -248,7 +268,9 @@ async def seed_demo(
     return cards, profiles
 
 
-async def _seed_demo_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> list[CompanyProfile]:
+async def _seed_demo_profiles(
+    db: AsyncSession, *, workspace_id: uuid.UUID, creator_id: uuid.UUID
+) -> list[CompanyProfile]:
     """Nạp hồ sơ doanh nghiệp từ ảnh chụp kết quả enrich thật (`scripts/demo_profiles.json`).
 
     Không có file thì **bỏ qua chứ không bịa**: hồ sơ không nguồn đúng là thứ rủi ro **R4** cấm.
@@ -269,7 +291,9 @@ async def _seed_demo_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> list[C
         key = normalize_company_name(str(item["company"]))
         company = (
             await db.execute(
-                select(Company).where(Company.user_id == user_id, Company.name_normalized == key)
+                select(Company).where(
+                    Company.workspace_id == workspace_id, Company.name_normalized == key
+                )
             )
         ).scalar_one_or_none()
         if company is None:
@@ -278,7 +302,8 @@ async def _seed_demo_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> list[C
 
         generated_at = item.get("generated_at")
         profile = CompanyProfile(
-            user_id=user_id,
+            workspace_id=workspace_id,
+            user_id=creator_id,
             company_id=company.id,
             legal_name=item.get("legal_name"),
             tax_code=item.get("tax_code"),
@@ -306,7 +331,7 @@ async def _seed_demo_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> list[C
     return profiles
 
 
-async def capture_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+async def capture_profiles(db: AsyncSession, *, workspace_id: uuid.UUID) -> int:
     """Ghi hồ sơ đang có trong DB của các công ty demo ra `scripts/demo_profiles.json`.
 
     Chạy **sau** khi đã enrich thật một lượt. Cách dùng đầy đủ ở docstring đầu file.
@@ -316,7 +341,7 @@ async def capture_profiles(db: AsyncSession, *, user_id: uuid.UUID) -> int:
         await db.execute(
             select(Company, CompanyProfile)
             .join(CompanyProfile, CompanyProfile.company_id == Company.id)
-            .where(Company.user_id == user_id, Company.name_normalized.in_(keys))
+            .where(Company.workspace_id == workspace_id, Company.name_normalized.in_(keys))
             .order_by(Company.display_name)
         )
     ).all()
@@ -368,20 +393,20 @@ async def existing_ids(
     company_keys: Sequence[str] = SEED_COMPANY_KEYS,
     card_emails: Sequence[str] = SEED_CARD_EMAILS,
     *,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """(id công ty mẫu, id danh thiếp mẫu) đang có **của tài khoản này**.
+    """(id công ty mẫu, id danh thiếp mẫu) đang có **trong không gian này**.
 
-    Lọc theo `user_id` từ task 12.8: bước chống-nạp-chồng bên dưới chỉ được nhìn dữ liệu
-    của chính tài khoản đang nạp. Đếm toàn cục thì T nạp bộ demo cho tài khoản của mình
-    sẽ nhận câu "đã có dữ liệu mẫu" chỉ vì Q đã nạp cho tài khoản khác, và `--reset` còn
-    xoá đúng dữ liệu của người kia.
+    Lọc theo `workspace_id` (task 12.8, đổi khoá ở `NEXT-05`): bước chống-nạp-chồng bên dưới
+    chỉ được nhìn dữ liệu của chính không gian đang nạp. Đếm toàn cục thì T nạp bộ demo cho
+    không gian của mình sẽ nhận câu "đã có dữ liệu mẫu" chỉ vì Q đã nạp cho không gian khác,
+    và `--reset` còn xoá đúng dữ liệu của bên kia.
     """
     companies = list(
         (
             await db.execute(
                 select(Company.id).where(
-                    Company.user_id == user_id, Company.name_normalized.in_(company_keys)
+                    Company.workspace_id == workspace_id, Company.name_normalized.in_(company_keys)
                 )
             )
         )
@@ -392,7 +417,8 @@ async def existing_ids(
         (
             await db.execute(
                 select(BusinessCard.id).where(
-                    BusinessCard.user_id == user_id, BusinessCard.email.in_(card_emails)
+                    BusinessCard.workspace_id == workspace_id,
+                    BusinessCard.email.in_(card_emails),
                 )
             )
         )
@@ -429,7 +455,9 @@ async def run_demo(reset: bool, *, email: str, password: str) -> int:
         async with factory() as db:
             user = await ensure_user(db, email, password)
             keys = [normalize_company_name(str(e["company"])) for e in load_demo_cards()]
-            companies, cards = await existing_ids(db, keys, demo_card_emails(), user_id=user.id)
+            companies, cards = await existing_ids(
+                db, keys, demo_card_emails(), workspace_id=await _workspace_of(db, user)
+            )
             if companies or cards:
                 if not reset:
                     print(
@@ -441,7 +469,8 @@ async def run_demo(reset: bool, *, email: str, password: str) -> int:
                 await purge(db, companies, cards)
                 await db.commit()
 
-            seeded_cards, profiles = await seed_demo(db, user_id=user.id)
+            workspace_id = await _workspace_of(db, user)
+            seeded_cards, profiles = await seed_demo(db, workspace_id=workspace_id, user_id=user.id)
             await db.commit()
 
             # Xem điểm 3 ở đầu file — bỏ bước này thì trợ lý gần như không tìm ra gì.
@@ -468,7 +497,7 @@ async def run_capture(*, email: str, password: str) -> int:
     try:
         async with factory() as db:
             user = await ensure_user(db, email, password)
-            written = await capture_profiles(db, user_id=user.id)
+            written = await capture_profiles(db, workspace_id=await _workspace_of(db, user))
     finally:
         await engine.dispose()
 
@@ -489,7 +518,7 @@ async def run(reset: bool, *, email: str, password: str) -> int:
     try:
         async with factory() as db:
             user = await ensure_user(db, email, password)
-            companies, cards = await existing_ids(db, user_id=user.id)
+            companies, cards = await existing_ids(db, workspace_id=await _workspace_of(db, user))
             if companies or cards:
                 if not reset:
                     print(
@@ -501,7 +530,7 @@ async def run(reset: bool, *, email: str, password: str) -> int:
                 await purge(db, companies, cards)
                 await db.commit()
 
-            corpus = await seed(db, user_id=user.id)
+            corpus = await seed(db, workspace_id=await _workspace_of(db, user), user_id=user.id)
 
             # Đối chiếu lại với dữ liệu vừa tạo: nếu ai đó đổi tên công ty trong
             # `eval_retrieval.py` mà quên sửa `SEED_COMPANY_NAMES` thì bước chống-nạp-chồng ở
@@ -510,7 +539,8 @@ async def run(reset: bool, *, email: str, password: str) -> int:
                 (
                     await db.execute(
                         select(Company.display_name).where(
-                            Company.user_id == user.id, Company.id.in_(corpus.labels)
+                            Company.workspace_id == corpus.workspace_id,
+                            Company.id.in_(corpus.labels),
                         )
                     )
                 )

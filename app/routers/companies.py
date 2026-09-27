@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
+from app.core.workspace import CurrentWorkspace, WriterWorkspace
 from app.models.company import Company, EnrichJob, EnrichJobItem
 from app.models.kb import KBSourceType
 from app.repositories import company as company_repo
@@ -50,8 +51,10 @@ NOT_FOUND = "not found"
 Session = Annotated[AsyncSession, Depends(get_db)]
 
 
-async def owned_company(db: AsyncSession, company_id: uuid.UUID, user: CurrentUser) -> Company:
-    company = await company_repo.get_owned_company(db, company_id, user_id=user.id)
+async def owned_company(
+    db: AsyncSession, company_id: uuid.UUID, workspace: CurrentWorkspace
+) -> Company:
+    company = await company_repo.get_owned_company(db, company_id, workspace_id=workspace.id)
     if company is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
     return company
@@ -84,6 +87,7 @@ async def company_detail_page(request: Request, company_id: uuid.UUID) -> HTMLRe
 async def list_companies(
     db: Session,
     user: CurrentUser,
+    workspace: CurrentWorkspace,
     q: Annotated[
         str | None, Query(description="Tìm theo tên hiển thị, tên khác hoặc tên đã chuẩn hoá")
     ] = None,
@@ -99,7 +103,7 @@ async def list_companies(
 ) -> CompanyListOut:
     rows, total = await company_repo.list_companies(
         db,
-        user_id=user.id,
+        workspace_id=workspace.id,
         q=q,
         has_profile=has_profile,
         archived=archived,
@@ -121,8 +125,10 @@ async def list_companies(
     status_code=status.HTTP_202_ACCEPTED,
     tags=["companies"],
 )
-async def enrich_batch(body: EnrichBatchIn, db: Session, user: CurrentUser) -> EnrichBatchOut:
-    owned = await job_repo.existing_company_ids(db, body.company_ids, user_id=user.id)
+async def enrich_batch(
+    body: EnrichBatchIn, db: Session, user: CurrentUser, workspace: WriterWorkspace
+) -> EnrichBatchOut:
+    owned = await job_repo.existing_company_ids(db, body.company_ids, workspace_id=workspace.id)
     missing = set(body.company_ids) - owned
     if missing:
         names = ", ".join(sorted(str(company_id) for company_id in missing))
@@ -137,8 +143,10 @@ async def enrich_batch(body: EnrichBatchIn, db: Session, user: CurrentUser) -> E
 
 
 @router.get("/api/companies/enrich-jobs/{job_id}", response_model=EnrichJobOut, tags=["companies"])
-async def get_enrich_job(job_id: uuid.UUID, db: Session, user: CurrentUser) -> EnrichJobOut:
-    job = await job_repo.get_job(db, job_id, user_id=user.id)
+async def get_enrich_job(
+    job_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> EnrichJobOut:
+    job = await job_repo.get_job(db, job_id, workspace_id=workspace.id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
     return to_job_out(job, await job_repo.list_items(db, job_id))
@@ -147,8 +155,10 @@ async def get_enrich_job(job_id: uuid.UUID, db: Session, user: CurrentUser) -> E
 @router.post(
     "/api/companies/enrich-jobs/{job_id}/cancel", response_model=EnrichJobOut, tags=["companies"]
 )
-async def cancel_enrich_job(job_id: uuid.UUID, db: Session, user: CurrentUser) -> EnrichJobOut:
-    job = await job_repo.get_job(db, job_id, user_id=user.id)
+async def cancel_enrich_job(
+    job_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
+) -> EnrichJobOut:
+    job = await job_repo.get_job(db, job_id, workspace_id=workspace.id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
     cancelled = await enrich_jobs.cancel(db, job_id=job_id)
@@ -159,16 +169,18 @@ async def cancel_enrich_job(job_id: uuid.UUID, db: Session, user: CurrentUser) -
 
 
 @router.get("/api/companies/{company_id}", response_model=CompanyDetailOut, tags=["companies"])
-async def get_company(company_id: uuid.UUID, db: Session, user: CurrentUser) -> CompanyDetailOut:
-    row = await company_repo.get_company_row(db, company_id, user_id=user.id)
+async def get_company(
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
+) -> CompanyDetailOut:
+    row = await company_repo.get_company_row(db, company_id, workspace_id=workspace.id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=NOT_FOUND)
     profile = await company_repo.get_profile(db, company_id)
     contacts = await company_repo.list_contacts(db, company_id)
     twins = await company_repo.same_tax_code(
-        db, company_id, profile.tax_code if profile else None, user_id=user.id
+        db, company_id, profile.tax_code if profile else None, workspace_id=workspace.id
     )
-    neighbours = await company_repo.same_domain(db, company_id, user_id=user.id)
+    neighbours = await company_repo.same_domain(db, company_id, workspace_id=workspace.id)
     return CompanyDetailOut(
         **to_list_item(row).model_dump(),
         aliases=row.company.aliases or [],
@@ -188,9 +200,9 @@ async def get_company(company_id: uuid.UUID, db: Session, user: CurrentUser) -> 
     "/api/companies/{company_id}/contacts", response_model=list[CardOut], tags=["companies"]
 )
 async def list_company_contacts(
-    company_id: uuid.UUID, db: Session, user: CurrentUser
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: CurrentWorkspace
 ) -> list[CardOut]:
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
     contacts = await company_repo.list_contacts(db, company_id)
     return [CardOut.model_validate(card) for card in contacts]
 
@@ -203,9 +215,9 @@ async def list_company_contacts(
     tags=["companies"],
 )
 async def enrich_company(
-    company_id: uuid.UUID, db: Session, user: CurrentUser
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichStartOut | JSONResponse:
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
     created = await enrich_jobs.create_job(db, [company_id])
     if not created.accepted:
         existing = await job_repo.active_job_id(db, company_id)
@@ -228,9 +240,9 @@ async def enrich_company(
     tags=["companies"],
 )
 async def cancel_company_enrich(
-    company_id: uuid.UUID, db: Session, user: CurrentUser
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> EnrichCancelOut:
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
     cancelled = await enrich_jobs.cancel(db, company_id=company_id)
     stale = 0 if cancelled else await company_repo.discard_draft_profile(db, company_id)
     if not cancelled and not stale:
@@ -249,9 +261,9 @@ async def cancel_company_enrich(
     tags=["companies"],
 )
 async def archive_company_profile(
-    company_id: uuid.UUID, db: Session, user: CurrentUser
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> CompanyProfileOut:
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
     profile = await company_repo.get_profile(db, company_id)
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Công ty này chưa có hồ sơ.")
@@ -264,7 +276,7 @@ async def archive_company_profile(
         profile.status = ProfileStatus.ARCHIVED.value
         await kb_repo.delete_for_source(
             db,
-            user_id=user.id,
+            workspace_id=workspace.id,
             source_type=KBSourceType.COMPANY_PROFILE,
             source_id=company_id,
         )
@@ -279,9 +291,9 @@ async def archive_company_profile(
     tags=["companies"],
 )
 async def restore_company_profile(
-    company_id: uuid.UUID, db: Session, user: CurrentUser
+    company_id: uuid.UUID, db: Session, user: CurrentUser, workspace: WriterWorkspace
 ) -> CompanyProfileOut:
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
     profile = await company_repo.get_profile(db, company_id)
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Công ty này chưa có hồ sơ.")
@@ -303,6 +315,7 @@ async def restore_company_profile(
 async def update_company_profile(
     db: Session,
     user: CurrentUser,
+    workspace: WriterWorkspace,
     company_id: uuid.UUID,
     body: CompanyProfileUpdateIn,
 ) -> CompanyProfileOut | JSONResponse:
@@ -311,7 +324,7 @@ async def update_company_profile(
     if not changes:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có trường nào để sửa.")
 
-    await owned_company(db, company_id, user)
+    await owned_company(db, company_id, workspace)
 
     running = await job_repo.active_job_id(db, company_id)
 
