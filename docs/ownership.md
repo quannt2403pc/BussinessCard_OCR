@@ -43,7 +43,7 @@ sai mà là **hai người sửa cùng một file rồi mất thời gian gỡ c
 |------|--------------|
 | F2 — Hồ sơ doanh nghiệp | `app/services/enrichment.py`, `app/services/enrich_jobs.py`, `app/services/normalize_company.py`, `app/services/company_matching.py`, `app/prompts/enrichment.py`, `app/routers/companies.py`, `app/repositories/company.py`, `app/repositories/enrich_job.py`, `app/schemas/company.py`, `app/schemas/enrich_job.py`, `app/models/company.py`, `templates/companies/` |
 | Service embedding (RAG) | `embedder/` (Dockerfile + FastAPI + model), `scripts/spike_embedding.py`, `docs/adr-embedding.md` |
-| Dashboard & export | `app/routers/stats.py`, `app/routers/export.py`, `templates/dashboard.html` |
+| Dashboard & export | `app/routers/stats.py`, `app/routers/export.py`, `app/schemas/export.py` *(`templates/dashboard.html` đã xoá ở `14.6` — số liệu gộp vào trang chủ)* |
 | Tài liệu & dữ liệu mẫu | `docs/` *(trừ `oauth-setup.md`, `bugs-f1-f3.md`, `accuracy.md`)*, `samples/`, `scripts/spike_*.py` |
 | Test F2 | `tests/test_normalize_company.py`, `tests/test_company*.py`, `tests/test_enrichment.py`, `tests/test_export.py` |
 | Nhật ký bug F2 | `docs/bugs-f2.md` |

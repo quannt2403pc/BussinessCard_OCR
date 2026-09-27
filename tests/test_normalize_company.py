@@ -80,6 +80,45 @@ def test_brand_is_not_mistaken_for_legal_form(raw: str, expected: str) -> None:
     assert normalize_company_name(raw) == expected
 
 
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ("Công ty TNHH Phú Cơ", "Công ty TNHH Phú"),
+        ("Minh Cô", "Minh"),
+        ("Công ty Cổ phần Đại Cồ Việt", "Công ty Cổ phần Đại"),
+        ("Hải Cơ", "Hải"),
+    ],
+)
+def test_accented_word_is_not_cut_as_an_english_legal_form(left: str, right: str) -> None:
+    """`I-21`: `Cơ` và `Cô` bỏ dấu ra `co`, không được cắt như `Co.` của tiếng Anh.
+
+    Trùng khoá là `upsert_company()` gộp **thẳng**, không qua so mờ — mà gộp tay (`8.10`) đã cắt
+    khỏi phạm vi, nên gộp nhầm ở đây là hỏng dữ liệu không sửa được từ giao diện.
+    """
+    assert normalize_company_name(left) != normalize_company_name(right)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("ABC Co., Ltd", "abc"),
+        ("ABC Co", "abc"),
+        ("Hoa Sen Group", "hoa sen"),
+        ("Thanh Cong Corp", "thanh cong"),
+    ],
+)
+def test_unaccented_english_legal_form_is_still_cut(raw: str, expected: str) -> None:
+    """Mặt kia của `I-21`: lá chắn chỉ chặn chữ **có dấu**, không được làm hỏng tiếng Anh."""
+    assert normalize_company_name(raw) == expected
+
+
+def test_the_shield_does_not_block_vietnamese_legal_forms() -> None:
+    """`Công ty`, `Cổ phần`, `Tập đoàn` vốn đã có dấu — bắt chúng không dấu là không gỡ được gì."""
+    assert normalize_company_name("Công ty Cổ phần Sữa Việt Nam") == "sua viet nam"
+    assert normalize_company_name("Tập đoàn Hoà Phát") == "hoa phat"
+    assert normalize_company_name("Công ty TNHH MTV Cơ khí Hà Nội") == "co khi ha noi"
+
+
 def test_hangul_is_stored_composed() -> None:
     key = normalize_company_name("주식회사 한빛")
     assert unicodedata.normalize("NFC", key) == key
