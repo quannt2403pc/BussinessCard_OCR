@@ -1,27 +1,85 @@
-# Stack theo Plan.md muc 9. Ghim phien ban khi dung thuc te (task 1.2, chu so huu: Q).
-fastapi
-uvicorn[standard]
-pydantic>=2
-pydantic-settings
-# Ghim tran <2.1: SQLAlchemy 2.1.0 (2026-09-25) doi kieu `Select` sang dang variadic, lam do
-# 29 loi mypy o 9 file cua ca hai nguoi, va thoi kem `greenlet` nen toan bo tang async chet
-# ngay o `conftest.py`. Go tran nay la mot viec rieng, khong phai viec cua mot PR tinh nang.
-# `[asyncio]` khai thang `greenlet` thay vi trong cho no duoc kem san.
-sqlalchemy[asyncio]>=2,<2.1
-alembic
-psycopg[binary]
-pgvector
-httpx
-jinja2
-python-multipart
-pillow
-# E.164 cho SDT da quoc gia (task 3.6, chu so huu: Q)
-phonenumbers
-rapidfuzz
-argon2-cffi
-itsdangerous
+# Stack theo Plan.md muc 9.
+#
+# GHIM TOAN BO, ke ca phu thuoc gian tiep (I-35, 2026-09-27). Truoc do file nay chi ghi ten
+# goi, va ngay 2026-09-25 SQLAlchemy 2.1.0 ra mat giua PR #53 (xanh, 2.0.54) va PR #54 (do,
+# 2.1.0) -- cach nhau ba tieng. Khong PR nao gay ra loi do va khong PR nao tu tranh duoc.
+#
+# Ghim ca phan gian tiep chu khong chi phan truc tiep: `starlette` hay `pydantic-core` doi ban
+# cung lam do y het, ma chung khong co ten trong file nay nen se troi tu do. Chinh vi the ban
+# ghim phai la mot bo day du.
+#
+# Bo duoi day la **dung nhung ban CI da chay xanh** o lan cuoi (run 36123544886, PR #59), va da
+# chay lai o may: ruff + mypy sach, 704 test xanh.
+#
+# Nang ban: doi so o day, chay lai du bo kiem tra cua CI, roi moi merge. Dung `pip install -U`
+# roi quen cap nhat file nay -- lan sau se lai la mot buoi sang di tim vi sao CI do.
+#
+# `embedder/requirements.txt` da ghim san tu dau, khong nam trong dot nay.
 
-# Test
-pytest
-pytest-asyncio
-respx
+# --- Web ---
+fastapi==0.141.1
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+jinja2==3.1.6
+MarkupSafe==3.0.3
+itsdangerous==2.2.0
+
+# --- Cau hinh & kieu du lieu ---
+pydantic==2.13.5
+pydantic-core==2.46.5
+pydantic-settings==2.15.0
+annotated-types==0.8.0
+annotated-doc==0.0.5
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+python-dotenv==1.2.3
+
+# --- CSDL ---
+# `[asyncio]` khai thang `greenlet` thay vi trong cho no duoc kem san: SQLAlchemy 2.1 bo phan
+# kem do, va toan bo tang async chet ngay o `conftest.py` (I-35).
+sqlalchemy[asyncio]==2.0.54
+greenlet==3.5.6
+alembic==1.20.0
+Mako==1.4.3
+psycopg[binary]==3.3.6
+psycopg-binary==3.3.6
+pgvector==0.5.0
+
+# --- HTTP client ---
+httpx==0.28.1
+httpcore==1.0.9
+h11==0.16.0
+anyio==4.15.1
+certifi==2026.7.22
+idna==3.20
+
+# --- Xu ly du lieu ---
+pillow==12.3.0
+# E.164 cho SDT da quoc gia (task 3.6, chu so huu: Q)
+phonenumbers==9.0.40
+rapidfuzz==3.14.6
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+pycparser==3.0
+
+# --- Phu thuoc cua uvicorn[standard] ---
+click==8.5.0
+httptools==0.8.0
+# `uvloop` khong build duoc tren Windows. `uvicorn[standard]` von gan san dieu kien nen
+# tang cho no; ghim thang ban so lam mat dieu kien ay va hong `pip install` tren may cua
+# ca hai nguoi -- da vap dung luc ghim, nen giu lai marker.
+uvloop==0.22.1; sys_platform != "win32" and platform_python_implementation != "PyPy"
+watchfiles==1.3.0
+websockets==17.1
+pyyaml==6.0.3
+
+# --- Test ---
+pytest==9.1.1
+pytest-asyncio==1.4.0
+respx==0.23.1
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+pygments==2.21.0
