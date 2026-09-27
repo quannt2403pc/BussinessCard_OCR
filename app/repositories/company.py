@@ -95,7 +95,7 @@ async def list_companies(
     rows = await db.execute(
         _company_rows()
         .where(*conditions)
-        .order_by(Company.display_name, Company.id)
+        .order_by(_shown_name(), Company.id)
         .offset((page - 1) * size)
         .limit(size)
     )
@@ -213,7 +213,7 @@ async def stale_profiles(
             CompanyProfile.status.in_(FINISHED_PROFILE_STATUSES),
             or_(checked.is_(None), checked < _naive_utc(before)),
         )
-        .order_by(checked.asc().nullsfirst(), Company.display_name)
+        .order_by(checked.asc().nullsfirst(), _shown_name())
         .limit(limit)
     )
     return list(rows.tuples().all())
@@ -224,7 +224,7 @@ async def list_changes(
 ) -> Sequence[tuple[ProfileChange, str]]:
     """Nhật ký thay đổi kèm tên công ty. Đáng chú ý trước, rồi mới nhất trước."""
     stmt = (
-        select(ProfileChange, Company.display_name)
+        select(ProfileChange, func.coalesce(Company.display_name_vi, Company.display_name))
         .join(Company, Company.id == ProfileChange.company_id)
         .where(ProfileChange.workspace_id == workspace_id)
     )
@@ -329,6 +329,15 @@ async def update_profile(
     return profile
 
 
+def _shown_name() -> ColumnElement[str]:
+    """Tên đang hiện trên giao diện — thứ tự danh sách phải theo nó (`I-36`).
+
+    Sắp theo `display_name` thì người dùng thấy một danh sách tiếng Việt xếp theo thứ tự
+    bảng chữ cái Hàn/Trung, tức là trông như không sắp xếp gì cả.
+    """
+    return func.coalesce(Company.display_name_vi, Company.display_name)
+
+
 def _list_conditions(
     *, q: str | None, has_profile: bool | None, archived: bool = False
 ) -> list[ColumnElement[bool]]:
@@ -338,6 +347,9 @@ def _list_conditions(
         pattern = _contains(term)
         matches = [
             Company.display_name.ilike(pattern, escape="\\"),
+            # `I-36`: không có dòng này thì gõ "Samsung" không ra công ty đang hiện là
+            # *Công ty Cổ phần Điện tử Samsung* — người dùng tìm bằng đúng cái tên họ nhìn thấy.
+            Company.display_name_vi.ilike(pattern, escape="\\"),
             func.array_to_string(Company.aliases, " ").ilike(pattern, escape="\\"),
         ]
         with suppress(ValueError):
@@ -382,7 +394,7 @@ async def same_tax_code(
             func.trim(CompanyProfile.tax_code) == code,
             Company.id != company_id,
         )
-        .order_by(Company.display_name, Company.id)
+        .order_by(_shown_name(), Company.id)
     )
     return rows.all()
 
@@ -412,7 +424,7 @@ async def same_domain(
     companies = await db.scalars(
         select(Company)
         .where(Company.workspace_id == workspace_id, Company.id.in_(shared))
-        .order_by(Company.display_name, Company.id)
+        .order_by(_shown_name(), Company.id)
     )
     return [(company, shared[company.id]) for company in companies]
 

@@ -250,6 +250,7 @@ async def seed_demo(
             str(entry["company"]),
             workspace_id=workspace_id,
             user_id=user_id,
+            display_name_vi=card.company_name_vi,
             email=fields.get("email"),
             website=fields.get("website"),
         )

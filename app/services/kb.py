@@ -187,11 +187,14 @@ def serialize_company_profile(company: Company, profile: CompanyProfile) -> tupl
     nhiều chunk thì các trường tra cứu (MST, ngành nghề, địa chỉ) nằm gọn trong chunk đầu thay
     vì bị đẩy rải rác — câu hỏi "mã số thuế của X" chỉ cần lấy đúng một chunk là trả lời được.
     """
-    title = f"Hồ sơ doanh nghiệp — {company.display_name}"
+    # `I-36`: tiêu đề đi theo tên **đang hiện trên giao diện**, còn bản gốc xuống dòng *Tên
+    # gọi khác*. Người hỏi trợ lý gõ đúng cái tên họ nhìn thấy trong danh sách; tiêu đề chữ Hàn
+    # thì câu hỏi tiếng Việt không khớp được vào chunk này. Giữ cả hai để hỏi kiểu nào cũng ra.
+    title = f"Hồ sơ doanh nghiệp — {_with_vi(company.display_name, company.display_name_vi)}"
     lines = [
-        ("Tên công ty", company.display_name),
-        ("Tên gọi khác", _join(company.aliases)),
-        ("Tên pháp lý", _other(profile.legal_name, company.display_name)),
+        ("Tên công ty", company.vi_name),
+        ("Tên gọi khác", _join(_other_names(company))),
+        ("Tên pháp lý", _other(profile.legal_name, company.vi_name)),
         ("Mã số thuế", profile.tax_code),
         ("Năm thành lập", profile.founded_year),
         ("Quy mô", profile.size_label),
@@ -444,6 +447,21 @@ def _text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _other_names(company: Company) -> list[str]:
+    """Mọi cách gọi khác với tên đang hiện, bỏ trùng và giữ nguyên thứ tự (`I-36`).
+
+    `_insert_company()` vốn đã nhét `display_name` vào `aliases`, nên nối thẳng hai thứ lại
+    là in tên gốc hai lần trong cùng một dòng.
+    """
+    shown = company.vi_name.casefold()
+    names = dict.fromkeys(
+        name.strip()
+        for name in (*(company.aliases or []), company.display_name)
+        if name and name.strip() and name.strip().casefold() != shown
+    )
+    return list(names)
 
 
 def _join(values: Sequence[str] | None) -> str:

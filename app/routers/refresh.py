@@ -109,6 +109,7 @@ async def stale_profiles(
             StaleProfile(
                 company_id=company.id,
                 display_name=company.display_name,
+                display_name_vi=company.display_name_vi,
                 checked_at=_as_utc(checked_at) if checked_at is not None else None,
                 days_since=since,
             )

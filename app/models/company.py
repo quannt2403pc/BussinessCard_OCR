@@ -62,12 +62,31 @@ class Company(Base):
         index=True,
     )
     name_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: Tên **như in trên danh thiếp**, giữ nguyên chữ viết gốc.
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: Bản Việt hoá của `display_name` (`I-36`), chép từ `business_cards.company_name_vi` lúc
+    #: xác nhận thẻ — **không gọi thêm lượt model nào**, bản dịch đã có sẵn từ `EX-02`.
+    #:
+    #: Cột riêng chứ không ghi đè `display_name`, đúng lối 4 cột `*_vi` của danh thiếp: giao
+    #: diện in bản Việt to và bản gốc làm chú thích nhỏ, mà `ocr_raw_json` vẫn đối chiếu được.
+    #: `NULL` khi thẻ nguồn chưa dịch hoặc tên vốn đã là tiếng Việt — chỗ đọc rơi về
+    #: `display_name`, không bao giờ hiện ô trống.
+    display_name_vi: Mapped[str | None] = mapped_column(String(255))
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    @property
+    def vi_name(self) -> str:
+        """Tên để hiện ra: bản Việt nếu có, không thì bản gốc (`I-36`).
+
+        Một chỗ duy nhất quyết định việc này, y như `display_name()` của `CardExportRow`.
+        Rải `a or b` ở từng chỗ đọc thì chỉ cần sót một chỗ là danh sách hiện chữ Hàn còn
+        file xuất ra hiện tiếng Việt, hoặc ngược lại.
+        """
+        return self.display_name_vi or self.display_name
 
     def __repr__(self) -> str:
         return f"<Company {self.id} {self.name_normalized!r}>"
