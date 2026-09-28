@@ -114,7 +114,14 @@ async def admin_count(db: AsyncSession, workspace_id: uuid.UUID) -> int:
 async def set_role(
     db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID, role: str
 ) -> bool:
-    """Đổi vai trò. Trả `False` nếu việc đó bỏ lại một không gian không còn quản trị nào."""
+    """Đổi vai trò. Trả `False` nếu việc đó bỏ lại một workspace không còn quản trị nào.
+
+    Từ `I-37` router chặn **mọi** lượt tự đổi vai của chính mình, nên qua HTTP thì nhánh
+    `False` ở đây không còn với tới được: người gọi luôn là quản trị, và họ chỉ hạ vai được
+    người khác — tức là đã có sẵn hai quản trị. Giữ lại vì đây là hàng rào của **tầng
+    repository**: `scripts/` hay một màn hình quản trị sau này gọi thẳng vào đây thì vẫn
+    không đưa được tổ chức về trạng thái không ai mời được ai.
+    """
     member = await db.get(WorkspaceMember, (workspace_id, user_id))
     if member is None:
         return False

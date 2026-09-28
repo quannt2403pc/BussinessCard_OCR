@@ -304,11 +304,32 @@
         member.is_me ? `${member.email} · bạn` : member.email));
       row.append(left);
 
+      // Không phải quản trị thì chỉ đọc: cả việc đổi vai trò lẫn việc gỡ người đều đòi quyền
+      // quản trị ở API, nên vẽ nút ra đây là hứa một việc sẽ bị từ chối.
       if (myRole !== "admin") {
-        row.append(el("span", "text-sm text-slate-600", ROLE_LABELS[member.role] || member.role));
+        row.append(roleLabel(member));
         return row;
       }
 
+      // I-37: quản trị đổi vai trò của **người khác**, không đổi của chính mình. Tự hạ vai là
+      // một cú bấm không có đường lùi — mất quyền xong thì không tự nâng lại được, và luật
+      // "còn ít nhất một quản trị" chỉ chặn người cuối cùng chứ không chặn một tổ chức hai
+      // quản trị mà một người bấm nhầm. Nhãn tĩnh thay vì ô chọn: một ô chọn bấm được rồi bị
+      // API trả 403 là giao diện nói dối. Đi hẳn thì vẫn còn nút *Rời khỏi*.
+      row.append(member.is_me ? roleLabel(member) : roleSelect(member));
+
+      const remove = el("button", "btn", member.is_me ? "Rời khỏi" : "Gỡ");
+      remove.type = "button";
+      remove.addEventListener("click", () => removeMember(member));
+      row.append(remove);
+      return row;
+    }
+
+    function roleLabel(member) {
+      return el("span", "text-sm text-slate-600", ROLE_LABELS[member.role] || member.role);
+    }
+
+    function roleSelect(member) {
       const select = el("select",
         "rounded-md border border-line px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600");
       Object.entries(ROLE_LABELS).forEach(([value, label]) => {
@@ -318,13 +339,7 @@
         select.append(option);
       });
       select.addEventListener("change", () => changeRole(member, select));
-      row.append(select);
-
-      const remove = el("button", "btn", member.is_me ? "Rời khỏi" : "Gỡ");
-      remove.type = "button";
-      remove.addEventListener("click", () => removeMember(member));
-      row.append(remove);
-      return row;
+      return select;
     }
 
     async function loadMembers() {
