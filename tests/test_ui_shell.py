@@ -232,15 +232,18 @@ def test_o_thong_bao_cua_q_deu_doc_duoc_bang_trinh_doc_man_hinh() -> None:
 
 
 async def test_batch_giu_anh_tren_may_truoc_khi_gui(app_client, user_a: User) -> None:
-    """Trang quét hàng loạt phải khai đủ bộ đồ nghề của `NEXT-09`.
+    """Trang quét phải khai đủ bộ đồ nghề của `NEXT-09`.
 
     Phần thật sự đáng kiểm là hành vi lúc mất sóng, mà cái đó chỉ chạy trong trình duyệt thật
     (đã đo bằng Playwright, xem `Task.md`). Ca này giữ **hợp đồng template**: đổi tên id hay bỏ
     khối hàng đợi đi thì đoạn JavaScript kia hỏng im lặng — trang vẫn mở được, ảnh vẫn chọn
     được, chỉ là không còn gì giữ chúng lại khi rớt mạng.
+
+    Từ `I-38` bộ đồ nghề này nằm ở `/cards/upload`: hai màn hình quét gộp làm một, và bản giữ
+    lại là bản chịu được mạng yếu.
     """
     async with app_client(user_a) as http:
-        html = (await http.get("/cards/batch")).text
+        html = (await http.get("/cards/upload")).text
 
     for marker in ('id="offline-banner"', 'id="queue-box"', 'id="queue-list"', 'id="btn-retry"'):
         assert marker in html, marker
@@ -253,7 +256,28 @@ async def test_batch_giu_anh_tren_may_truoc_khi_gui(app_client, user_a: User) ->
 async def test_batch_noi_ro_anh_duoc_giu_tren_may(app_client, user_a: User) -> None:
     """Lời hứa với người dùng phải hiện ngay trên trang, không nằm trong mã nguồn."""
     async with app_client(user_a) as http:
-        html = (await http.get("/cards/batch")).text
+        html = (await http.get("/cards/upload")).text
 
     assert "giữ trên máy trước" in html
     assert "tự gửi tiếp khi có mạng" in html
+
+
+async def test_mot_man_hinh_quet_duy_nhat_va_duong_cu_van_mo_duoc(app_client, user_a: User) -> None:
+    """`I-38`: `/cards/upload` nhận nhiều ảnh, và `/cards/batch` chuyển hướng về đó.
+
+    Hai vế đều đáng khoá lại. Bỏ `multiple` là im lặng quay về đúng cái phiền mà `I-38` gỡ —
+    người dùng chọn được một ảnh một lượt, trang không báo lỗi gì. Còn `/cards/batch` nằm trong
+    tài liệu hướng dẫn và trong trang đánh dấu của cả hai người, nên nó phải mở ra một thứ gì
+    đó chứ không phải 404.
+    """
+    async with app_client(user_a) as http:
+        html = (await http.get("/cards/upload")).text
+        moved = await http.get("/cards/batch")
+
+    assert 'id="input-file" type="file" accept="image/*" multiple' in html
+    # Nút chụp ảnh của màn hình cũ phải sống sót qua lần gộp: đó là đường của người đứng ở hội
+    # chợ, chính là cảnh `NEXT-09` sinh ra để phục vụ.
+    assert 'capture="environment"' in html
+
+    assert moved.status_code == 301
+    assert moved.headers["location"] == "/cards/upload"

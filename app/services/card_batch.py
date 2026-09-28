@@ -54,7 +54,7 @@ MAX_ATTEMPTS = 3
 #: lỗi đi được tới đây thường là rate limit thật, mà rate limit đo bằng giây chứ không mili giây.
 BACKOFF_SECONDS: tuple[float, ...] = (2.0, 5.0)
 
-#: Số job giữ lại trong bộ nhớ. Job cũ nhất bị đẩy ra khi tràn — trang `/cards/batch` chỉ poll
+#: Số job giữ lại trong bộ nhớ. Job cũ nhất bị đẩy ra khi tràn — trang `/cards/upload` chỉ poll
 #: job vừa tạo, còn giữ vô hạn thì một tiến trình chạy cả tuần sẽ phình dần.
 MAX_JOBS = 20
 
@@ -176,7 +176,7 @@ def start(job: BatchJob) -> None:
 
     Dùng `asyncio.create_task` chứ không `BackgroundTasks` của FastAPI: Starlette chạy background
     task **trước khi nhả kết nối HTTP**, nên một job 30 ảnh (~1 phút) sẽ giữ nguyên connection đó
-    suốt thời gian chạy. Trình duyệt chỉ mở tối đa 6 connection mỗi host và trang `/cards/batch`
+    suốt thời gian chạy. Trình duyệt chỉ mở tối đa 6 connection mỗi host và trang `/cards/upload`
     cần một cái để poll — giữ lại là tự bóp cổ chính mình.
     """
     task = asyncio.create_task(run_job(job))
