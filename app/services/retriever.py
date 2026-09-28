@@ -1,36 +1,18 @@
 """Truy hồi cho RAG: tìm theo vector, tìm theo từ khoá, trộn hai kết quả.
 
-Chủ sở hữu: Q | Task: 7.1 (vector + ngưỡng điểm), 7.2 (hybrid full-text), 12.5 (tách theo người
-dùng) | xem Task.md
+Chủ sở hữu: Q | Task: 7.1, 7.2, 12.5
 
-Đây là lớp giữa `repositories/kb.py` (câu SQL) và `routers/chat.py` (D8): nhận **câu hỏi bằng
-chữ**, trả về các chunk đáng đưa vào ngữ cảnh của model, đã xếp hạng. Không gọi LLM, không dựng
-prompt — D8 làm việc đó.
+Lớp giữa `repositories/kb.py` (câu SQL) và `routers/chat.py`: nhận câu hỏi bằng chữ, trả về các
+chunk đã xếp hạng. Không gọi LLM, không dựng prompt.
 
-Vì sao phải có **hai** nhánh tìm, chứ không chỉ vector:
+Hai nhánh tìm vì chúng hỏng theo hai kiểu khác nhau: vector bắt được câu hỏi ngữ nghĩa ("công ty
+nào làm logistics"), full-text bắt được định danh (email, số điện thoại, mã số thuế). Trộn lại
+nâng recall@3 từ 7/10 lên 9/10.
 
-| Câu hỏi | Nhánh bắt được | Vì sao nhánh kia trượt |
-|---------|----------------|------------------------|
-| "công ty nào làm về logistics?" | vector | không có từ "logistics" nào trùng hình thức trong hồ sơ viết bằng tiếng Việt |
-| "ai dùng email a.nguyen@abc.vn?" | full-text | một địa chỉ email là chuỗi ngẫu nhiên, model nhúng không có ngữ nghĩa nào để bám |
-| "số 0912 345 678 là của ai?" | full-text (sau khi chuẩn hoá) | như trên |
-| "mã số thuế 0301234567" | full-text | vector coi mọi dãy 10 chữ số gần như nhau |
-| "cong ty san xuat sua" (không dấu) | **cả hai đều trượt** | `to_tsvector('simple', …)` không bỏ dấu; model nhúng cũng không kéo nổi tiếng Việt mất dấu về đúng chỗ — đo ở 7.4, xem ghi chú dưới |
+⚠️ Cả hai cùng trượt với câu tiếng Việt **gõ không dấu** — cần extension `unaccent`, chưa làm.
 
-Hai nhánh hỏng theo hai kiểu khác hẳn nhau, nên trộn lại thì chỗ này che được chỗ kia — đó là
-toàn bộ lý do của task 7.2, và cũng là lý do **không** thay full-text bằng cách hạ ngưỡng vector.
-Số đo 7.4 xác nhận: recall@3 **7/10 khi chỉ dùng vector → 9/10 khi trộn**.
-
-⚠️ **Một ca đo được là cả hai nhánh cùng trượt: câu hỏi tiếng Việt gõ không dấu.** "cong ty nao
-san xuat sua" không lọt top-5 dù hồ sơ Mộc Châu nằm sẵn trong KB. Nhánh full-text trượt vì
-`simple` không bỏ dấu, nhánh vector trượt vì `e5-small` không coi "san xuat sua" gần "sản xuất
-sữa". Gỡ được bằng extension `unaccent` của Postgres (một cột/biểu thức đã bỏ dấu cho nhánh
-full-text) — cần một Alembic revision, nên để lại cho D9/D10 quyết theo kết quả đo A6 của D8,
-chứ không lặng lẽ nhét vào 7.2.
-
-Trộn bằng **Reciprocal Rank Fusion**, không cộng điểm thô: điểm cosine nằm trong `[0, 1]` còn
-`ts_rank_cd` không có trần, cộng thẳng là để nhánh full-text nuốt trọn thứ tự. RRF chỉ nhìn
-*thứ hạng* nên không cần chuẩn hoá thang điểm giữa hai thứ vốn không so sánh được với nhau.
+Trộn bằng **Reciprocal Rank Fusion**, không cộng điểm thô: cosine nằm trong `[0, 1]` còn
+`ts_rank_cd` không có trần, cộng thẳng là để full-text nuốt trọn thứ tự.
 """
 
 from __future__ import annotations
@@ -51,57 +33,30 @@ from app.services import embeddings, normalize
 
 logger = logging.getLogger(__name__)
 
-#: Số chunk trả về mặc định. 5 chunk × ~700 ký tự ≈ 3 500 ký tự ngữ cảnh — đủ để trả lời một
-#: câu hỏi về vài công ty mà chưa chạm giới hạn nào của Gemini Flash.
+#: Số chunk trả về mặc định (~3 500 ký tự ngữ cảnh).
 TOP_K = 5
 
-#: Mỗi nhánh lấy `top_k × hệ số này` ứng viên trước khi trộn. Lấy đúng `top_k` mỗi nhánh thì
-#: RRF không còn gì để xếp lại: một chunk đứng hạng 6 ở cả hai nhánh (dấu hiệu rất đáng tin)
-#: sẽ không bao giờ lọt vào danh sách để được cộng điểm.
+#: Mỗi nhánh lấy `top_k × hệ số này` ứng viên trước khi trộn — lấy đúng `top_k` thì RRF không
+#: còn gì để xếp lại.
 CANDIDATE_MULTIPLIER = 4
 
-#: Ngưỡng điểm tương đồng cosine của **nhánh vector** (task 7.1 yêu cầu có ngưỡng).
-#:
-#: **Đây là sàn an toàn, KHÔNG phải bộ phân loại "có trong KB hay không".** Số đo 7.4 ngày
-#: 2026-09-17 (`scripts/eval_retrieval.py`, `multilingual-e5-small`, 7 nguồn, 13 truy vấn):
-#:
-#:     chunk ĐÚNG   : thấp nhất 0.773 · cao nhất 0.910
-#:     câu NGOÀI KB : cao nhất  0.819  ("hướng dẫn nấu phở bò")
-#:
-#: Hai phân bố **chồng lên nhau**: mọi ngưỡng chặn được câu hỏi ngoài phạm vi cũng chặn luôn
-#: câu trả lời đúng cho "mã số thuế 0100233468" (0.773). Họ `e5` cho điểm nền rất cao — hai
-#: đoạn văn chẳng liên quan gì vẫn quanh 0.75–0.82 — nên không có con số nào tách được.
-#:
-#: Hệ quả cho **D8**: việc quyết định "không có thông tin trong dữ liệu đã nhập" phải nằm ở
-#: prompt của trợ lý (model tự thấy ngữ cảnh không chứa câu trả lời), **không** trông vào ngưỡng
-#: này. Đừng nâng nó lên cho "chắc ăn": nâng là mất recall thật, còn câu hỏi lạc đề vẫn lọt.
-#:
-#: 0.70 đặt dưới điểm đúng thấp nhất đo được một quãng an toàn, nên với KB thật nó gần như
-#: không bao giờ kích hoạt; chỗ nó thật sự có tác dụng là khi KB rỗng hoặc quá nhỏ.
+#: Ngưỡng cosine của nhánh vector — **sàn an toàn, KHÔNG phải bộ phân loại "có trong KB hay
+#: không"**. Đo thật: chunk đúng 0.773–0.910, câu ngoài KB cao nhất 0.819 — hai phân bố chồng
+#: nhau nên không ngưỡng nào tách được. Việc từ chối câu ngoài phạm vi nằm ở prompt trợ lý.
+#: Đừng nâng lên cho "chắc ăn": nâng là mất recall thật mà câu lạc đề vẫn lọt.
 MIN_SIMILARITY = 0.70
 
-#: Hằng số làm mượt của RRF. 60 là giá trị trong bài báo gốc và là mặc định của mọi thư viện;
-#: giữ nguyên để khỏi tự chế một thang điểm không ai đối chiếu được. Càng lớn thì chênh lệch
-#: giữa các thứ hạng đầu càng phẳng.
+#: Hằng số làm mượt của RRF — 60 là giá trị trong bài báo gốc và mặc định của mọi thư viện.
 RRF_K = 60
 
-#: Vùng mặc định khi đọc số điện thoại **trong câu hỏi**. Câu hỏi không có trường
-#: `language_detected` như danh thiếp nên không suy ra được vùng; KB của bản demo là danh thiếp
-#: thu ở hội thảo trong nước nên `VN` là phỏng đoán đúng gần như mọi lúc. Đoán sai thì chỉ mất
-#: dạng chuẩn hoá, bản người dùng gõ vẫn được tìm.
+#: Vùng mặc định khi đọc số điện thoại trong câu hỏi (câu hỏi không có `language_detected`).
 QUERY_PHONE_REGION = "VN"
 
-#: Trần số từ khoá gửi xuống nhánh full-text. Câu hỏi thật không bao giờ chứa nhiều hơn chừng
-#: này *định danh*; chạm trần nghĩa là bộ lọc đang bắt nhầm chữ thường thành tên riêng, và một
-#: tsquery `OR` dài thì khớp gần hết KB.
+#: Trần số từ khoá gửi xuống nhánh full-text — một tsquery `OR` dài thì khớp gần hết KB.
 MAX_QUERY_TERMS = 8
 
-#: Từ **không** được coi là từ khoá dù viết hoa: đây là nhãn trường mà `services/kb.py` in vào
-#: **mọi** chunk ("Email:", "Điện thoại:", "Công ty:"…), cộng vài từ để hỏi.
-#:
-#: Đây là lập luận IDF phiên bản rẻ tiền: token có mặt trong mọi tài liệu thì không phân biệt
-#: được tài liệu nào, mà `ts_rank_cd` lại **không** tự hạ trọng số những token như vậy. Bỏ qua
-#: bước này thì câu "Ai dùng Email X" kéo về đúng mọi danh thiếp trong KB.
+#: Từ **không** được coi là từ khoá dù viết hoa: nhãn trường mà `services/kb.py` in vào mọi
+#: chunk, cộng vài từ để hỏi. `ts_rank_cd` không có IDF nên phải tự loại chúng ở đây.
 NON_SELECTIVE_WORDS = frozenset(
     (
         # từ để hỏi
@@ -176,13 +131,10 @@ NON_SELECTIVE_WORDS = frozenset(
     )
 )
 
-#: Dãy trông như số điện thoại: mở đầu bằng chữ số hoặc `+`, dài tối thiểu 7 ký tự kể cả dấu
-#: cách/gạch. Cố ý bắt rộng rồi để `normalize.normalize_phone()` phán quyết — nó có
-#: `phonenumbers` để kiểm tra thật, còn regex ở đây chỉ khoanh vùng.
+#: Dãy trông như số điện thoại. Cố ý bắt rộng rồi để `normalize.normalize_phone()` phán quyết.
 _PHONE_LIKE_RE = re.compile(r"(?<![\w+])\+?\d[\d\s().\-]{5,}\d(?!\w)")
 
-#: Email — bắt trước mọi thứ khác, vì nó chứa cả dấu chấm lẫn ký tự chữ nên hai regex dưới đều
-#: sẽ xé nó ra thành mảnh vụn nếu đi sau.
+#: Email — bắt trước mọi thứ khác, vì hai regex dưới sẽ xé nó thành mảnh vụn nếu đi sau.
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 #: Tên miền / website (`abc.vn`, `www.fpt.com.vn`). Bỏ `https://` vì `to_tsvector` cũng bỏ.
@@ -205,15 +157,13 @@ class Hit:
     content: str
     meta: dict[str, Any]
 
-    #: Điểm trộn RRF — **thứ tự cuối cùng theo điểm này**. Không so sánh được giữa hai lượt tìm
-    #: khác nhau (nó phụ thuộc số nhánh khớp), chỉ dùng để xếp hạng trong cùng một lượt.
+    #: Điểm trộn RRF. Chỉ so sánh được trong cùng một lượt tìm.
     score: float
     #: Tương đồng cosine `1 - khoảng cách`, `None` khi chunk chỉ khớp ở nhánh full-text.
     similarity: float | None = None
     #: `ts_rank_cd`, `None` khi chunk chỉ khớp ở nhánh vector.
     text_rank: float | None = None
-    #: `"vector"` | `"text"` | `"both"` — nhánh nào tìm ra. Hiện trong log và trong báo cáo đo
-    #: của 7.4; khớp ở **cả hai** là tín hiệu tin cậy nhất.
+    #: `"vector"` | `"text"` | `"both"` — khớp ở **cả hai** là tín hiệu tin cậy nhất.
     matched_by: str = "vector"
 
     @property
@@ -247,21 +197,13 @@ async def search(
 ) -> list[Hit]:
     """Tìm trong Knowledge Base, trả tối đa `top_k` chunk đã xếp hạng.
 
-    Trả về **danh sách rỗng** khi không có gì đủ liên quan — đó là một câu trả lời hợp lệ, không
-    phải lỗi. D8 nhận rỗng thì nói "không có thông tin trong dữ liệu đã nhập" thay vì để model
-    tự bịa từ mấy chunk gần nhất.
+    Danh sách rỗng là câu trả lời hợp lệ, không phải lỗi — trợ lý nói "không có thông tin".
 
-    `source_type` / `company_id` là bộ lọc metadata của task 8.5 — thu hẹp KB **trước** khi tìm
-    (chỉ danh thiếp, chỉ hồ sơ DN, hoặc chỉ một công ty). Lọc ở tầng SQL chứ không sàng lại kết
-    quả trong Python: sàng sau thì hỏi top-5 trong phạm vi một công ty sẽ nhận về 0–1 dòng vì
-    bốn chỗ đã bị các công ty khác chiếm mất.
+    `source_type` / `company_id` lọc ở tầng SQL **trước** khi tìm; sàng lại trong Python thì
+    top-5 của một công ty sẽ chỉ còn 0–1 dòng. `hybrid=False` chỉ dùng để đo riêng từng nhánh.
 
-    `hybrid=False` tắt nhánh full-text; chỉ dùng để **đo riêng từng nhánh** ở task 7.4.
-
-    `workspace_id` **không phải bộ lọc** như hai tham số trên, mà là ranh giới dữ liệu (task 12.5): nó
-    không đến từ lựa chọn nào trên giao diện, không tắt được, và đi xuống tận mệnh đề `WHERE` của
-    cả hai nhánh. Tiêu chí **A9** đứng trên đúng một dòng này — A hỏi về công ty mà chỉ B có thì
-    truy hồi phải trả **rỗng**, để prompt của 8.1 nói "không có thông tin".
+    `workspace_id` không phải bộ lọc mà là ranh giới dữ liệu: không tắt được, đi xuống tận
+    `WHERE` của cả hai nhánh.
     """
     text_query = (query or "").strip()
     if not text_query:
@@ -313,12 +255,10 @@ async def vector_search(
     company_id: uuid.UUID | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> list[Hit]:
-    """Nhánh vector (task 7.1): nhúng câu hỏi → top-k cosine → cắt theo ngưỡng.
+    """Nhánh vector: nhúng câu hỏi → top-k cosine → cắt theo ngưỡng.
 
-    Câu hỏi đi qua `embeddings.embed_query()` chứ không `embed_passages()`: service `embedder`
-    tự gắn tiền tố `query:` / `passage:` theo `kind`, mà họ model `e5` được huấn luyện với hai
-    tiền tố đó cho hai vai trò khác nhau. Nhầm vai không sinh ra lỗi nào, chỉ làm chất lượng
-    truy hồi tụt đi một cách không truy ra được (Plan.md mục 2.6).
+    Dùng `embed_query()` chứ không `embed_passages()`: họ `e5` cần đúng tiền tố `query:`.
+    Nhầm vai không sinh lỗi, chỉ làm chất lượng truy hồi tụt không truy ra được.
     """
     vector = await embeddings.embed_query(query, client=client)
     rows = await kb_repo.search_similar(
@@ -334,8 +274,7 @@ async def vector_search(
     for chunk, distance in rows:
         similarity = 1.0 - distance
         if similarity < min_similarity:
-            # Danh sách đã sắp theo khoảng cách tăng dần: cái đầu tiên rớt ngưỡng thì mọi cái
-            # sau cũng rớt.
+            # Đã sắp theo khoảng cách tăng dần: cái đầu rớt ngưỡng thì mọi cái sau cũng rớt.
             break
         hits.append(_hit(chunk, score=0.0, similarity=similarity, matched_by="vector"))
 
@@ -358,17 +297,11 @@ async def text_search(
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
 ) -> list[Hit]:
-    """Nhánh full-text (task 7.2): khớp từ khoá trên `kb_chunks.content`.
+    """Nhánh full-text: khớp từ khoá trên `kb_chunks.content`.
 
-    **Không có ngưỡng điểm ở nhánh này, và đó là chủ ý.** `ts_rank_cd` không có thang tuyệt đối
-    (nó phụ thuộc độ dài văn bản và số từ trong truy vấn) nên mọi ngưỡng đặt ra đều là số bịa.
-    Bù lại, nhánh này chỉ nhận các từ khoá **chọn lọc** của câu hỏi (`query_terms`) và chỉ trả
-    về chunk thật sự chứa chúng — bản thân việc khớp đã là bộ lọc, khác hẳn nhánh vector vốn
-    luôn trả đủ k dòng.
-
-    Câu hỏi không có định danh nào ("công ty nào làm logistics?") thì nhánh này **không trả gì**
-    và nhường hẳn cho nhánh vector. Đó là kết quả đúng chứ không phải thiếu sót: nó không có
-    công cụ nào để trả lời một câu hỏi thuần ngữ nghĩa.
+    Không đặt ngưỡng điểm — `ts_rank_cd` không có thang tuyệt đối. Bù lại nhánh này chỉ nhận từ
+    khoá chọn lọc (`query_terms`), nên câu hỏi thuần ngữ nghĩa sẽ **không trả gì** và nhường
+    hẳn cho nhánh vector.
     """
     rows = await kb_repo.search_fulltext(
         db,
@@ -384,27 +317,12 @@ async def text_search(
 def query_terms(query: str) -> list[str]:
     """Rút các từ khoá **đáng tìm nguyên văn** từ câu hỏi, theo thứ tự chọn lọc giảm dần.
 
-    Lọc chứ không đưa cả câu xuống, vì cả hai cách ghép tsquery đều hỏng với văn xuôi: `AND`
-    mọi từ thì chunk phải chứa từng chữ một (kể cả "ai", "dùng"); `OR` mọi từ thì `ts_rank_cd` —
-    vốn **không có IDF** — tính "ai" ngang với một địa chỉ email, và nhánh này trả về gần hết KB
-    theo thứ tự gần như ngẫu nhiên. Đo cả hai ở task 7.4.
+    Lọc chứ không đưa cả câu xuống: `AND` mọi từ thì chunk phải chứa từng chữ một, `OR` mọi từ
+    thì `ts_rank_cd` (không có IDF) trả về gần hết KB theo thứ tự gần như ngẫu nhiên.
 
-    Năm loại được giữ, đúng những thứ task 7.2 ghi là nhánh vector hay trượt:
-
-    1. **Email** — bắt trước tiên, vì hai regex sau sẽ xé nó thành mảnh nếu chạy trước.
-    2. **Số điện thoại**, giữ **cả hai dạng**: bản người dùng gõ và bản E.164 do
-       `normalize.normalize_phone()` sinh. KB lưu bản đã chuẩn hoá ở task 3.6 (`+84912345678`)
-       còn người hỏi gõ như in trên thẻ (`0912 345 678`) — thiếu bước này thì nhánh full-text
-       tách thành ba token `0912`/`345`/`678` và không khớp gì. Giữ cả bản gốc vì danh thiếp
-       nước ngoài mà `phonenumbers` không đọc được thì KB đang lưu đúng chữ người dùng gõ.
-    3. **Dãy ≥ 6 chữ số** — mã số thuế, mã doanh nghiệp.
-    4. **Tên miền** — `abc.vn`, `fptsoftware.com`.
-    5. **Từ viết hoa không đứng đầu câu** — phỏng đoán tên riêng ("Vinamilk", "FPT", "Hòa Phát").
-       Bỏ từ đầu câu vì ai cũng viết hoa nó, và bỏ nhãn trường (`NON_SELECTIVE_WORDS`).
-
-    Giới hạn đã biết của (5): gõ toàn chữ thường thì tên riêng không được nhận ra. Chấp nhận
-    được — lúc đó nhánh vector vẫn chạy, chỉ mất phần bổ trợ. Đoán rộng hơn thì nhánh full-text
-    kéo về cả KB, kiểu hỏng tệ hơn hẳn.
+    Giữ 5 loại: email, số điện thoại (**cả bản gõ tay lẫn bản E.164**, vì KB lưu bản chuẩn hoá),
+    dãy ≥ 6 chữ số, tên miền, và từ viết hoa không đứng đầu câu (phỏng đoán tên riêng).
+    Gõ toàn chữ thường thì (5) trượt — chấp nhận được, nhánh vector vẫn chạy.
     """
     remaining = query or ""
     terms: list[str] = []
@@ -437,12 +355,8 @@ def _append(terms: list[str], value: str | None) -> None:
 def _fuse(vector_hits: Sequence[Hit], text_hits: Sequence[Hit]) -> list[Hit]:
     """Reciprocal Rank Fusion hai danh sách đã xếp hạng → một danh sách.
 
-    `score = Σ 1 / (RRF_K + thứ hạng)` cộng dồn trên mọi nhánh tìm ra chunk đó. Hệ quả có chủ
-    đích: một chunk đứng hạng 3 ở **cả hai** nhánh xếp trên một chunh đứng hạng 1 ở đúng một
-    nhánh — hai cách tìm độc lập cùng chỉ vào một chỗ là bằng chứng mạnh hơn.
-
-    Giữ nguyên thứ tự của nhánh vector khi nhánh kia rỗng (RRF đơn điệu theo thứ hạng), nên tắt
-    hybrid không làm đảo lộn gì.
+    `score = Σ 1 / (RRF_K + thứ hạng)`: chunk hạng 3 ở **cả hai** nhánh xếp trên chunk hạng 1 ở
+    một nhánh. Nhánh kia rỗng thì thứ tự nhánh vector giữ nguyên.
     """
     merged: dict[uuid.UUID, Hit] = {}
     scores: dict[uuid.UUID, float] = {}

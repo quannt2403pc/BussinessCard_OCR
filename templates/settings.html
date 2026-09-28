@@ -1,25 +1,13 @@
-{# Nút “Kết nối CLIProxy (OAuth)” + badge trạng thái + poll 2s. #}
-{# Chủ sở hữu: Q | Task: 2.5 | xem Task.md #}
-{#
-  Luồng bấm nút (Plan.md mục 2.5):
-    1. POST /api/integration/connect         -> {url, state}
-    2. mở tab mới tới `url` (Google OAuth)
-    3. poll GET /api/integration/oauth-status?state=...  mỗi 2s  -> wait | ok | error
-    4. nhận "ok" MỚI gọi GET /api/integration/status để vẽ badge
+{# Nút “Kết nối AI (OAuth)” + badge trạng thái + poll 2s.
+   Chủ sở hữu: Q | Task: 2.5
 
-  Vì sao không dùng HTMX ở đây: luồng này phải giữ `state` giữa các lần gọi và phải dừng poll
-  đúng lúc — viết bằng fetch tường minh dễ đọc hơn nhiều so với nhồi vào thuộc tính hx-*.
+   Luồng bấm nút:
+     1. POST /api/integration/connect                     -> {url, state}
+     2. mở tab mới tới `url` (Google OAuth)
+     3. poll GET /api/integration/oauth-status?state=…    -> wait | ok | error
+     4. nhận "ok" MỚI gọi GET /api/integration/status để vẽ badge
 
-  ⚠️ Badge LUÔN lấy từ /api/integration/status (đọc `auth-files`), không bao giờ từ kết quả
-  poll. Poll không kèm `state` sẽ trả "ok" kể cả khi chưa đăng nhập bao giờ (I-02).
-
-  Bước 3' — lối thứ hai về đích, thêm ở task 13.7 (gỡ I-29):
-    3'. người dùng dán URL callback -> POST /api/integration/oauth-callback {state, redirect_url}
-  Cần vì Google luôn trả trình duyệt về `http://localhost:51121/oauth-callback` (ghi cứng trong
-  mã nguồn CLIProxy). Chạy localhost thì trùng máy nên bước 3 tự xong; mở từ `ocrximi.io.vn`
-  thì `localhost` là máy của người dùng, bước 3 không bao giờ chuyển sang "ok" nếu không có
-  bước 3'. Cả hai lối cùng đi qua `finishConnect()` để không có hai bản logic lệch nhau.
-#}
+   Không dùng HTMX ở đây: luồng này phải giữ `state` giữa các lần gọi và phải dừng poll đúng lúc. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 
@@ -50,8 +38,7 @@
   <p id="status-detail" class="mt-4 hidden rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800"></p>
 
   <div class="mt-6 flex flex-wrap gap-3">
-    {# Nhãn rút theo luật ≤ 2 từ (ui-kit mục 6). "Kết nối CLIProxy (OAuth)" là tên cũ, còn nằm
-       trong 5 tài liệu — **task 14.11 của T** phải sửa theo, danh sách chỗ phải sửa ghi ở Task.md. #}
+    {# Nhãn rút theo luật ≤ 2 từ của `docs/ui-kit.md`. #}
     <button id="btn-connect" type="button" class="btn-primary">{{ icon("link") }} Kết nối AI</button>
     <button id="btn-test" type="button" class="btn">{{ icon("check-circle") }} Kiểm tra</button>
     <button id="btn-disconnect" type="button" class="btn border-rose-200 text-rose-700 hover:bg-rose-50">
@@ -110,12 +97,9 @@
               <kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">Ctrl</kbd>+<kbd class="rounded border border-slate-300 bg-white px-1 font-mono text-xs">C</kbd>.
             </p>
 
-            {# Cho thấy TRƯỚC cái trang lỗi sắp gặp. Không xoá được nó — chỉ thứ nghe ở
-               `localhost:51121` trên máy người dùng mới làm nổi, mà chẳng có gì nghe ở đấy.
-               Biết trước thì nó thôi là sự cố, thành một bước trong quy trình.
-               Cố ý KHÔNG hứa một thông báo cụ thể: máy nào tình cờ có thứ chiếm cổng 51121
-               (ví dụ máy dev đang chạy chính bộ Docker này) sẽ ra `ERR_EMPTY_RESPONSE`, máy
-               sạch ra "đã từ chối kết nối". Viết cứng một câu là sai với một nửa số máy. #}
+            {# Cho thấy TRƯỚC cái trang lỗi sắp gặp — biết trước thì nó thôi là sự cố, thành một
+               bước trong quy trình. Cố ý KHÔNG hứa một thông báo cụ thể: máy có thứ chiếm cổng
+               51121 ra `ERR_EMPTY_RESPONSE`, máy sạch ra "đã từ chối kết nối". #}
             <div class="mt-2 rounded-md border border-slate-200 bg-white p-3">
               <p class="text-xs font-medium text-slate-500">Trang đó trông đại loại thế này:</p>
               <div class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-600">
@@ -176,9 +160,8 @@
      role="status" aria-live="polite"></div>
 </section>
 
-{# Khối chọn model theo từng chức năng (EX-15). Thay cho danh sách "Model khả dụng của channel"
-   chỉ đọc trước đây: danh mục vẫn hiện đầy đủ, nhưng nay hiện **trong đúng ô người dùng chọn**,
-   và đã lọc theo năng lực đo được ở EX-12 — xem `docs/adr-model-per-feature.md`. #}
+{# Khối chọn model theo từng chức năng. Danh mục hiện **trong đúng ô người dùng chọn**, và đã lọc
+   theo năng lực đo được — xem `docs/adr-model-per-feature.md`. #}
 <section class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
   <h2 class="text-base font-semibold text-slate-900">Model cho từng chức năng</h2>
 

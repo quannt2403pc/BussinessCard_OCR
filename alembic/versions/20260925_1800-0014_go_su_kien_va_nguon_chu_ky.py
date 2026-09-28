@@ -4,35 +4,20 @@ Revision ID: 0014
 Revises: 0013
 Create Date: 2026-09-25 18:00:00.000000+07:00
 
-Task NEXT-03 + NEXT-08 (T) -- **ca hai bi cat khoi pham vi 2026-09-25** theo quyet dinh cua
-nhom sau khi ban bac. Cung ngoai le nhu `0008`-`0013`: Q cho phep T tu sinh revision cho rieng
-cac dong NEXT-xx.
+Task NEXT-03 + NEXT-08 (T) -- **ca hai bi cat khoi pham vi 2026-09-25**.
 
-RUI RO: **trung binh -- day la revision duy nhat trong du an lam MAT du lieu.** Bang `events`
-va cot `business_cards.event_id` bien mat cung nhau, nen moi nhan su kien da gan deu mat. Danh
-thiep thi khong mat mot dong nao: khoa ngoai la `SET NULL`, va o day ta drop ca cot chu khong
-dong vao bang the.
+⚠️ RUI RO trung binh -- **revision duy nhat trong du an lam MAT du lieu**: bang `events` va cot
+`business_cards.event_id` bien mat cung nhau nen moi nhan su kien da gan deu mat. Danh thiep
+khong mat dong nao.
 
-DI TOI CHU KHONG DOWNGRADE:
+DI TOI CHU KHONG DOWNGRADE: DB dev cua ca hai nguoi dang o `0013`; quay nguoc thi lich su tren
+`main` va tren may hai nguoi le nhau.
 
-  DB dev cua ca hai nguoi dang o `0013`. Quay nguoc bang `alembic downgrade` thi lich su tren
-  `main` va lich su tren may hai nguoi le nhau -- ai pull ve sau se chay mot chuoi revision
-  khong ai tung chay. Mot revision di toi thi moi may deu di qua cung mot duong.
+KHONG siet `image_path` ve lai NOT NULL: siet lai thi phai chon giua xoa nhung lien he da nhap tu
+chu ky va ghi vao do mot chuoi rong -- dung cai bay ma `0013` sinh ra de tranh. Cot `source` thi
+drop vi khong con ai doc.
 
-VI SAO KHONG SIET `image_path` VE LAI NOT NULL:
-
-  Cot nay duoc noi ra o `0013` cho `NEXT-08`. Siet lai thi phai chon giua **xoa nhung lien he
-  da nhap tu chu ky** va **ghi vao do mot chuoi rong** -- ma chuoi rong la mot duong dan *hop
-  le* tro vao thu muc goc cua volume, dung cai bay ma `0013` sinh ra de tranh.
-
-  Mot cot cho phep NULL ma khong con duong nao ghi NULL vao la vo hai. Siet lai moi la huong
-  co rui ro. Nen `image_path` giu nguyen nullable, va `models/card.py` ghi ro ly do.
-
-COT `source` THI DROP:
-
-  Khac `image_path`, cot nay khong con ai doc: no sinh ra chi de phan biet `scan` voi
-  `signature`, ma mot trong hai ve khong ton tai nua. Giu lai la de mot cot chi co dung mot gia
-  tri va mot cau hoi cho nguoi doc ma nguon sau nay.
+File nay khong dau tieng Viet: xem canh bao o dau alembic.ini (I-07).
 """
 
 import sqlalchemy as sa

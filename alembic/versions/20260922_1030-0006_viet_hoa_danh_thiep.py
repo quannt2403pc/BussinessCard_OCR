@@ -4,33 +4,17 @@ Revision ID: 0006
 Revises: 0005
 Create Date: 2026-09-22 10:30:00.000000+07:00
 
-Task EX-03 (Q) -- chi Q duoc sinh revision (quy uoc so 5, Task.md; quy uoc nay KHONG duoc noi
-tu D12). Thiet ke o Plan.md muc 3, phan "Viet hoa sau khi quet".
+Task EX-03 (Q). Thiet ke o Plan.md muc 3.
 
-Revision NGUOC HAN voi 0005 ve muc do rui ro: nam cot moi, TAT CA deu NULLABLE, khong rang buoc
-nao, khong index nao, khong dong du lieu nao phai vie lai. Chay tren bang dang co du lieu that
-la mot cau ALTER TABLE ... ADD COLUMN cua Postgres 11+, khong viet lai bang, khong khoa lau.
+RUI RO thap: nam cot moi, tat ca NULLABLE, khong rang buoc, khong index, khong viet lai bang.
 
-VI SAO LA COT RIENG chu khong ghi de `full_name` / `company_name_raw`:
+VI SAO LA COT RIENG chu khong ghi de `full_name` / `company_name_raw`: quy tac 3 cua
+`app/prompts/ocr.py` giu nguyen chu ban dia va do la thu duy nhat doi chieu duoc voi anh; giao
+dien con in ban goc lam chu thich nho duoi ban dich; va phien am sai tren cot rieng thi sua lai
+duoc, sai tren cot goc thi khong.
 
-  1. Quy tac 3 cua `app/prompts/ocr.py` giu nguyen chu ban dia, va do la thu duy nhat doi chieu
-     duoc voi anh khi nghi may doc sai. Ghi de la mat vinh vien.
-  2. Giao dien in ban goc lam chu thich nho ngay duoi ban dich (EX-06) -- can ca hai cung luc.
-  3. Phien am la viec model co the lam sai. Sai tren mot cot rieng thi sua lai duoc; sai tren
-     cot goc thi khong con gi de sua lai theo.
-
-VI SAO `translation_meta` LA MOT COT chu khong tach thanh vai cot nho: no la nhat ky cua mot buoc
-xu ly (nguon ban dich, ngon ngu & he chu model nhan ra, cach phien am, co `stale`, loi neu co),
-khong phai du lieu nghiep vu. Khong truy van nao loc theo no, khong index nao can den no.
-
-NGHIA CUA NULL o bon cot `*_vi`: *ban goc dung duoc luon, khong can ban dich* -- the tieng Viet
-va the tieng Anh roi het vao ca nay (`services/translate.py::_finalize` bo ban dich trung y het
-ban goc). NULL **khong** co nghia "chua dich"; muon biet da dich hay chua thi doc
-`translation_meta`.
-
-DOWNGRADE that va sach: bo nam cot. Mat toan bo ban Viet hoa, nhung khong mat mot chu nao cua du
-lieu goc -- dung nghia cua viec de chung o cot rieng. Quet lai khong can thiet, bam *Dich lai* la
-dung lai het.
+NGHIA CUA NULL o bon cot `*_vi`: *ban goc dung duoc luon*. NULL **khong** co nghia "chua dich" --
+muon biet da dich hay chua thi doc `translation_meta`.
 
 File nay khong dau tieng Viet: xem canh bao o dau alembic.ini (I-07).
 """

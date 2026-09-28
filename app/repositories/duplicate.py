@@ -1,16 +1,13 @@
 """Phát hiện và gộp liên hệ trùng.
 
-Chủ sở hữu: T | Task: NEXT-04 | xem Task.md
+Chủ sở hữu: T | Task: NEXT-04
 
 **Máy chỉ gợi ý, người quyết định.** Không có đường nào ở đây tự gộp: trùng số tổng đài công ty
-hay trùng địa chỉ `info@` là chuyện thường, và hai thứ đó trông y hệt hai bản ghi của cùng một
-người. Học theo đúng cách chống trùng công ty ở `3.8` — chuẩn hoá rồi gợi ý, gộp là thao tác tay.
+hay trùng địa chỉ `info@` là chuyện thường, mà hai thứ đó trông y hệt hai bản ghi của cùng một
+người.
 
-Gộp là **gộp mềm**: bản trùng ở lại, mang `merged_into_id`, biến mất khỏi mọi danh sách nhưng
-vẫn mở ra đọc được và gỡ gộp được (xem docstring revision `0010`).
-
-**Mọi hàm bắt buộc `workspace_id`** — từ `NEXT-05` đây là khoá lọc, cùng lối đã chốt ở 12.6.
-Trong file này **không có chỗ nào** `user_id` mang nghĩa *người tạo*, nên đổi được trọn gói.
+Gộp là **gộp mềm**: bản trùng ở lại, mang `merged_into_id`, biến khỏi mọi danh sách nhưng vẫn mở
+ra đọc được và gỡ gộp được.
 """
 
 import uuid
@@ -30,13 +27,11 @@ from app.services.normalize_company import normalize_label
 MAX_GROUPS = 50
 
 #: Một giá trị bị dùng chung bởi nhiều thẻ hơn mức này gần như chắc chắn là **số tổng đài hoặc
-#: hộp thư chung của công ty**, không phải một người bị quét hai lần. Vẫn hiện, nhưng có cờ để
-#: giao diện cảnh báo trước khi người dùng bấm gộp.
+#: hộp thư chung của công ty**. Vẫn hiện, nhưng có cờ để giao diện cảnh báo trước khi gộp.
 LIKELY_SHARED_FROM = 4
 
 #: Cột được lấp từ bản trùng khi ô tương ứng của thẻ chính còn trống. Khai tường minh chứ không
-#: mượn `card_repo.OCR_COLUMNS`: danh sách kia phục vụ việc chặn model ghi bậy, hai việc khác
-#: nhau thì không nên dính số phận vào nhau.
+#: mượn `card_repo.OCR_COLUMNS` — hai việc khác nhau thì không nên dính số phận vào nhau.
 MERGE_FIELDS: tuple[str, ...] = (
     "full_name",
     "full_name_vi",
@@ -54,9 +49,8 @@ MERGE_FIELDS: tuple[str, ...] = (
     "notes",
 )
 
-#: Thứ tự "xa" của vòng đời quan hệ, dùng khi gộp. `won` xếp trên `lost`/`closed` có chủ đích:
-#: mất một quan hệ **đã chốt** vì thao tác gộp là lỗi tệ hơn hẳn việc giữ lại một trạng thái
-#: lạc quan hơn thực tế — cái sau người dùng sửa lại trong một cú bấm.
+#: Thứ tự "xa" của vòng đời quan hệ, dùng khi gộp. `won` xếp trên `lost`/`closed`: mất một quan
+#: hệ **đã chốt** vì thao tác gộp là lỗi tệ hơn hẳn việc giữ một trạng thái lạc quan hơn thực tế.
 STAGE_RANK: dict[str, int] = {
     RelationshipStatus.NEW: 0,
     RelationshipStatus.CONTACTED: 1,
@@ -80,8 +74,7 @@ class DuplicateGroup:
     """Một nhóm thẻ dùng chung ít nhất một giá trị đã chuẩn hoá.
 
     `reasons` có thể nhiều hơn một: trùng **cả** email lẫn số điện thoại là bằng chứng mạnh hơn
-    hẳn trùng một trong hai. Gộp chúng vào cùng một khối chứ không tách đôi — tách ra thì màn
-    hình hiện hai lần cùng một cặp thẻ, mà lại đánh mất đúng cái tín hiệu mạnh ấy.
+    hẳn. Gộp vào cùng một khối chứ không tách đôi thành hai khối giống hệt nhau.
     """
 
     reasons: list[DuplicateReason]
@@ -91,8 +84,8 @@ class DuplicateGroup:
     def same_name(self) -> bool:
         """Tên của mọi thẻ trong nhóm chuẩn hoá về cùng một chuỗi.
 
-        Đây là tín hiệu phân biệt *một người bị quét hai lần* với *cả phòng dùng chung một số*.
-        Thẻ không có tên thì không tính là khớp — trống không phải là bằng chứng.
+        Tín hiệu phân biệt *một người bị quét hai lần* với *cả phòng dùng chung một số*. Thẻ
+        không có tên thì không tính là khớp — trống không phải là bằng chứng.
         """
         keys = set()
         for card in self.cards:
@@ -137,15 +130,12 @@ async def _shared_values(db: AsyncSession, workspace_id: uuid.UUID, column: Any)
 async def find_groups(db: AsyncSession, *, workspace_id: uuid.UUID) -> list[DuplicateGroup]:
     """Nhóm thẻ trùng theo email hoặc số điện thoại **đã chuẩn hoá**.
 
-    Chuẩn hoá đã xong từ lúc quét (`services/normalize.py` của Q chạy trong `ocr`), nên ở đây so
-    thẳng giá trị trong cột — không chuẩn hoá lại, để hai chỗ không bao giờ lệch luật với nhau.
+    Chuẩn hoá đã xong từ lúc quét nên ở đây so thẳng giá trị trong cột — không chuẩn hoá lại, để
+    hai chỗ không bao giờ lệch luật với nhau.
 
-    Hai nhóm có **đúng cùng một tập thẻ** được gộp làm một, giữ cả hai lý do: đó chính là ca
-    trùng cả email lẫn số điện thoại, và nó đáng hiện thành một khối chắc chắn hơn chứ không
-    phải hai khối giống hệt nhau.
-
-    Cố ý **không** gom thành cụm liên thông khi các tập chỉ chồng lấn một phần: gom lại thì
-    người dùng nhìn thấy một đống sáu thẻ mà không biết vì sao chúng dính nhau.
+    Hai nhóm có **đúng cùng một tập thẻ** được gộp làm một, giữ cả hai lý do: đó là ca trùng cả
+    email lẫn số điện thoại. Cố ý **không** gom thành cụm liên thông khi các tập chỉ chồng lấn
+    một phần — gom lại thì người dùng nhìn thấy một đống sáu thẻ mà không biết vì sao chúng dính.
     """
     found: dict[frozenset[uuid.UUID], tuple[list[DuplicateReason], list[BusinessCard]]] = {}
     for kind, column in (("email", BusinessCard.email), ("phone", BusinessCard.phone)):
@@ -169,8 +159,7 @@ async def find_groups(db: AsyncSession, *, workspace_id: uuid.UUID) -> list[Dupl
             reasons.append(DuplicateReason(kind=kind, value=value))
 
     groups = [DuplicateGroup(reasons=reasons, cards=cards) for reasons, cards in found.values()]
-    # Bằng chứng nhiều hơn xếp trước, rồi tới nhóm đông thẻ hơn: thứ chắc chắn nhất nằm trên
-    # cùng, vì đó là thứ người dùng gộp được ngay mà không phải cân nhắc.
+    # Bằng chứng nhiều hơn xếp trước, rồi tới nhóm đông thẻ hơn: thứ chắc chắn nhất nằm trên cùng.
     groups.sort(key=lambda group: (len(group.reasons), len(group.cards)), reverse=True)
     return groups[:MAX_GROUPS]
 
@@ -213,12 +202,10 @@ async def merge(
 
     Luật gộp, mỗi dòng chọn theo hướng **mất dữ liệu là lỗi nặng hơn giữ thừa**:
 
-    - Ô nào của thẻ chính còn trống thì lấp từ bản trùng, theo thứ tự thẻ quét trước ưu tiên.
-      Ô đã có thì **không đụng tới** — thẻ chính là thứ người dùng đã chọn giữ.
+    - Ô nào của thẻ chính còn trống thì lấp từ bản trùng; ô đã có thì **không đụng tới**.
     - `relationship_status` lấy trạng thái **xa nhất** (xem `STAGE_RANK`).
-    - `follow_up_at` lấy hẹn **sớm nhất**: bỏ sót một lời nhắc tệ hơn là nhắc sớm một ngày.
-    - `contact_notes` của bản trùng **chuyển sang thẻ chính** — dòng thời gian của một quan hệ
-      thì gộp lại là đúng.
+    - `follow_up_at` lấy hẹn **sớm nhất** — bỏ sót một lời nhắc tệ hơn nhắc sớm một ngày.
+    - `contact_notes` của bản trùng **chuyển sang thẻ chính**.
     - Bản trùng không mất gì: nó chỉ mang `merged_into_id` và biến khỏi các danh sách.
     """
     ordered = sorted(duplicates, key=lambda card: card.uploaded_at)
@@ -272,9 +259,8 @@ async def unmerge(
 ) -> Sequence[BusinessCard]:
     """Gỡ gộp: thẻ quay lại làm thẻ độc lập. Trả về những thẻ thật sự đổi.
 
-    **Không kéo ghi chú về lại.** Sau khi gộp, dòng thời gian là của một quan hệ đã hợp nhất;
-    đoán xem ghi chú nào vốn thuộc thẻ nào là đoán mò. Gỡ gộp trả lại *bản ghi danh thiếp*, không
-    hứa quay ngược thời gian.
+    **Không kéo ghi chú về lại**: sau khi gộp, dòng thời gian là của một quan hệ đã hợp nhất, và
+    đoán xem ghi chú nào vốn thuộc thẻ nào là đoán mò.
     """
     rows = await db.scalars(
         select(BusinessCard).where(

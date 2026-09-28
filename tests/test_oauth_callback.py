@@ -1,16 +1,14 @@
 """Lối hoàn tất OAuth bằng cách dán URL callback — task 13.7, gỡ I-29.
 
-Chủ sở hữu: Q | xem Task.md
+Chủ sở hữu: Q
 
-Vì sao có lối này: Google luôn trả trình duyệt về `http://localhost:51121/oauth-callback`.
-Giá trị đó **ghi cứng trong mã nguồn CLIProxy** (`auth_files_provider_oauth.go:359` dựng từ
-`antigravity.CallbackPort = 51121`), không có khoá cấu hình nào đổi được, và cũng không thể
-đổi sang `oauth.ocrximi.io.vn` vì `redirect_uri` phải khớp cái đã đăng ký cho client OAuth của
-Antigravity — client đó là của Google, ta không sửa được danh sách của nó.
+Google luôn trả trình duyệt về `http://localhost:51121/oauth-callback`; giá trị đó **ghi cứng
+trong mã nguồn CLIProxy** và cũng không đổi sang tên miền thật được vì `redirect_uri` phải khớp
+cái đã đăng ký cho client OAuth của Antigravity.
 
-Chạy ở localhost thì máy chạy trình duyệt **cũng là** máy chạy CLIProxy nên callback tự về.
-Mở từ tên miền thật thì `localhost` là máy của *người dùng*: callback rơi vào khoảng không và
-`get-auth-status` không bao giờ chuyển khỏi `wait`. Bộ test này khoá đúng hành vi đó lại.
+Chạy ở localhost thì máy chạy trình duyệt **cũng là** máy chạy CLIProxy nên callback tự về. Mở từ
+tên miền thật thì `localhost` là máy của *người dùng*: callback rơi vào khoảng không và
+`get-auth-status` không bao giờ chuyển khỏi `wait`.
 """
 
 import json
@@ -39,9 +37,7 @@ MGMT = "/v0/management"
 class CallbackProxy:
     """CLIProxy giả lập ở đúng mức chi tiết mà task này cần.
 
-    Khác `FakeProxy` của `test_user_credentials.py` ở một điểm quyết định: phiên OAuth **chỉ**
-    chuyển sang `ok` khi ai đó nộp callback. Đây chính là tình huống trên máy chủ — không nộp
-    thì poll `wait` mãi cho tới lúc hết giờ.
+    Phiên OAuth **chỉ** chuyển sang `ok` khi ai đó nộp callback — đúng tình huống trên máy chủ.
     """
 
     stub: CliProxyStub
@@ -182,8 +178,8 @@ async def test_without_the_paste_the_flow_never_completes(
 ) -> None:
     """Tiền đề của cả task: trên tên miền thật, chỉ poll thôi thì không bao giờ xong.
 
-    Không có test này thì ba test dưới chỉ chứng minh "đường mới chạy được", chứ không chứng
-    minh **vì sao phải có nó**.
+    Không có test này thì ba test dưới chỉ chứng minh "đường mới chạy được", không chứng minh
+    **vì sao phải có nó**.
     """
     async with app_client(alice) as http:
         state = (await http.post("/api/integration/connect")).json()["state"]
@@ -223,10 +219,9 @@ async def test_pasting_the_url_connects_and_claims_the_credential(
 async def test_backend_forwards_the_whole_url_not_just_the_code(
     app_client: ClientFactory, proxy: CallbackProxy, alice: User
 ) -> None:
-    """Gửi nguyên `redirect_url` cho CLIProxy tự bóc — đúng hợp đồng `oauth_callback.go:55-74`.
+    """Gửi nguyên `redirect_url` cho CLIProxy tự bóc — đúng hợp đồng của nó.
 
-    Tự bóc `code` rồi gửi riêng cũng chạy, nhưng sẽ tự nhận lấy việc phân tích URL mà upstream
-    đã làm sẵn, và sai lệch ngay khi Google thêm tham số mới.
+    Tự bóc `code` rồi gửi riêng cũng chạy, nhưng sẽ sai lệch ngay khi Google thêm tham số mới.
     """
     async with app_client(alice) as http:
         state = (await http.post("/api/integration/connect")).json()["state"]
@@ -250,9 +245,8 @@ async def test_url_of_an_earlier_round_still_works(
 ) -> None:
     """Bấm nút Kết nối hai lần rồi dán URL của lượt ĐẦU — vẫn phải xong.
 
-    `state` lấy từ chính URL dán vào, không phải từ phiên mới nhất của UI. Bản đầu bắt hai
-    giá trị phải trùng nhau và trả 400, tức phạt người dùng vì một cú bấm thừa — trong khi
-    lượt họ thật sự đăng nhập xong chính là lượt nằm trong URL họ cầm về.
+    `state` lấy từ chính URL dán vào, không phải từ phiên mới nhất của UI: lượt người dùng thật
+    sự đăng nhập xong chính là lượt nằm trong URL họ cầm về.
     """
     async with app_client(alice) as http:
         first = (await http.post("/api/integration/connect")).json()["state"]
@@ -271,8 +265,7 @@ async def test_bare_code_is_accepted_too(
 ) -> None:
     """Chép hụt, chỉ lấy được đoạn `code` — vẫn nhận, `state` thì backend đang giữ sẵn.
 
-    Bước dán là chỗ duy nhất hệ thống bắt người dùng làm việc của máy; kén chọn ở đây chỉ
-    đổi lấy một lượt đăng nhập hỏng.
+    Bước dán là chỗ duy nhất hệ thống bắt người dùng làm việc của máy.
     """
     async with app_client(alice) as http:
         state = (await http.post("/api/integration/connect")).json()["state"]
@@ -294,8 +287,7 @@ async def test_expired_state_says_so_instead_of_blaming_the_config(
     """404 của route này là "state hết hạn", KHÔNG phải "Management API bị tắt".
 
     `CliProxyClient.request()` dịch mọi 404 quản trị thành thông báo bảo đi sửa `config.yaml` —
-    đúng với `auth-files`, sai hẳn ở đây. Người dán URL muộn 5 phút phải được bảo là bấm kết
-    nối lại, chứ không phải đi sửa cấu hình máy chủ.
+    sai hẳn ở đây.
     """
     async with app_client(alice) as http:
         state = (await http.post("/api/integration/connect")).json()["state"]
@@ -345,9 +337,7 @@ async def test_reusing_the_same_url_twice_is_refused(
 
     assert first.json()["status"] == "ok"
     # Lượt sau **không** bị chặn ở khâu sở hữu: `owns_session()` cố ý trả True cho state lạ
-    # (phiên đã quên sau khi xong, và process khởi động lại cũng làm mọi state thành lạ — khoá
-    # cứng ở đó thì mất luôn đường kết nối sau mỗi lần deploy). Chặn ở đây là CLIProxy, và câu
-    # chữ của nó phải tới được người dùng nguyên vẹn.
+    # (process khởi động lại làm mọi state thành lạ). Chặn ở đây là CLIProxy.
     assert second.status_code == 400
     assert "đã dùng rồi" in second.json()["detail"]
 

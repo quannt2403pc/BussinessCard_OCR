@@ -1,22 +1,18 @@
 """Gọi Gemini Flash Vision, parse & validate JSON trả về.
 
-Chủ sở hữu: Q | Task: 3.4 | xem Task.md
+Chủ sở hữu: Q | Task: 3.4
 
-Đường đi một ảnh: `routers/cards.py` (3.1) → `services/image.py` (3.2) → **file này** →
-`services/normalize.py` (3.6) → `services/translate.py` (EX-02) → DB (3.5).
+Đường đi một ảnh: `routers/cards.py` → `services/image.py` → **file này** →
+`services/normalize.py` → `services/translate.py` → DB.
 
-Hai chỗ hỏng đã biết trước khi viết dòng code đầu tiên:
+Hai chỗ hỏng đã biết trước:
 
-1. **I-15 — model bọc JSON trong khối ```json.** Đo thật ở task 2.3: prompt ghi rõ "không bọc"
-   mà `gemini-3-flash` vẫn bọc. `services/llm_json.py` gỡ hàng rào code, và nếu vẫn hỏng thì
-   quét lấy object `{…}` cân bằng ngoặc đầu tiên trong chuỗi — bắt được cả trường hợp model
-   thêm một câu dẫn trước JSON. (Trước EX-02 phần này nằm ngay trong file; chuyển ra ngoài khi
-   lượt Việt hoá cần đúng logic đó cho lời gọi model thứ hai.)
-2. **Model trả JSON hợp lệ nhưng sai khoá / sai kiểu.** Không có hợp đồng nào ràng buộc nó cả.
-   `CardExtraction` (task 3.4, `app/schemas/card.py`) lo phần này; ở đây chỉ lo cú pháp.
+1. **I-15 — model bọc JSON trong khối ```json** dù prompt ghi rõ "không bọc". `services/llm_json.py`
+   gỡ hàng rào, và nếu vẫn hỏng thì quét lấy object `{…}` cân bằng ngoặc đầu tiên.
+2. **Model trả JSON hợp lệ nhưng sai khoá / sai kiểu** — `CardExtraction` lo phần này; ở đây chỉ
+   lo cú pháp.
 
-Thất bại parse được **thử lại đúng một lần** kèm lời nhắc gắt hơn. Thử lại lỗi kết nối/OAuth thì
-không — `CliProxyClient` đã lo retry mạng, còn 4xx thì thử lại chỉ tốn thời gian (I-05, I-10).
+Thất bại parse được **thử lại đúng một lần** kèm lời nhắc gắt hơn. Lỗi kết nối/OAuth thì không.
 """
 
 from __future__ import annotations
@@ -44,7 +40,7 @@ from app.services.normalize import normalize_card_fields
 logger = logging.getLogger(__name__)
 
 #: Một lần gọi lại khi model trả chữ không parse được thành JSON. Nhiều hơn thì người dùng ngồi
-#: chờ 3 lượt vision (~10s) để rồi vẫn hỏng — thà báo lỗi sớm cho họ bấm quét lại.
+#: chờ 3 lượt vision (~10s) để rồi vẫn hỏng.
 MAX_ATTEMPTS = 2
 
 #: Nhắc thêm ở lượt thử lại. Cố ý cộc lốc: lượt đầu đã có prompt đầy đủ rồi.
@@ -61,8 +57,8 @@ class OcrError(RuntimeError):
 class OcrParseError(OcrError):
     """Model trả lời nhưng không đọc được thành dữ liệu danh thiếp.
 
-    Giữ nguyên văn câu trả lời trong `raw_text` để ghi log và dán vào `docs/bugs-f1-f3.md` khi
-    cần điều tra — mất chuỗi gốc là mất luôn khả năng biết model đã trả cái gì.
+    Giữ nguyên văn câu trả lời trong `raw_text`: mất chuỗi gốc là mất luôn khả năng biết model đã
+    trả cái gì.
     """
 
     def __init__(self, message: str, raw_text: str = "") -> None:
@@ -81,18 +77,15 @@ class OcrResult:
     model: str
     elapsed_ms: int
     attempts: int = 1
-    #: Bản Việt hoá (EX-02), `None` khi lượt quét không chạy bước đó. Cố ý **không** trộn vào
-    #: `extraction`: `CardExtraction` là *chữ model đọc được từ ảnh*, còn đây là kết quả của một
-    #: lời gọi model khác trên chính dữ liệu đó. Gộp làm một thì không còn phân biệt được
-    #: "model đọc sai chữ" với "model dịch sai chữ đọc đúng" — hai lỗi phải sửa ở hai chỗ.
+    #: Bản Việt hoá, `None` khi lượt quét không chạy bước đó. Cố ý **không** trộn vào `extraction`:
+    #: gộp làm một thì không phân biệt được "model đọc sai chữ" với "model dịch sai chữ đọc đúng".
     translation: translate_service.Translation | None = None
 
     def card_fields(self) -> dict[str, Any]:
         """Toàn bộ phần ghi vào `business_cards`: trường OCR + 4 cột `*_vi` + `translation_meta`.
 
-        Chỗ **duy nhất** gộp hai nguồn, để hai đường vào (upload 1 ảnh ở `routers/cards.py` và
-        upload hàng loạt ở `services/card_batch.py`) không bao giờ lệch nhau về việc cột nào
-        được ghi — đúng lý lẽ đã viết ở `status_and_notes()`.
+        Chỗ **duy nhất** gộp hai nguồn, để hai đường upload không bao giờ lệch nhau về việc cột
+        nào được ghi.
         """
         fields = self.extraction.card_columns()
         if self.translation is not None:
@@ -110,12 +103,11 @@ async def extract_card(
 ) -> OcrResult:
     """Đọc một ảnh danh thiếp đã tiền xử lý thành `CardExtraction` đã chuẩn hoá.
 
-    `image_bytes` phải là ảnh **đã qua `services/image.py`** (JPEG, cạnh dài ≤ 1600px): ảnh gốc
-    từ điện thoại có thể nằm sai chiều theo EXIF, model đọc đúng pixel nhưng chữ xoay 90°.
+    `image_bytes` phải là ảnh **đã qua `services/image.py`**: ảnh gốc từ điện thoại có thể nằm
+    sai chiều theo EXIF, model đọc đúng pixel nhưng chữ xoay 90°.
 
-    Ném `OcrParseError` khi model trả chữ không dùng được, và để nguyên `llm.LLMError` các loại
-    (`LLMNotConnectedError`, `LLMBlockedError`…) đi tiếp — router phân biệt "chưa kết nối OAuth"
-    với "quét hỏng" để hiện đúng lời mời bấm nút (task 9.4).
+    Ném `OcrParseError` khi model trả chữ không dùng được, và để nguyên `llm.LLMError` đi tiếp —
+    router phân biệt "chưa kết nối OAuth" với "quét hỏng".
     """
     started = time.perf_counter()
     last_error: OcrParseError | None = None
@@ -157,10 +149,8 @@ async def extract_card(
             extraction=extraction,
             raw_json=raw_json,
             raw_text=text,
-            # Model **thật sự đã gọi**, không phải model mặc định của hệ thống: từ EX-14 mỗi
-            # người chọn model riêng cho từng chức năng, nên hai thứ đó khác nhau. `base_model()`
-            # cắt tiền tố credential (`u1a2b3c/…`) — nó nói lời gọi đi bằng tài khoản ai, không
-            # phải model nào, và ghi nó vào sổ là lộ một phần `user_id` ra bản ghi thẻ. (I-34)
+            # Model **thật sự đã gọi**, không phải model mặc định của hệ thống. `base_model()`
+            # cắt tiền tố credential — ghi nó vào sổ là lộ một phần `user_id` ra bản ghi thẻ.
             model=llm.base_model(model or settings.llm_model),
             elapsed_ms=elapsed_ms,
             attempts=attempt,
@@ -179,15 +169,11 @@ async def extract_and_translate(
     model: str | None = None,
     client: CliProxyClient | None = None,
 ) -> OcrResult:
-    """`extract_card()` + lượt Việt hoá (EX-02). **Đây là hàm hai đường upload cùng gọi.**
+    """`extract_card()` + lượt Việt hoá. **Đây là hàm hai đường upload cùng gọi.**
 
-    Tách khỏi `extract_card()` chứ không nhét thẳng vào trong, vì hai lý do khác nhau:
-
-    * `extract_card()` là *đọc chữ trên ảnh* và có hợp đồng riêng — số lượt gọi model của nó
-      (`attempts`, `MAX_ATTEMPTS`) là thứ test và log đang đếm. Thêm một lời gọi nữa vào giữa
-      làm hỏng phép đếm đó.
-    * Việt hoá là **tiện ích**: hỏng thì thẻ vẫn phải quét xong. Ở đây lỗi bị nuốt hẳn
-      (`translate_card()` tự rơi về bảng tra cứu), còn `extract_card()` vẫn ném lỗi như cũ.
+    Tách khỏi `extract_card()` vì hai lý do: số lượt gọi model của `extract_card()` là thứ test và
+    log đang đếm, thêm một lời gọi vào giữa làm hỏng phép đếm đó; và Việt hoá là **tiện ích**,
+    hỏng thì thẻ vẫn phải quét xong nên ở đây lỗi bị nuốt hẳn.
     """
     result = await extract_card(
         image_bytes, mime_type=mime_type, hint=hint, model=model, client=client
@@ -212,13 +198,10 @@ def status_and_notes(result: OcrResult | None, error: str | None) -> tuple[CardS
     """Trạng thái vòng đời + ghi chú cho một bản ghi vừa quét.
 
     `pending` = chưa quét được, còn phải quét lại. `needs_review` = đã có dữ liệu, chờ người
-    duyệt (task 5.1). Không bao giờ tự nhảy sang `confirmed` — xác nhận là việc của người dùng
-    (task 4.3).
+    duyệt. Không bao giờ tự nhảy sang `confirmed`.
 
-    Nằm ở đây chứ không ở `routers/cards.py` vì từ task 5.2 có **hai** đường đi tới cùng một kết
-    luận: upload 1 ảnh (đồng bộ, trong request) và upload hàng loạt (nền, `services/card_batch.py`).
-    Hai bản sao của cùng một quy tắc vòng đời là chỗ sẽ lệch nhau mà không ai nhận ra — sửa một
-    bên rồi quên bên kia thì cùng một ảnh hỏng lại ra hai trạng thái khác nhau tuỳ đường vào.
+    Nằm ở đây chứ không ở router vì có **hai** đường đi tới cùng một kết luận (upload 1 ảnh và
+    upload hàng loạt); hai bản sao của cùng một quy tắc vòng đời sẽ lệch nhau mà không ai nhận ra.
     """
     if result is None:
         return CardStatus.PENDING, f"OCR chưa chạy được: {error}"
@@ -234,10 +217,10 @@ def status_and_notes(result: OcrResult | None, error: str | None) -> tuple[CardS
 
 
 def _validate(raw_json: dict[str, Any]) -> CardExtraction:
-    """Ép JSON thô vào schema rồi chạy hậu xử lý SĐT/email (task 3.6).
+    """Ép JSON thô vào schema rồi chạy hậu xử lý SĐT/email.
 
-    Chuẩn hoá **sau** khi validate chứ không phải trước: `CardExtraction` mới là chỗ biết
-    `language_detected` sau khi đã gom alias, mà mã vùng số điện thoại lại phụ thuộc trường đó.
+    Chuẩn hoá **sau** khi validate: `CardExtraction` mới là chỗ biết `language_detected` sau khi
+    đã gom alias, mà mã vùng số điện thoại lại phụ thuộc trường đó.
     """
     try:
         extraction = CardExtraction.model_validate(raw_json)
@@ -257,9 +240,8 @@ def _validate(raw_json: dict[str, Any]) -> CardExtraction:
 def _to_json(text: str) -> dict[str, Any]:
     """Chuỗi model trả về → dict, dịch lỗi bóc JSON thành lỗi của F1.
 
-    Phần đếm ngoặc / gỡ hàng rào ```json (I-15) chuyển sang `services/llm_json.py` ở EX-02, khi
-    lượt Việt hoá cần đúng logic đó cho lời gọi model thứ hai. Giữ lại hàm này vì lớp dịch lỗi
-    mới là phần thuộc về F1: `OcrParseError` mang theo `raw_text` để dán vào `docs/bugs-f1-f3.md`.
+    Phần đếm ngoặc / gỡ hàng rào ```json nằm ở `services/llm_json.py`; giữ hàm này vì lớp dịch
+    lỗi mới là phần thuộc về F1 — `OcrParseError` mang theo `raw_text` để điều tra.
     """
     try:
         return extract_json_object(text)

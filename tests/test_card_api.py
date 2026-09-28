@@ -1,17 +1,13 @@
-"""Test API danh thiếp: xác nhận (4.3), sửa tay (4.2), lọc danh sách (4.1).
+"""Test API danh thiếp: xác nhận, sửa tay, lọc danh sách.
 
-Chủ sở hữu: Q | Task: 10.2, 12.8 (gắn người dùng) | xem Task.md
+Chủ sở hữu: Q | Task: 10.2, 12.8
 
-**Vì sao file này mãi tới D10 mới có nội dung.** Nó nằm trong khung xương từ D1 và ở lại dạng
-stub 6 dòng suốt D3–D9: các endpoint của `routers/cards.py` chỉ được chạm gián tiếp trong
-`tests/test_rag_retrieval.py` (mục 7.3, nơi `confirm_card` được gọi để kiểm hook vào KB). Kiểm
-thử đầu–cuối của 10.1 chạy qua HTTP thật nên vẫn bắt được lỗi, nhưng bộ đó cần Docker + model
-thật nên **CI không chạy được** — nghĩa là hồi quy ở F1 không có lưới nào đỡ. Ghi đầy đủ ở
-`docs/bugs-f1-f3.md` mục B-05.
+Bộ kiểm thử đầu–cuối của 10.1 chạy qua HTTP thật nên cần Docker + model thật, tức **CI không chạy
+được** — file này là lưới đỡ hồi quy chạy được trong CI.
 
-File này chưa phủ hết API danh thiếp và không giả vờ là đã phủ. Nó nhắm đúng những hành vi mà
-10.1/10.3 đã chứng minh là **có người đi qua** và lại **không tốn model để kiểm**: chỗ nối sang
-`company_matching` của T, ranh giới chuẩn hoá khi sửa tay, và các đường 4xx.
+Không phủ hết API danh thiếp và không giả vờ là đã phủ: nhắm đúng những hành vi **có người đi
+qua** mà lại **không tốn model để kiểm** — chỗ nối sang `company_matching`, ranh giới chuẩn hoá
+khi sửa tay, và các đường 4xx.
 """
 
 from __future__ import annotations
@@ -39,9 +35,8 @@ NOW = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 async def make_company(db_session, user: User, name: str = "Công ty TNHH Phú Cơ") -> Company:
     """Công ty thật trong DB.
 
-    Không dùng UUID bịa được: từ khi I-16 khai lại `ForeignKey` trên `business_cards.company_id`
-    (task 3.8), gán một id không có trong bảng `companies` là `ForeignKeyViolation` ngay lúc
-    INSERT — đúng như ứng dụng thật sẽ hành xử.
+    Không dùng UUID bịa: gán một id không có trong bảng `companies` là `ForeignKeyViolation` ngay
+    lúc INSERT, đúng như ứng dụng thật sẽ hành xử.
     """
     company = Company(
         id=uuid.uuid4(),
@@ -87,15 +82,13 @@ async def make_card(db_session, user: User, **overrides) -> BusinessCard:
 async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
     db_session, user_a, workspace_a, active_a, embedder, monkeypatch
 ):
-    """I-18: thiếu hai tham số này thì quy tắc gộp theo tên miền của 3.8 không bao giờ chạy.
+    """I-18: thiếu hai tham số này thì quy tắc gộp theo tên miền không bao giờ chạy.
 
-    `company_matching.upsert_company()` (file của T) nhận `email=` / `website=` để rút tên miền,
-    và tên miền cắt theo **cả hai chiều**: chung miền thì nới ngưỡng so mờ, khác miền thì không
-    bao giờ gộp. Bản đầu của 4.3 gọi `upsert(db, raw_name)` nên `extract_domains(None, None)`
-    luôn rỗng — lưới an toàn có mà chưa bao giờ bật từ giao diện.
+    `upsert_company()` nhận `email=` / `website=` để rút tên miền, và tên miền cắt theo **cả hai
+    chiều**: chung miền thì nới ngưỡng so mờ, khác miền thì không bao giờ gộp.
 
-    Test bám vào **chữ ký lời gọi**, không bám vào kết quả gộp: kết quả là hành vi trong file
-    của T và T có quyền đổi; điều Q phải giữ là truyền đủ dữ kiện xuống.
+    Test bám vào **chữ ký lời gọi**, không bám vào kết quả gộp — kết quả là hành vi trong file
+    của T và T có quyền đổi.
     """
     card = await make_card(db_session, user_a, company_name_vi="Công ty TNHH Phú Cơ (VN)")
     company = await make_company(db_session, user_a)
@@ -123,8 +116,7 @@ async def test_xac_nhan_truyen_ca_email_va_website_xuong_upsert_company(
         "raw_name": "Công ty TNHH Phú Cơ",
         "workspace_id": workspace_a,
         "user_id": user_a.id,
-        # `I-36`: bản Việt hoá của thẻ phải đi xuống, không thì danh sách công ty hiện
-        # chữ gốc trong khi thẻ đã có sẵn bản dịch từ `EX-02`.
+        # Bản Việt hoá của thẻ phải đi xuống, không thì danh sách công ty hiện chữ gốc.
         "display_name_vi": "Công ty TNHH Phú Cơ (VN)",
         "email": "c.le@phuco.vn",
         "website": "https://phuco.vn",
@@ -184,8 +176,8 @@ async def test_patch_chuan_hoa_sdt_va_email_giong_luc_quet(db_session, user_a, a
 async def test_patch_chi_sua_phone_thi_khong_xoa_mat_phone_alt(db_session, user_a, active_a):
     """Ranh giới của `_normalize_edits()`: sửa ô nào chỉ đổi ô đó.
 
-    `normalize_card_fields()` lúc quét xử lý `phone`/`phone_alt` như một cặp và luôn ghi lại cả
-    hai — dùng lại nó ở đây thì một lần PATCH gửi mỗi `phone` sẽ xoá sạch số thứ hai đang có.
+    `normalize_card_fields()` xử lý `phone`/`phone_alt` như một cặp và luôn ghi lại cả hai — dùng
+    lại nó ở đây thì một lần PATCH gửi mỗi `phone` sẽ xoá sạch số thứ hai đang có.
     """
     card = await make_card(db_session, user_a)
 
@@ -253,14 +245,11 @@ async def test_stage_gan_ca_nguoi_bam_nut_chu_khong_rieng_khong_gian(
 ) -> None:
     """Mục xếp hàng phải mang **cả hai** id — `I-39`.
 
-    `NEXT-05` tách `user_id` (ai bấm nút) khỏi `workspace_id` (dữ liệu của ai), thêm tham số
-    `user_id` vào `_stage()` nhưng **quên gán nó vào `BatchItem`**. Lô vẫn nhận 202, ảnh vẫn
-    nằm trong volume, rồi mọi ảnh chết ở nền tại bước chọn model — người dùng thấy đúng một
-    câu "Lỗi ngoài dự kiến".
+    `_stage()` từng nhận `user_id` nhưng **quên gán vào `BatchItem`**: lô vẫn nhận 202, rồi mọi
+    ảnh chết ở nền tại bước chọn model với đúng một câu "Lỗi ngoài dự kiến".
 
-    Không ca nào bắt được vì `POST /api/cards/batch-upload` **chưa từng có test**: mọi test
-    của batch đều dựng `BatchItem` bằng tay và tự điền sẵn hai id, tức là kiểm phần sau đúng
-    cái chỗ bị hỏng. Ca này đi qua chính `_stage()`, chỗ duy nhất dựng `BatchItem` thật.
+    Không ca nào bắt được vì mọi test của batch đều dựng `BatchItem` bằng tay và tự điền sẵn hai
+    id. Ca này đi qua chính `_stage()`, chỗ duy nhất dựng `BatchItem` thật.
     """
     monkeypatch.setattr(settings, "upload_dir", tmp_path)
     workspace_id = await workspace_id_of(db_session, user_a)
@@ -282,9 +271,8 @@ async def test_stage_gan_du_hai_id_ca_khi_anh_da_quet_truoc_do(
 ) -> None:
     """Nhánh ảnh trùng cũng phải mang đủ hai id.
 
-    Nhánh này không đi qua `_scan()` nên hôm nay thiếu id cũng không nổ. Vẫn kiểm, vì một
-    `BatchItem` có `card_id` mà không biết ai tạo ra nó là một bản ghi tự mâu thuẫn — và nhánh
-    nào rồi cũng có ngày được đem đi quét lại.
+    Nhánh này không đi qua `_scan()` nên hôm nay thiếu id cũng không nổ, nhưng một `BatchItem` có
+    `card_id` mà không biết ai tạo ra nó là một bản ghi tự mâu thuẫn.
     """
     monkeypatch.setattr(settings, "upload_dir", tmp_path)
     workspace_id = await workspace_id_of(db_session, user_a)

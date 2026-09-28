@@ -1,18 +1,15 @@
 """Câu SQL cho không gian làm việc và danh sách thành viên.
 
-Chủ sở hữu: T | Task: NEXT-05 | xem Task.md
+Chủ sở hữu: T | Task: NEXT-05
 
-`core/workspace.py` quyết định request **được** chạm vào không gian nào; file này là chỗ duy
-nhất **đọc ghi** hai bảng ấy. Ba điều đáng nhớ:
+`core/workspace.py` quyết định request **được** chạm vào không gian nào; file này là chỗ duy nhất
+**đọc ghi** hai bảng ấy. Ba điều đáng nhớ:
 
-1. **Không gian nào cũng phải còn ít nhất một quản trị.** Gỡ hay hạ vai trò người cuối cùng là
-   tạo ra một tổ chức không ai mời được ai nữa, và không đường nào sửa từ trong ứng dụng. Hai
-   hàm `remove_member()` / `set_role()` cùng gọi `admin_count()` trước khi ghi.
-2. **Gỡ người thì dữ liệu ở lại.** Đó là toàn bộ điểm của `NEXT-05`: danh thiếp thuộc tổ chức.
-   Việc duy nhất phải dọn là *người phụ trách* — xem `handover()`.
-3. **`users.active_workspace_id` chỉ là chỗ ghi nhớ.** Gỡ một người thì trỏ nó sang không gian
-   khác họ còn chân, hoặc `NULL`; `core/workspace.py` vẫn tra lại bảng thành viên mỗi request
-   nên bước này là để giao diện không mở nhầm màn hình, không phải để chặn truy cập.
+1. **Không gian nào cũng phải còn ít nhất một quản trị** — gỡ hay hạ vai người cuối cùng là tạo
+   ra một tổ chức không ai mời được ai, và không đường nào sửa từ trong ứng dụng.
+2. **Gỡ người thì dữ liệu ở lại**; việc duy nhất phải dọn là *người phụ trách*.
+3. **`users.active_workspace_id` chỉ là chỗ ghi nhớ** — `core/workspace.py` vẫn tra lại bảng
+   thành viên mỗi request.
 """
 
 import uuid
@@ -56,11 +53,10 @@ async def list_for_user(
     """Mọi không gian của một người, kèm vai trò và số thành viên, cũ nhất trước.
 
     Đếm thành viên bằng truy vấn con chứ không `JOIN` rồi `GROUP BY`: `JOIN` nhân dòng lên theo
-    số thành viên, và bất kỳ cột nào thêm vào sau này cũng phải nhét vào `GROUP BY` theo.
+    số thành viên.
     """
     # Bí danh riêng cho truy vấn con, **không** dùng lại `WorkspaceMember` của câu `JOIN` bên
-    # ngoài: dùng lại thì SQLAlchemy tự tương quan luôn cả bảng ấy, truy vấn con mất sạch mệnh đề
-    # `FROM` và câu lệnh không biên dịch nổi (`InvalidRequestError: returned no FROM clauses`).
+    # ngoài: dùng lại thì SQLAlchemy tự tương quan luôn cả bảng ấy và câu lệnh không biên dịch nổi.
     counted = aliased(WorkspaceMember)
     member_count = (
         select(func.count())
@@ -116,11 +112,9 @@ async def set_role(
 ) -> bool:
     """Đổi vai trò. Trả `False` nếu việc đó bỏ lại một workspace không còn quản trị nào.
 
-    Từ `I-37` router chặn **mọi** lượt tự đổi vai của chính mình, nên qua HTTP thì nhánh
-    `False` ở đây không còn với tới được: người gọi luôn là quản trị, và họ chỉ hạ vai được
-    người khác — tức là đã có sẵn hai quản trị. Giữ lại vì đây là hàng rào của **tầng
-    repository**: `scripts/` hay một màn hình quản trị sau này gọi thẳng vào đây thì vẫn
-    không đưa được tổ chức về trạng thái không ai mời được ai.
+    Router chặn mọi lượt tự đổi vai của chính mình nên nhánh `False` không với tới được qua HTTP.
+    Giữ lại vì đây là hàng rào của **tầng repository**: `scripts/` gọi thẳng vào đây vẫn không
+    đưa được tổ chức về trạng thái không ai mời được ai.
     """
     member = await db.get(WorkspaceMember, (workspace_id, user_id))
     if member is None:
@@ -135,9 +129,7 @@ async def set_role(
 async def remove_member(db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     """Gỡ một người khỏi không gian. Trả `False` nếu đó là quản trị cuối cùng.
 
-    **Dữ liệu họ đã nhập ở lại nguyên vẹn** — `business_cards.user_id` vẫn trỏ vào họ để câu
-    "ai nhập bản ghi này" còn trả lời được. Chỉ *người phụ trách* được trả về trống, vì một
-    người đã rời tổ chức thì không phụ trách được liên hệ nào nữa.
+    **Dữ liệu họ đã nhập ở lại nguyên vẹn** — chỉ *người phụ trách* được trả về trống.
     """
     member = await db.get(WorkspaceMember, (workspace_id, user_id))
     if member is None:
@@ -155,9 +147,9 @@ async def remove_member(db: AsyncSession, *, workspace_id: uuid.UUID, user_id: u
 async def handover(db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID) -> int:
     """Trả về trống mọi liên hệ đang giao cho `user_id` trong không gian này.
 
-    Trả trống chứ không giao sang quản trị: một liên hệ *không có người phụ trách* hiện lên
-    trong bộ lọc "chưa giao" để ai đó nhận, còn một liên hệ bị giao âm thầm cho quản trị thì
-    nằm im trong danh sách của người không biết mình đang giữ nó.
+    Trả trống chứ không giao sang quản trị: một liên hệ *không có người phụ trách* hiện lên trong
+    bộ lọc "chưa giao" để ai đó nhận, còn giao âm thầm thì nằm im trong danh sách của người không
+    biết mình đang giữ nó.
     """
     result = await db.execute(
         update(BusinessCard)

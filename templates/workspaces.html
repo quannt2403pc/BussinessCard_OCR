@@ -1,24 +1,14 @@
-{# Workspace: danh sách, tạo, chuyển, và thành viên của workspace đang mở. #}
-{# Chủ sở hữu: T | Task: NEXT-05, sửa giao diện ở I-37 (Q làm, T review) | xem Task.md #}
-{#
-  Một trang, hai khối, và thứ tự đó là có chủ đích: khối trên trả lời "tôi đang ở đâu", khối
-  dưới "ai làm chung với tôi". Đảo lại thì người vừa được mời vào hai tổ chức sẽ sửa thành viên
-  của nhầm nơi.
+{# Workspace: danh sách, tạo, chuyển, và thành viên của workspace đang mở.
+   Chủ sở hữu: T | Task: NEXT-05, I-37
 
-  Mọi thao tác thành viên chạy trên **workspace đang mở** — API từ chối id khác (xem
-  `routers/workspaces.py::_require_active`). Vì vậy bấm *Chuyển* là nạp lại cả hai khối.
+   Hai khối, thứ tự có chủ đích: khối trên trả lời "tôi đang ở đâu", khối dưới "ai làm chung với
+   tôi". Đảo lại thì người vừa được mời vào hai tổ chức sẽ sửa thành viên của nhầm nơi.
 
-  I-37 đổi ba thứ, không đổi một dòng logic nào:
-  1. Thuật ngữ trên màn hình: "không gian làm việc" → **workspace**. Chữ trong mã (`workspace_id`,
-     `ActiveWorkspace`) vốn đã là `workspace`, nên đây là dẹp chỗ lệch giữa mã và giao diện.
-  2. Gỡ các đoạn giải thích cơ chế theo `NEXT-10` — trang này sinh sau khi `NEXT-10` chạy nên
-     chưa từng bị quét. Giữ đúng loại chữ mà luật cho giữ: ràng buộc (*phải có tài khoản sẵn,
-     không gửi thư mời*) và hậu quả (*dữ liệu ở lại*).
-  3. `window.prompt()` / `window.confirm()` → hai `<dialog>` của chính trang. Hộp của trình duyệt
-     chặn cả tab, không nhận được `aria-live` của trang, và trên iOS Safari nó hiện tên máy chủ
-     lên đầu hộp. `<dialog>` + `showModal()` thì bẫy focus và Esc là việc của trình duyệt, không
-     phải việc của ta — cùng lối `settings.html` dùng từ 13.7.
-#}
+   Mọi thao tác thành viên chạy trên **workspace đang mở** (API từ chối id khác), nên bấm *Chuyển*
+   là nạp lại cả hai khối.
+
+   Dùng `<dialog>` chứ không `prompt()`/`confirm()`: hộp của trình duyệt chặn cả tab, không nhận
+   `aria-live`, và trên iOS Safari nó hiện tên máy chủ lên đầu hộp. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 

@@ -1,15 +1,13 @@
-"""Test trợ lý hỏi–đáp: prompt (8.1), API chat (8.2), hội thoại nhiều lượt (8.3), lọc (8.5).
+"""Test trợ lý hỏi–đáp: prompt, API chat, hội thoại nhiều lượt, lọc phạm vi.
 
-Chủ sở hữu: Q | Task: 8.1–8.5 | xem Task.md
+Chủ sở hữu: Q | Task: 8.1–8.5
 
 Phần cần DB dùng `embedder` giả lập của `conftest.py`: vector suy từ hàm băm của chính đoạn văn,
-nên hỏi bằng **đúng nội dung một chunk** cho tương đồng 1.0 còn mọi câu khác cho ~0. Hai đầu của
-thang điểm — đủ để dựng chắc chắn hai tình huống mà D8 phải phân biệt: "tìm được ngữ cảnh" và
-"không tìm được gì".
+nên hỏi bằng **đúng nội dung một chunk** cho tương đồng 1.0 còn mọi câu khác cho ~0 — đủ để dựng
+chắc chắn hai tình huống "tìm được ngữ cảnh" và "không tìm được gì".
 
-Đổi lại, các test ở đây **không nói gì về chất lượng câu trả lời thật**: model cũng là giả lập,
-nó trả về đúng chuỗi test đưa cho. Chất lượng trả lời đo bằng model thật trên
-`docs/qa-testset.md` (task 8.7 của T), kết quả ghi vào chính file đó.
+Đổi lại, các test ở đây **không nói gì về chất lượng câu trả lời thật**: model cũng là giả lập.
+Chất lượng trả lời đo bằng model thật trên `docs/qa-testset.md`.
 """
 
 from __future__ import annotations
@@ -112,8 +110,7 @@ def test_trich_dan_giu_thu_tu_xuat_hien_va_danh_so_lai():
 def test_trich_dan_gop_nhieu_chunk_cua_cung_mot_nguon():
     """Một hồ sơ dài bị cắt thành 2 chunk vẫn chỉ ra **một** thẻ trích dẫn.
 
-    Không gộp thì UI hiện hai thẻ y hệt nhau trỏ cùng một trang, và số trong câu chữ trỏ tới
-    thẻ thứ hai — thứ người đọc không phân biệt được với một nguồn thật khác.
+    Không gộp thì UI hiện hai thẻ y hệt nhau trỏ cùng một trang.
     """
     source_id = uuid.uuid4()
     hits = [
@@ -293,9 +290,7 @@ async def chunk_content(db_session, user, source_type: str) -> str:
 async def post_chat(db_session, payload: dict, user) -> httpx.Response:
     """Gọi `POST /api/chat` qua ASGI **với tư cách `user`**.
 
-    Từ task 12.4 mọi đường dẫn ngoài `/auth/*` đều đòi phiên đăng nhập, nên phần dựng
-    client (ghi đè `get_db`, ký cookie, trỏ session của middleware về đúng transaction của
-    test) chuyển hẳn sang `conftest.api_client` — một chỗ cho cả bộ test.
+    Phần dựng client nằm ở `conftest.api_client` — một chỗ cho cả bộ test.
     """
     async with api_client(db_session, user) as http:
         return await http.post("/api/chat", json=payload)
@@ -322,8 +317,8 @@ async def test_chat_tra_loi_kem_trich_dan_bam_duoc(db_session, user_a, embedder,
     assert body["answer"] == "Nguyễn Văn An, giám đốc kinh doanh [1]."
     assert body["context_chunks"] >= 1
     assert body["model"] == settings.llm_model
-    # Model chỉ trích `[1]`, nên đúng **một** thẻ dù ngữ cảnh có mấy khối — đó là khác biệt giữa
-    # "đã truy hồi" và "đã dùng" (xem `services/assistant.py`, quyết định 2).
+    # Model chỉ trích `[1]`, nên đúng **một** thẻ dù ngữ cảnh có mấy khối — khác biệt giữa "đã
+    # truy hồi" và "đã dùng".
     assert len(body["citations"]) == 1
     assert body["citations"][0]["url"] == f"/cards/{card.id}"
     assert body["citations"][0]["title"].startswith("Danh thiếp — Nguyễn Văn An")
@@ -442,8 +437,7 @@ async def test_luot_sau_van_truy_hoi_duoc_nho_ghep_cau_hoi_truoc(
 ):
     """Câu hỏi lượt 2 không chứa định danh nào; ghép lượt trước vào mới tìm lại được chunk cũ.
 
-    Đây là test bảo vệ `retrieval_query()`: bỏ bước ghép đi thì lượt 2 trả về
-    `context_chunks = 0` và trợ lý nói không biết, dù dữ liệu nằm ngay đó.
+    Bảo vệ `retrieval_query()`: bỏ bước ghép thì lượt 2 trả `context_chunks = 0`.
     """
     await seed_kb(db_session, user_a)
     question = await chunk_content(db_session, user_a, KBSourceType.CARD.value)
@@ -480,14 +474,11 @@ async def test_doc_lai_phien_khong_ton_tai_tra_404(db_session, user_a, embedder,
 
 
 async def test_hai_luot_ghi_cung_transaction_van_dung_thu_tu(db_session, user_a, workspace_a):
-    """Bắt đúng lỗi phát hiện khi chạy test 8.3 lần đầu — xem `repositories/chat.py::_ROLE_ORDER`.
+    """Bắt đúng lỗi thứ tự đọc — xem `repositories/chat.py::_ROLE_ORDER`.
 
     `now()` của Postgres là thời điểm **bắt đầu transaction**, nên hai dòng ghi trong cùng một
-    lượt hỏi có `created_at` bằng nhau tuyệt đối; `id` là UUIDv4 nên cũng không mang thông tin
-    thời gian. Hậu quả đo được: `GET /api/chat/{id}` trả câu trả lời đứng **trước** câu hỏi.
-
-    Cố ý ghi câu trả lời **trước** câu hỏi để chứng minh thứ tự đọc ra không phụ thuộc thứ tự
-    ghi vào — nếu nó phụ thuộc thì test này xanh vì lý do sai.
+    lượt hỏi có `created_at` bằng nhau tuyệt đối. Hậu quả đo được: câu trả lời đứng **trước** câu
+    hỏi. Cố ý ghi câu trả lời trước để chứng minh thứ tự đọc không phụ thuộc thứ tự ghi.
     """
     session = await chat_repo.create_session(
         db_session, workspace_id=workspace_a, user_id=user_a.id, title="thử"
@@ -517,10 +508,9 @@ async def test_loc_theo_loai_nguon_bo_han_chunk_ngoai_pham_vi(
 ):
     """Hỏi bằng đúng nội dung chunk hồ sơ; lọc `card` thì chunk hồ sơ đó không được lọt vào.
 
-    Ghi chú rút ra khi viết test này: câu hỏi đó **vẫn ra kết quả** sau khi lọc, vì chunk danh
-    thiếp cũng chứa "Đại Việt Logistics" nên nhánh full-text bắt được nó. Đúng như thiết kế —
-    lọc là *thu hẹp phạm vi*, không phải tắt tìm kiếm. Điều phải đúng là **không chunk nào ngoài
-    phạm vi lọt ra**, nên khẳng định theo tập `source_type` chứ không theo số lượng.
+    Câu hỏi đó **vẫn ra kết quả** sau khi lọc vì chunk danh thiếp cũng chứa tên công ty — đúng
+    thiết kế, lọc là *thu hẹp phạm vi* chứ không phải tắt tìm kiếm. Điều phải đúng là không chunk
+    nào ngoài phạm vi lọt ra, nên khẳng định theo tập `source_type` chứ không theo số lượng.
     """
     await seed_kb(db_session, user_a)
     profile_chunk = await chunk_content(db_session, user_a, KBSourceType.COMPANY_PROFILE.value)

@@ -4,30 +4,17 @@ Revision ID: 0008
 Revises: 0007
 Create Date: 2026-09-24 17:30:00.000000+07:00
 
-Task NEXT-01 (T). Quy uoc so 5 noi "chi Q sinh revision"; **Q cho phep T tu sinh cho rieng cac
-dong NEXT-xx, 2026-09-24** -- ngoai le co ghi ngay, moi viec khac van theo quy uoc cu.
+Task NEXT-01 (T) -- Q cho phep T tu sinh revision cho rieng cac dong NEXT-xx (2026-09-24).
 
-RUI RO: thap, cung muc voi 0006. Hai cot moi tren `business_cards` va mot bang moi.
-`relationship_status` la NOT NULL nhung co `server_default='new'`, nen Postgres dien san cho moi
-dong dang co -- khong buoc phai viet lai bang (Postgres 11+ luu default vao catalog).
+RUI RO thap. `relationship_status` NOT NULL nhung co `server_default='new'` nen Postgres 11+ luu
+default vao catalog, khong phai viet lai bang.
 
-VI SAO KHONG CO COT "nguoi phu trach":
+Ghi chu la bang rieng chu khong noi them vao `business_cards.notes`: cot do la ghi chu **ve tam
+the**, con day la **dong thoi gian cua mot quan he** -- nhieu dong, moi dong mot moc thoi gian.
 
-  Tu D12 moi ban ghi da thuoc dung mot nguoi (`user_id`, tieu chi A9) va **khong co cach nao
-  giao viec cho nguoi khac** -- chia se du lieu giua cac tai khoan la NEXT-05, va chinh no se
-  doi `user_id` thanh `workspace_id`. Them cot `owner_user_id` bay gio la them mot cot luon
-  bang `user_id`, roi NEXT-05 lai phai go ra.
+INDEX partial `WHERE follow_up_at IS NOT NULL`: phan lon the khong co hen.
 
-VI SAO GHI CHU LA BANG RIENG chu khong noi them vao cot `notes` san co:
-
-  `business_cards.notes` la ghi chu **ve tam the** (may ghi vao khi quet hong, nguoi dung sua
-  tay). Con day la **dong thoi gian cua mot quan he**: nhieu dong, moi dong co moc thoi gian,
-  doc theo thu tu nguoc. Nhet ca hai vao mot o van ban la mat moc thoi gian va mat luon kha nang
-  dem "lan lien he gan nhat la bao gio".
-
-INDEX: mot index cho dung cau hoi cua khoi *Can lien he hom nay* tren trang chu --
-`WHERE user_id = ? AND follow_up_at <= ?`. Cot `follow_up_at` phan lon la NULL nen dung index
-**partial**: chi so hoa dung nhung dong co hen, bang nho hon han va cau tren van dung duoc no.
+File nay khong dau tieng Viet: xem canh bao o dau alembic.ini (I-07).
 """
 
 import sqlalchemy as sa
@@ -65,14 +52,13 @@ def upgrade() -> None:
     op.create_table(
         "contact_notes",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        # `user_id` co mat du suy ra duoc qua `card_id`: moi truy van deu loc theo nguoi dung
-        # (12.6), ma JOIN them mot bang moi biet cua ai la cho de quen -- quen mot cho la ro.
+        # `user_id` co mat du suy ra duoc qua `card_id`: JOIN them mot bang moi biet cua ai la
+        # cho de quen, ma quen mot cho la ro.
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("card_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
-        # `clock_timestamp()` chứ không `now()`: `now()` trả về giờ **bắt đầu transaction**,
-        # nên hai ghi chú thêm trong cùng một transaction có cùng mốc y hệt và dòng thời gian
-        # mất thứ tự. Bảng này tồn tại chính là để giữ thứ tự ấy.
+        # `clock_timestamp()` chứ không `now()`: `now()` trả giờ **bắt đầu transaction**, nên hai
+        # ghi chú thêm trong cùng một transaction có cùng mốc y hệt và mất thứ tự.
         sa.Column(
             "created_at",
             sa.DateTime(),

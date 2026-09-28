@@ -1,22 +1,14 @@
 """F3 — `POST /api/kb/reindex`: index lại toàn bộ danh thiếp + hồ sơ DN vào Knowledge Base.
 
-Chủ sở hữu: Q | Task: 6.4, 12.5 | xem Task.md
+Chủ sở hữu: Q | Task: 6.4, 12.5
 
-**Chạy đồng bộ, trả về số liệu — không phải job nền.** `docs/api.md` (bản chốt ban đầu, D1)
-phác thảo `202 {job_id}`, ở đây cố ý làm khác; theo quy ước số 9 của Task.md thì Swagger
-(`/docs`) mới là hợp đồng thật sau D1. Lý do:
+**Chạy đồng bộ, trả về số liệu — không phải job nền.** KB của bản demo cỡ 30 danh thiếp + 10 hồ
+sơ, nhúng chừng đó mất vài giây trên CPU. Job nền tử tế phải có bảng trong DB để sống qua restart,
+tức thêm một Alembic revision cho một endpoint quản trị chạy vài giây — không đáng. Đây cũng là
+nút vá dữ liệu cho người vận hành, không nằm trên đường đi của người dùng cuối.
 
-- Toàn bộ KB của bản demo là cỡ 30 danh thiếp + 10 hồ sơ (tiêu chí A3/A5). Nhúng chừng đó đoạn
-  mất vài giây trên CPU — người bấm nút chờ được, mà lại thấy ngay kết quả.
-- Job nền tử tế phải có bảng trong DB để sống qua restart (đúng như 5.8 làm). Bảng đó chưa có,
-  và thêm bảng nghĩa là thêm một Alembic revision cho một endpoint quản trị chạy vài giây —
-  không đáng.
-- Đây là nút vá dữ liệu cho người vận hành, không nằm trên đường đi của người dùng cuối: luồng
-  thường là ingest từng bản ghi ngay lúc xác nhận danh thiếp (7.3) / xong enrich (7.5).
-
-Một khoá trong tiến trình chặn hai lượt reindex chạy chồng nhau. Không phải để bảo vệ dữ liệu
-(ghi đè theo nguồn nên chạy chồng vẫn ra kết quả đúng) mà để khỏi đốt đôi thời gian CPU của
-embedder và làm chậm mọi thứ khác đang dùng chung nó.
+Một khoá trong tiến trình chặn hai lượt reindex chạy chồng nhau — không phải để bảo vệ dữ liệu
+(ghi đè theo nguồn nên chạy chồng vẫn đúng) mà để khỏi đốt đôi thời gian CPU của embedder.
 """
 
 from __future__ import annotations
@@ -42,10 +34,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/kb", tags=["kb"])
 
-#: Trần số lô mỗi lượt chạy — chốt chặn cho vòng lặp, không phải giới hạn nghiệp vụ.
-#: 500 lô × 20 nguồn = 10 000 nguồn, gấp nhiều lần quy mô bản demo. Chạm trần nghĩa là phân
-#: trang theo khoá có bug (không tiến lên được), và một vòng lặp vô hạn thì giữ luôn cả khoá
-#: bên dưới lẫn một kết nối DB.
+#: Trần số lô mỗi lượt chạy — chốt chặn cho vòng lặp, không phải giới hạn nghiệp vụ. Chạm trần
+#: nghĩa là phân trang theo khoá có bug, và vòng lặp vô hạn thì giữ luôn cả khoá lẫn một kết nối DB.
 MAX_BATCHES = 500
 
 #: Chỉ một lượt reindex tại một thời điểm trong tiến trình này.
@@ -63,13 +53,12 @@ async def reindex(
 ) -> ReindexOut:
     """Nhúng lại toàn bộ KB từ dữ liệu đang có trong DB.
 
-    Không nhận `CurrentUser`: từ `NEXT-05` phạm vi index là **không gian làm việc**, mà
-    `CurrentWorkspace` đã đòi đăng nhập rồi — giữ thêm một tham số không ai đọc chỉ mời gọi
-    ai đó lại index theo `user.id`, đúng cái lỗi vừa sửa ở đây.
+    Không nhận `CurrentUser`: phạm vi index là **không gian làm việc**, mà `CurrentWorkspace` đã
+    đòi đăng nhập rồi — giữ thêm một tham số không ai đọc chỉ mời gọi ai đó lại index theo
+    `user.id`.
 
-    Chỉ lấy danh thiếp **đã xác nhận** và hồ sơ **generated/verified** — xem
-    `repositories/kb.py::INDEXABLE_CARD_STATUSES`. Nguồn nào không còn trường nào có nội dung
-    thì bị gỡ khỏi KB và tính vào `skipped`.
+    Chỉ lấy danh thiếp **đã xác nhận** và hồ sơ **generated/verified**. Nguồn nào không còn trường
+    nào có nội dung thì bị gỡ khỏi KB và tính vào `skipped`.
     """
     if _reindex_lock.locked():
         raise HTTPException(
@@ -80,8 +69,8 @@ async def reindex(
     async with _reindex_lock:
         started = time.perf_counter()
         try:
-            # Hỏi embedder trước khi đọc DB: chưa sẵn sàng thì báo ngay, thay vì để người dùng
-            # chờ hết một vòng đọc dữ liệu mới nhận lỗi. Đây cũng là chỗ bắt lệch số chiều.
+            # Hỏi embedder trước khi đọc DB: chưa sẵn sàng thì báo ngay thay vì để người dùng chờ
+            # hết một vòng đọc dữ liệu. Đây cũng là chỗ bắt lệch số chiều.
             info = await embeddings.health()
 
             async with httpx.AsyncClient(
@@ -103,8 +92,8 @@ async def reindex(
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
         # Ghi xong mới `REINDEX` được: index `ivfflat` học phân cụm từ dữ liệu đang có, mà
-        # revision 0003 tạo nó lúc `kb_chunks` còn rỗng. Bỏ bước này thì KB đầy dữ liệu nhưng
-        # `search_similar()` trả về gần như không có gì — xem `rebuild_vector_index()`.
+        # migration tạo nó lúc `kb_chunks` còn rỗng. Bỏ bước này thì KB đầy dữ liệu nhưng tìm
+        # kiếm trả về gần như không có gì.
         if chunks:
             await kb_repo.rebuild_vector_index(db)
             await db.commit()
@@ -135,8 +124,7 @@ async def _reindex_cards(
 ) -> tuple[int, int, int]:
     """Duyệt hết danh thiếp đã xác nhận. Trả `(số nguồn, số chunk, số nguồn rỗng)`.
 
-    Commit sau **mỗi lô** chứ không một lần ở cuối: lô đã xong thì nằm yên trong DB, hỏng ở lô
-    sau không cuốn theo công sức của các lô trước (nhúng lại là việc tốn thời gian nhất ở đây).
+    Commit sau **mỗi lô**: hỏng ở lô sau không cuốn theo công sức nhúng của các lô trước.
     """
     after: uuid.UUID | None = None
     sources = written = empty = 0
@@ -150,8 +138,8 @@ async def _reindex_cards(
         ]
         # Đọc `id` TRƯỚC khi ghi: `index_documents()` commit, mà commit làm mọi object ORM hết
         # hạn — chạm vào thuộc tính sau đó là một lượt nạp lại đồng bộ giữa hàm async
-        # (`MissingGreenlet`). Ở app thật `SessionLocal` đặt `expire_on_commit=False` nên không
-        # nổ, nhưng dựa vào một tuỳ chọn ở file khác thì lỗi chỉ chờ đúng một session khác là ra.
+        # (`MissingGreenlet`). `SessionLocal` có `expire_on_commit=False` nhưng dựa vào một tuỳ
+        # chọn ở file khác thì lỗi chỉ chờ đúng một session khác là ra.
         after = rows[-1][0].id
         written += await kb.index_documents(db, documents, client=http, commit=True)
         empty += sum(1 for document in documents if not document.chunks)

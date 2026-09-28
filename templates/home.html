@@ -1,16 +1,7 @@
-{# Trang chủ: số liệu + việc cần làm + 3 hành động chính. #}
-{# Chủ sở hữu: T | Task: 14.6 — **bản tối thiểu do Q dựng 2026-09-23**, T hoàn thiện. #}
-{#
-  ⚠️ Q chạm file của T, theo đúng ba điều kiện của quy ước chống xung đột số 2 (đã nới từ D12):
-  báo tại daily · **T review PR** · không sinh Alembic revision. Lý do phải dựng ngay: `14.7` của Q
-  trỏ `home()` sang chính file này, không có nó thì `/` gãy và cả D14 phía Q không nghiệm thu được.
+{# Trang chủ: số liệu + việc cần làm + 3 hành động chính.
+   Chủ sở hữu: T | Task: 14.6 — bản tối thiểu do Q dựng, T hoàn thiện.
 
-  Phần T bổ sung ở `14.6`: gộp nốt nội dung `dashboard.html` (tỉ lệ cần review + biểu đồ), và
-  rà lại chữ theo `docs/ui-kit.md`.
-
-  Theo **QĐ-2**: `/dashboard` chuyển hướng 301 về đây. Nav còn **3 mục** — `EX-09` rút tiếp
-  `Trợ lý AI` ra khỏi nav vì trang riêng đã gỡ, trợ lý nay là bong bóng trên mọi trang.
-#}
+   `/dashboard` chuyển hướng 301 về đây. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon, banner %}
 
@@ -41,8 +32,8 @@
   {% endfor %}
 </section>
 
-{# Hai số cuối của `dashboard.html` cũ, gộp về đây theo QĐ-2. Tỉ lệ cần review đứng riêng vì nó là
-   **tỉ lệ**, không phải số đếm: nhét chung hàng với 4 ô trên là bắt người đọc so hai đơn vị khác nhau. #}
+{# Tỉ lệ cần review đứng riêng vì nó là **tỉ lệ**, không phải số đếm: nhét chung hàng với 4 ô
+   trên là bắt người đọc so hai đơn vị khác nhau. #}
 <section class="mt-4 rounded-lg border border-line bg-white p-4" aria-label="Tỉ lệ cần duyệt">
   <div class="flex items-baseline gap-3">
     <h2 class="text-sm font-semibold text-brand-ink">Tỉ lệ cần duyệt</h2>
@@ -58,8 +49,8 @@
 <section class="mt-8 grid gap-3 sm:grid-cols-3" aria-label="Hành động chính">
   <a href="/cards/upload" class="btn-primary justify-start px-5 py-3">{{ icon("scan") }} Quét danh thiếp</a>
   <a href="/companies" class="btn justify-start px-5 py-3">{{ icon("building") }} Lập hồ sơ</a>
-  {# EX-09: trang `/assistant` đã gỡ — nút này mở bong bóng tại chỗ. `<button>` chứ không `<a href>`:
-     nó không dẫn đi đâu cả, mà link giả còn bị trình duyệt prefetch và mở được ở tab mới. #}
+  {# Nút mở bong bóng tại chỗ. `<button>` chứ không `<a href>`: nó không dẫn đi đâu cả, mà link
+     giả còn bị trình duyệt prefetch và mở được ở tab mới. #}
   <button type="button" data-open-assistant class="btn justify-start px-5 py-3">{{ icon("sparkles") }} Hỏi trợ lý</button>
 </section>
 
@@ -72,8 +63,8 @@
   <div id="queue" class="mt-3 divide-y divide-line overflow-hidden rounded-lg border border-line bg-white"></div>
 </section>
 
-{# NEXT-01: cùng khuôn với khối *Chờ bạn duyệt* ở trên — cũng là một hàng chờ, cũng ẩn khi rỗng.
-   Đứng ngay dưới nó vì việc đến hạn hôm nay gấp hơn tấm thẻ chờ duyệt. #}
+{# Cùng khuôn với khối *Chờ bạn duyệt* ở trên, và đứng ngay dưới nó vì việc đến hạn hôm nay gấp
+   hơn tấm thẻ chờ duyệt. #}
 <section id="due-section" class="mt-8 hidden" aria-label="Cần liên hệ hôm nay">
   <div class="flex items-baseline gap-3">
     <h2 class="text-sm font-semibold text-brand-ink">Cần liên hệ hôm nay</h2>

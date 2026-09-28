@@ -66,8 +66,7 @@ def upgrade() -> None:
         ),
     )
 
-    # Moi nguoi dung dang co duoc mot khong gian rieng, ho lam `admin`. Sau buoc nay he thong
-    # hanh xu y het truoc do cho toi khi co ai moi them thanh vien.
+    # Moi nguoi dung dang co duoc mot khong gian rieng, ho lam `admin`.
     op.execute(
         "INSERT INTO workspaces (id, name, created_at, updated_at) "
         "SELECT gen_random_uuid(), "
@@ -159,13 +158,11 @@ def upgrade() -> None:
         postgresql_where=sa.text("assigned_to_user_id IS NOT NULL"),
     )
 
-    # Hai bang du lieu dan xuat khong co nguoi tao that: chunk KB sinh lai duoc tu nguon bat cu
-    # luc nao, va mot thay doi ho so la do may phat hien khi di tra lai. Giu `user_id` o day la
-    # ghi mot su that khong dung, va tu gio khong cau nao doc no nua.
+    # Hai bang du lieu dan xuat khong co nguoi tao that: chunk KB sinh lai duoc bat cu luc nao,
+    # con mot thay doi ho so la do may phat hien khi di tra lai.
     #
-    # Bo cot SAU phan index o tren, khong phai truoc: Postgres tu xoa moi index co dinh toi mot
-    # cot bi bo, nen `ix_profile_changes_unseen` (user_id, detected_at) bien mat cung luc, va
-    # `op.drop_index()` o tren se chet vi index khong con ton tai.
+    # ⚠️ Bo cot SAU phan index o tren, khong phai truoc: Postgres tu xoa moi index co dinh toi mot
+    # cot bi bo, nen `op.drop_index()` o tren se chet vi index khong con ton tai.
     for table in ("kb_chunks", "profile_changes"):
         op.drop_column(table, "user_id")
 

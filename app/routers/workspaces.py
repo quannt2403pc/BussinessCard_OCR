@@ -1,21 +1,16 @@
 """F5 — không gian làm việc: danh sách, tạo, đổi tên, chuyển, và quản lý thành viên.
 
-Chủ sở hữu: T | Task: NEXT-05 | xem Task.md
+Chủ sở hữu: T | Task: NEXT-05
 
-Đây là màn hình duy nhất của `NEXT-05` mà người dùng *nhìn thấy*; phần còn lại của task là đổi
-khoá tách dữ liệu bên dưới. Bốn quyết định đáng ghi lại:
+Bốn quyết định đáng ghi lại:
 
-1. **Mời bằng email của tài khoản đã có, không gửi thư mời.** Bản demo chưa có xác thực email
-   (`Plan.md` mục 1.3 — nằm ngoài phạm vi), nên một lời mời gửi tới địa chỉ gõ nhầm sẽ mở dữ
-   liệu của cả tổ chức cho người lạ. Email chưa có tài khoản thì trả `404` kèm lời nhắc họ đăng
-   ký trước.
-2. **Không gian luôn còn ít nhất một quản trị.** `repositories/workspace.py` chặn, router chỉ
-   dịch câu trả lời `False` sang `409`. Không có nút nào đưa được tổ chức về trạng thái không
-   ai mời được ai.
-3. **Gỡ người thì dữ liệu ở lại**, chỉ *người phụ trách* được trả về trống — xem `handover()`.
-4. **Không có nút xoá không gian trên giao diện.** `delete_workspace()` có sẵn cho người vận
-   hành, nhưng một nút xoá sạch dữ liệu của cả tổ chức sau hai cú bấm là thứ không đáng có
-   trong bản demo. Ai thật sự cần thì gọi thẳng repository.
+1. **Mời bằng email của tài khoản đã có, không gửi thư mời.** Chưa có xác thực email, nên một
+   lời mời gửi tới địa chỉ gõ nhầm sẽ mở dữ liệu của cả tổ chức cho người lạ.
+2. **Không gian luôn còn ít nhất một quản trị** — `repositories/workspace.py` chặn, router chỉ
+   dịch câu trả lời `False` sang `409`.
+3. **Gỡ người thì dữ liệu ở lại**, chỉ *người phụ trách* được trả về trống.
+4. **Không có nút xoá không gian trên giao diện** — `delete_workspace()` có sẵn cho người vận
+   hành, nhưng một nút xoá sạch dữ liệu của cả tổ chức sau hai cú bấm là thứ không đáng có.
 """
 
 import logging
@@ -68,8 +63,8 @@ async def workspaces_page(request: Request, user: CurrentUser) -> HTMLResponse:
 async def list_workspaces(db: Session, user: CurrentUser) -> WorkspaceListOut:
     """Mọi không gian người này có chân, kèm vai trò của chính họ trong từng cái.
 
-    Không đòi `CurrentWorkspace`: người vừa bị gỡ khỏi không gian cuối cùng phải mở được màn
-    hình này để tạo cái mới, mà `require_workspace` thì chặn họ bằng `409`.
+    Không đòi `CurrentWorkspace`: người vừa bị gỡ khỏi không gian cuối cùng phải mở được màn hình
+    này để tạo cái mới, mà `require_workspace` thì chặn họ bằng `409`.
     """
     rows = await workspace_repo.list_for_user(db, user.id)
     return WorkspaceListOut(
@@ -92,8 +87,7 @@ async def list_workspaces(db: Session, user: CurrentUser) -> WorkspaceListOut:
 async def create_workspace(payload: WorkspaceIn, db: Session, user: CurrentUser) -> WorkspaceOut:
     """Tạo không gian mới và **chuyển sang nó luôn**.
 
-    Chuyển luôn vì người vừa bấm "Tạo" gần như chắc chắn định làm việc trong đó ngay; bắt họ
-    bấm thêm một nút *Chuyển* nữa chỉ để đúng lý thuyết thì chẳng phục vụ ai.
+    Người vừa bấm "Tạo" gần như chắc chắn định làm việc trong đó ngay.
     """
     workspace = await workspace_repo.create(db, name=payload.name, owner_id=user.id)
     await db.commit()
@@ -169,8 +163,7 @@ async def list_members(
 ) -> MemberListOut:
     """Thành viên của **không gian đang mở**. Ai cũng xem được, kể cả vai trò chỉ xem.
 
-    Biết mình đang làm chung với ai không phải là quyền riêng của quản trị — mà giấu đi thì
-    người dùng không hiểu nổi vì sao dữ liệu của mình có người khác sửa.
+    Giấu đi thì người dùng không hiểu nổi vì sao dữ liệu của mình có người khác sửa.
     """
     _require_active(workspace_id, workspace.id)
     rows = await workspace_repo.members(db, workspace_id)
@@ -245,13 +238,10 @@ async def change_role(
 ) -> MemberOut:
     """Đổi vai trò một thành viên — **người khác**, không phải chính mình (`I-37`).
 
-    Quản trị tự hạ vai mình xuống *thành viên* là một cú bấm **không có đường lùi**: ngay sau đó
-    họ mất luôn quyền tự nâng lại, và nếu là quản trị duy nhất thì cả tổ chức không còn ai mời
-    được ai. Luật "còn ít nhất một quản trị" chỉ chặn được trường hợp cuối cùng ấy, không chặn
-    được một tổ chức hai quản trị mà một người bấm nhầm.
+    Quản trị tự hạ vai mình xuống *thành viên* là cú bấm **không có đường lùi**: ngay sau đó họ
+    mất quyền tự nâng lại. Luật "còn ít nhất một quản trị" chỉ chặn được người cuối cùng.
 
-    Rời hẳn khỏi workspace thì vẫn làm được bằng `DELETE .../members/{id}` — đó là một việc
-    khác, người bấm biết rõ mình đang đi ra, và vẫn được mời lại.
+    Rời hẳn khỏi workspace thì dùng `DELETE .../members/{id}` — người bấm biết rõ mình đang đi ra.
     """
     _require_active(workspace_id, workspace.id)
     if member_id == user.id:
@@ -283,8 +273,8 @@ async def remove_member(
 ) -> None:
     """Gỡ một người khỏi không gian. **Dữ liệu họ đã nhập ở lại** — chỉ người phụ trách trống ra.
 
-    Quản trị tự gỡ chính mình cũng được: đó là đường *rời khỏi tổ chức*, và luật "còn ít nhất
-    một quản trị" vẫn chặn người cuối cùng.
+    Quản trị tự gỡ chính mình cũng được (đường *rời khỏi tổ chức*); luật "còn ít nhất một quản
+    trị" vẫn chặn người cuối cùng.
     """
     _require_active(workspace_id, workspace.id)
     await _member_or_404(db, workspace_id, member_id)
@@ -300,10 +290,8 @@ async def remove_member(
 def _require_active(asked: uuid.UUID, active: uuid.UUID) -> None:
     """Mọi endpoint dưới `/{workspace_id}` chỉ làm việc trên **không gian đang mở**.
 
-    `CurrentWorkspace` đã phân giải không gian từ tài khoản rồi, nên `workspace_id` trên URL chỉ
-    là thứ để đối chiếu. Không nhận id khác: nhận thì mỗi endpoint lại phải tự kiểm tư cách
-    thành viên một lần nữa, và chỉ cần một chỗ quên là rò. Muốn thao tác trên không gian khác
-    thì `POST /activate` trước — một bước rõ ràng, một chỗ kiểm.
+    `workspace_id` trên URL chỉ để đối chiếu. Nhận id khác thì mỗi endpoint lại phải tự kiểm tư
+    cách thành viên một lần nữa, và chỉ cần một chỗ quên là rò.
     """
     if asked != active:
         raise HTTPException(

@@ -29,7 +29,7 @@ STATIC_DIR = BASE_DIR / "static"
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Chuẩn bị thư mục upload và ghi log những router đã sẵn sàng."""
     # Cấu hình logging ở đây chứ không ở cấp module: `lifespan` **không chạy** khi test gọi app
-    # qua `httpx.ASGITransport`, nên pytest giữ nguyên cấu hình logging của chính nó.
+    # qua `httpx.ASGITransport`.
     setup_logging(settings.log_level)
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -43,21 +43,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-# Swagger chỉ sống trên máy dev (I-43).
+# Swagger chỉ sống trên máy dev (I-43). `/docs`, `/redoc`, `/openapi.json` vốn đã nằm sau cổng
+# đăng nhập, nhưng trên `ocrximi.io.vn` thì ai đăng ký cũng là "đã đăng nhập", mà `/openapi.json`
+# mô tả **toàn bộ bề mặt API**.
 #
-# `/docs`, `/redoc` và `/openapi.json` vốn **đã** nằm sau cổng đăng nhập (`core/security.py`,
-# A8) — khách vãng lai không xem được. Nhưng từ D13 hệ thống chạy trên `ocrximi.io.vn` và ai
-# đăng ký một tài khoản cũng là "đã đăng nhập", nên cổng ấy không còn là ranh giới đáng tin.
-# `/openapi.json` mô tả **toàn bộ bề mặt API** — mọi đường dẫn, mọi tham số, mọi hình dạng
-# body. Đó là bản đồ dò tìm dọn sẵn cho người muốn thử phá.
-#
-# Tắt theo `DEBUG` chứ không tắt hẳn: `Task.md` quy ước số 9 chốt Swagger là **nguồn tài liệu
-# API chính** của dự án sau D1 (`docs/api.md` cố ý không cập nhật tay). Tắt sạch là lấy mất
-# thứ cả hai người đang dùng để tra, để đổi lấy một thứ mà `.env` của production vốn đã lo.
-#
-# ⚠️ `openapi_url=None` phải đi kèm: để lại mỗi `/openapi.json` thì `/docs` chỉ là một trang
-# HTML rỗng, còn **toàn bộ lược đồ vẫn tải về được** — đúng thứ cần giấu, chỉ là không còn
-# giao diện đọc nó.
+# ⚠️ `openapi_url=None` phải đi kèm: để lại mỗi `/openapi.json` thì `/docs` chỉ là trang rỗng còn
+# toàn bộ lược đồ vẫn tải về được.
 _docs_enabled = settings.docs_enabled
 
 app = FastAPI(
@@ -70,23 +61,21 @@ app = FastAPI(
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
-# Cổng đăng nhập (task 12.4): chặn mọi đường dẫn ngoài `/auth/*`, `/static/*`, `/health`.
+# Cổng đăng nhập: chặn mọi đường dẫn ngoài `/auth/*`, `/static/*`, `/health`.
 #
 # ⚠️ **Thứ tự hai dòng dưới đây là một phần của thiết kế, đừng đảo.** `add_middleware` chèn vào
-# đầu danh sách, nên **dòng thêm sau cùng nằm ngoài cùng**: ở đây `RequestContextMiddleware` bọc
-# ngoài cổng đăng nhập, nhờ vậy cả request bị chặn bằng 303/401 vẫn có một dòng log và một
-# `X-Request-ID`. Đảo lại thì mọi lượt chặn biến mất khỏi log — đúng thứ cần nhìn khi ai đó báo
-# "tôi bị đá ra trang đăng nhập liên tục".
+# đầu danh sách nên dòng thêm sau cùng nằm ngoài cùng: `RequestContextMiddleware` phải bọc ngoài
+# cổng đăng nhập, nếu không mọi lượt chặn biến mất khỏi log.
 app.add_middleware(RequireLoginMiddleware)
 
-# Request id + đo thời gian xử lý (task 9.5). Thêm trước khi gắn router để mọi request — kể cả
-# request bị router từ chối bằng 404 — đều có một dòng log và một `X-Request-ID` trả về.
+# Request id + đo thời gian xử lý. Thêm trước khi gắn router để mọi request — kể cả request bị
+# từ chối bằng 404 — đều có một dòng log và một `X-Request-ID` trả về.
 app.add_middleware(RequestContextMiddleware)
 
-# Xử lý lỗi toàn cục (task 9.4): HTML cho người dùng, JSON cho API, cùng một chỗ quyết định.
+# Xử lý lỗi toàn cục: HTML cho người dùng, JSON cho API, cùng một chỗ quyết định.
 register_exception_handlers(app)
 
-# Router khai sẵn cho cả 7 module; module nào chưa có `router` thì bỏ qua (xem routers/__init__.py).
+# Router khai sẵn cho cả 7 module; module nào chưa có `router` thì bỏ qua.
 for _name, _router in iter_routers():
     app.include_router(_router)
 
@@ -102,14 +91,10 @@ async def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse, tags=["ui"])
 async def home(request: Request) -> HTMLResponse:
-    """Trang chủ (task 14.7).
+    """Trang chủ: số liệu, việc đang chờ duyệt và 3 hành động chính.
 
-    Trước D14 route này render thẳng `base.html`, tức là khách nhìn thấy khối mặc định của D1 —
-    dòng "Khung dự án đã dựng xong (D1)" — làm màn hình đầu tiên của `ocrximi.io.vn`. Nay nó trỏ
-    sang `home.html`: số liệu, việc đang chờ duyệt và 3 hành động chính.
-
-    Số liệu **không** lấy ở đây mà do trang tự gọi `GET /api/stats`. Lý do: route này không có
-    session DB (nó ở `main.py`, ngoài mọi router), và nhét truy vấn vào đây là mở lại đúng cái
-    vòng import mà `core/templates.py` sinh ra để tránh.
+    Số liệu **không** lấy ở đây mà do trang tự gọi `GET /api/stats`: route này không có session DB
+    (nó ở `main.py`, ngoài mọi router), và nhét truy vấn vào đây là mở lại đúng cái vòng import mà
+    `core/templates.py` sinh ra để tránh.
     """
     return templates.TemplateResponse(request, "home.html", {"active_nav": "home"})

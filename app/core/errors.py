@@ -1,27 +1,20 @@
 """Xử lý lỗi toàn cục: trang lỗi thân thiện cho người dùng, JSON giữ nguyên hợp đồng cho API.
 
-Chủ sở hữu: Q | Task: 9.4 | xem Task.md
+Chủ sở hữu: Q | Task: 9.4
 
-Trước task này, lỗi chưa được router nào bắt sẽ ra **trang 500 trắng của Starlette** kèm nguyên
-văn traceback khi bật debug — vừa vô nghĩa với người xem demo, vừa là chỗ rò đường dẫn file và
-chuỗi kết nối. Ba việc file này làm:
+Ba việc:
 
-1. **Một chỗ quyết định HTML hay JSON.** Cùng một lỗi, `/api/...` phải trả JSON (UI đang gọi
-   bằng `fetch`, và test đang khẳng định hình dạng `{"detail": …}`), còn trang HTML phải ra
-   trang có nav, có nút đi tiếp. Quyết định bằng **đường dẫn + `Accept`**, không phải bằng việc
-   mỗi router tự nhớ.
-2. **Lỗi nghiệp vụ không lọt ra ngoài dưới dạng 500.** Router đã tự ánh xạ `LLMNotConnectedError`
-   → 503 ở những chỗ đã nghĩ tới (chat, integration). Nhưng "những chỗ đã nghĩ tới" là danh sách
-   không ai bảo trì được: thêm một endpoint gọi LLM mà quên `try` là người dùng nhận 500 kèm
-   traceback. Ở đây khai bảng ánh xạ **một lần** cho toàn ứng dụng, router nào đã tự bắt thì
-   vẫn thắng (ngoại lệ không bao giờ đi tới đây).
-3. **Màn hình "chưa kết nối OAuth" riêng.** Đây là lỗi hay gặp nhất của bản demo — token nằm
-   trong volume `cliproxy_auths`, xoá volume là mất (cảnh báo ở task 9.10). Người dùng cần
-   đúng một nút đi tới `/settings`, không phải một đoạn traceback.
+1. **Một chỗ quyết định HTML hay JSON**, dựa trên đường dẫn + `Accept`, chứ không để mỗi router
+   tự nhớ.
+2. **Lỗi nghiệp vụ không lọt ra ngoài dưới dạng 500.** Router tự bắt ở những chỗ đã nghĩ tới,
+   nhưng "những chỗ đã nghĩ tới" là danh sách không ai bảo trì được. Bảng ánh xạ ở đây khai một
+   lần cho toàn ứng dụng; router nào đã tự bắt thì vẫn thắng.
+3. **Màn hình "chưa kết nối OAuth" riêng** — lỗi hay gặp nhất của bản demo, người dùng cần đúng
+   một nút đi tới `/settings` chứ không phải một đoạn traceback.
 
-⚠️ **`request_id` đọc từ `scope["state"]`, không từ `ContextVar`.** Với ngoại lệ chưa ai bắt,
-handler chạy ở `ServerErrorMiddleware` — nằm **ngoài** `RequestContextMiddleware`, tức sau khi
-ContextVar đã bị `reset()`. Xem ghi chú trong `app/core/logging.py`.
+⚠️ **`request_id` đọc từ `scope["state"]`, không từ `ContextVar`**: với ngoại lệ chưa ai bắt,
+handler chạy ở `ServerErrorMiddleware` — ngoài `RequestContextMiddleware`, tức sau khi ContextVar
+đã bị `reset()`.
 """
 
 from __future__ import annotations
@@ -91,10 +84,8 @@ _HINTS: dict[int, str] = {
     HTTP_503_SERVICE_UNAVAILABLE: "Kiểm tra các dịch vụ phụ trợ rồi thử lại.",
 }
 
-#: Lỗi nghiệp vụ → mã HTTP, dùng khi router **không** tự bắt (xem điểm 2 ở đầu file).
-#:
-#: Thứ tự quan trọng: lớp con đứng trước lớp cha. Starlette chọn handler theo MRO của ngoại lệ,
-#: nhưng khai lớp cha trước rồi lớp con sau ở cùng một bảng rất dễ đọc nhầm là "cha thắng".
+#: Lỗi nghiệp vụ → mã HTTP, dùng khi router **không** tự bắt.
+#: Thứ tự quan trọng: lớp con đứng trước lớp cha (Starlette chọn handler theo MRO).
 _DOMAIN_STATUS: tuple[tuple[type[Exception], int], ...] = (
     (LLMNotConnectedError, HTTP_503_SERVICE_UNAVAILABLE),
     (LLMInvalidModelError, HTTP_503_SERVICE_UNAVAILABLE),
@@ -113,8 +104,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RequestValidationError, _handle_validation_error)
     for exc_type, status_code in _DOMAIN_STATUS:
         app.add_exception_handler(exc_type, _domain_handler(status_code))
-    # `Exception` do `ServerErrorMiddleware` gọi; nó gửi response của ta rồi **ném lại** ngoại
-    # lệ để server vẫn ghi traceback — đúng thứ ta muốn, đừng cố "nuốt" cho sạch log.
+    # `Exception` do `ServerErrorMiddleware` gọi; nó gửi response của ta rồi **ném lại** ngoại lệ
+    # để server vẫn ghi traceback — đừng cố "nuốt" cho sạch log.
     app.add_exception_handler(Exception, _handle_unexpected)
 
 
@@ -146,7 +137,7 @@ async def _handle_validation_error(request: Request, exc: Exception) -> Response
             HTTP_422_UNPROCESSABLE_CONTENT,
             "Tham số trên đường dẫn không đúng định dạng — kiểm tra lại liên kết vừa bấm.",
         )
-    # Trình duyệt thì ra trang; còn API giữ nguyên bản mặc định của FastAPI (danh sách lỗi từng
+    # Trình duyệt thì ra trang; API giữ nguyên bản mặc định của FastAPI (danh sách lỗi từng
     # trường), vì UI dựa vào đó để tô đúng ô nhập sai.
     return await request_validation_exception_handler(request, exc)
 
@@ -154,8 +145,7 @@ async def _handle_validation_error(request: Request, exc: Exception) -> Response
 def _domain_handler(status_code: int) -> Callable[[Request, Exception], Awaitable[Response]]:
     """Sinh handler cho một lỗi nghiệp vụ. Ghi log ở mức WARNING, không phải ERROR.
 
-    Lý do phân biệt: những lỗi này là **tình huống đã lường trước** (chưa OAuth, embedder chưa
-    lên), không phải hỏng hóc cần đọc traceback. Để ERROR hết thì mức ERROR mất nghĩa.
+    Những lỗi này là **tình huống đã lường trước**; để ERROR hết thì mức ERROR mất nghĩa.
     """
 
     async def handler(request: Request, exc: Exception) -> Response:
@@ -172,8 +162,7 @@ async def _handle_unexpected(request: Request, exc: Exception) -> Response:
     """Lỗi không lường trước: log đầy đủ traceback, trả ra ngoài đúng một câu + mã tra cứu.
 
     **Không** đưa `str(exc)` cho người dùng: thông điệp của lỗi Python hay chứa đường dẫn file,
-    câu SQL, có khi cả chuỗi kết nối. Người dùng cần mã tra cứu, người sửa cần traceback — hai
-    thứ đó nối với nhau bằng `request_id`.
+    câu SQL, có khi cả chuỗi kết nối. Hai đầu nối với nhau bằng `request_id`.
     """
     logger.exception("Lỗi chưa bắt được ở %s %s", request.method, request.url.path)
     message = _HINTS[HTTP_500_INTERNAL_SERVER_ERROR]
@@ -188,8 +177,8 @@ async def _handle_unexpected(request: Request, exc: Exception) -> Response:
 def _wants_html(request: Request) -> bool:
     """Trả trang HTML hay JSON — logic nằm ở `core/security.py::wants_html`.
 
-    Chuyển sang đó ở task 12.4 vì cổng đăng nhập cần **đúng** quyết định này (303 cho trình
-    duyệt, 401 JSON cho API). Giữ lại tên cũ để phần còn lại của file không phải đổi.
+    Chuyển sang đó vì cổng đăng nhập cần **đúng** quyết định này; giữ tên cũ để phần còn lại của
+    file không phải đổi.
     """
     return wants_html(request)
 
@@ -212,8 +201,7 @@ def _html_error(
             "hint": _HINTS.get(status_code),
             "request_id": request_id,
             # Màn hình riêng cho ca hay gặp nhất của demo. Nhận diện bằng chính câu mà
-            # `services/llm.py` sinh ra ("… vào /settings bấm 'Kết nối AI'"),
-            # nên cả lỗi router tự ánh xạ thành 503 lẫn lỗi lọt xuống handler đều khớp.
+            # `services/llm.py` sinh ra, nên cả lỗi router tự ánh xạ lẫn lỗi lọt xuống đều khớp.
             "show_oauth": "/settings" in message,
             "active_nav": None,
         },

@@ -1,24 +1,19 @@
 """Kiểm luồng OCR đa ngôn ngữ (Hàn / Nhật / Trung) đầu–cuối trên model thật.
 
-Chủ sở hữu: Q | Task: 9.3 | xem Task.md
+Chủ sở hữu: Q | Task: 9.3
 
     python -m scripts.check_multilang_ocr            # chạy ở MÁY, không phải trong container
     python -m scripts.check_multilang_ocr --keep     # giữ lại thẻ đã tạo để xem trên UI
 
-⚠️ **Đây KHÔNG phải phép đo của tiêu chí A3.** A3 đòi 30 ảnh *chụp thật* do T chuẩn bị ở task
-3.9, và phép đo đó là task **7.8** — vẫn đang ⏸️ vì `samples/` chưa có ảnh nào. Script này sinh
-danh thiếp **dựng bằng phông chữ**, tức chữ sắc nét tuyệt đối, không nhoè, không nghiêng, không
-loá. Nó trả lời đúng một câu hỏi và chỉ một câu: *khi chữ đọc được rõ ràng, prompt có xử lý
-đúng chữ Hàn/Nhật/Trung không* — giữ nguyên chữ bản địa hay tự dịch sang Latin, `language_detected`
-có đúng không, thẻ song ngữ thì lấy mặt nào. Những lỗi đó là lỗi **của prompt**, tách được khỏi
-lỗi *đọc ảnh mờ*, và sửa được ngay hôm nay mà không cần chờ T.
+⚠️ **KHÔNG phải phép đo của tiêu chí A3** (A3 đòi 30 ảnh *chụp thật*). Danh thiếp ở đây dựng bằng
+phông chữ nên sắc nét tuyệt đối; nó trả lời đúng một câu: *khi chữ đọc được rõ ràng, prompt có xử
+lý đúng chữ Hàn/Nhật/Trung không*. Đó là lỗi **của prompt**, tách được khỏi lỗi đọc ảnh mờ.
 
-Vì sao chạy ở máy chứ không trong container: image `api` là `python:3.12-slim`, **không có phông
-chữ CJK nào**. Dựng ảnh trong đó thì mọi chữ Hàn/Nhật/Trung ra một hàng ô vuông — và tệ hơn cả
-hỏng, nó *trông như* đang chạy. Máy Windows có sẵn `malgun.ttf`, `msgothic.ttc`, `msyh.ttc`.
+Chạy ở máy chứ không trong container vì image `python:3.12-slim` **không có phông chữ CJK nào** —
+dựng ảnh trong đó thì mọi chữ ra một hàng ô vuông, và tệ hơn cả hỏng, nó *trông như* đang chạy.
 
-Ảnh sinh ra nằm ở thư mục tạm, **không ghi vào `samples/`** — thư mục đó của T (quy ước số 2),
-và trộn ảnh dựng-bằng-phông vào bộ ảnh chụp thật sẽ làm hỏng chính phép đo A3 sau này.
+Ảnh sinh ra nằm ở thư mục tạm, **không ghi vào `samples/`**: trộn ảnh dựng-bằng-phông vào bộ ảnh
+chụp thật sẽ làm hỏng chính phép đo A3 sau này.
 """
 
 from __future__ import annotations
@@ -34,9 +29,8 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# Windows: stdout mặc định cp1252 khi không phải console (pipe, `> log.txt`, CI), nên dòng in
-# đầu tiên có chữ "đã" là `UnicodeEncodeError` và script chết trước khi gọi API lần nào. Bắt
-# được ở task 10.1 lúc chạy `... | tail`. Cùng cách xử lý với `.claude/hooks/*.py`.
+# Windows: stdout mặc định cp1252 khi không phải console, nên dòng in đầu tiên có chữ có dấu là
+# `UnicodeEncodeError` và script chết trước khi gọi API lần nào.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -46,8 +40,7 @@ if hasattr(sys.stderr, "reconfigure"):
 BASE_URL = "http://localhost:8000"
 
 #: Phông có sẵn trên Windows cho từng ngôn ngữ. Thiếu phông thì bỏ qua ca đó và nói rõ, chứ
-#: không vẽ bằng phông Latin — chữ CJK vẽ bằng phông Latin ra ô vuông, và ô vuông thì model
-#: đọc được đúng thứ nó nhìn thấy: không có gì.
+#: không vẽ bằng phông Latin — chữ CJK vẽ bằng phông Latin ra ô vuông.
 FONTS: dict[str, tuple[str, ...]] = {
     "ko": ("C:/Windows/Fonts/malgun.ttf",),
     "ja": ("C:/Windows/Fonts/msgothic.ttc", "C:/Windows/Fonts/meiryo.ttc"),
@@ -58,10 +51,8 @@ FONTS: dict[str, tuple[str, ...]] = {
 }
 
 
-#: ⚠️ Đáp án của `website` ghi kèm `https://` dù **thẻ không in scheme**. Đây không phải sơ suất:
-#: `services/normalize.py::normalize_website()` (task 3.6) cố ý thêm scheme khi thiếu, và giá trị
-#: trả về từ API là bản **đã chuẩn hoá**. Lượt chạy đầu ngày 2026-09-18 báo TRƯỢT ở đúng hai ô
-#: này — hoá ra là bài test sai kỳ vọng chứ không phải model bịa thêm chữ.
+#: ⚠️ Đáp án của `website` ghi kèm `https://` dù thẻ không in scheme: `normalize_website()` cố ý
+#: thêm scheme khi thiếu, và API trả về bản **đã chuẩn hoá**.
 
 
 @dataclass(frozen=True)
@@ -145,8 +136,8 @@ CARDS: tuple[Card, ...] = (
         },
         note="thẻ thuần Trung, nhãn trường viết bằng chữ Hán (电话/邮箱/地址)",
     ),
-    # Hai thẻ dưới thêm ở task 10.8: 9.3 chỉ cần ba thẻ CJK vì nó hỏi riêng về chữ bản địa,
-    # còn 10.8 đo *độ chính xác trường* nên phải phủ cả hai ngôn ngữ chính của sản phẩm.
+    # Hai thẻ dưới thêm ở 10.8: 9.3 chỉ cần ba thẻ CJK, còn 10.8 đo *độ chính xác trường* nên
+    # phải phủ cả hai ngôn ngữ chính của sản phẩm.
     Card(
         key="vi",
         language="vi",

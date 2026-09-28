@@ -21,19 +21,9 @@ from app.core.db import Base
 class Company(Base):
     __tablename__ = "companies"
     __table_args__ = (
-        # ⚠️ Dòng này do **Q** thêm ở task 9.2 vào file của **T** — ngoại lệ có yêu cầu sẵn:
-        # `docs/db-tuning.md` mục 5 (T viết ở 9.8) đề nghị Q thêm đúng dòng này **cùng PR** với
-        # migration `0004`, vì khai model mà chưa có migration thì `alembic check` báo lệch
-        # ngay, còn tách hai PR thì giữa chừng `main` luôn ở trạng thái lệch. **T xác nhận khi
-        # review PR.** Không có thay đổi nào khác của Q trong file này.
-        # Số đo của T: danh sách công ty trang 1 2.13 → 0.11 ms; export mỗi lô 5.18 → 0.76 ms.
+        # Một index cho cả hai chiều đọc: danh sách công ty và keyset export.
         Index("ix_companies_display_name_id", "display_name", "id"),
-        # ⚠️ Lần thứ hai **Q** chạm file của **T**, lần này ở task 12.5 (luật nới D12, quy ước 2:
-        # T review PR). Chỉ hai thứ, và cả hai là *bắt buộc để hệ thống ghi được*: cột `user_id`
-        # và unique theo người dùng — revision `0005` đã áp vào DB cả hai, nên model thiếu chúng
-        # là `INSERT` nào vào `companies` cũng chết (`NOT NULL`), kéo theo cả nút Xác nhận của F1.
-        # **Phần lọc theo `user_id` ở F2 (repository / router / matching) vẫn là task 12.6 của T**
-        # — ở đây cố ý không chạm dòng nghiệp vụ nào.
+        # Chống trùng công ty theo từng không gian, không toàn cục.
         Index(
             "ix_companies_workspace_id_name_normalized",
             "workspace_id",
@@ -43,9 +33,7 @@ class Company(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
-    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
-    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    #: Khoá tách dữ liệu: mọi câu `WHERE` lọc qua cột này, không qua `user_id`.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
@@ -53,8 +41,7 @@ class Company(Base):
         index=True,
     )
 
-    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
-    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
+    #: Người tạo — KHÔNG phải khoá tách dữ liệu.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -64,13 +51,8 @@ class Company(Base):
     name_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
     #: Tên **như in trên danh thiếp**, giữ nguyên chữ viết gốc.
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    #: Bản Việt hoá của `display_name` (`I-36`), chép từ `business_cards.company_name_vi` lúc
-    #: xác nhận thẻ — **không gọi thêm lượt model nào**, bản dịch đã có sẵn từ `EX-02`.
-    #:
-    #: Cột riêng chứ không ghi đè `display_name`, đúng lối 4 cột `*_vi` của danh thiếp: giao
-    #: diện in bản Việt to và bản gốc làm chú thích nhỏ, mà `ocr_raw_json` vẫn đối chiếu được.
-    #: `NULL` khi thẻ nguồn chưa dịch hoặc tên vốn đã là tiếng Việt — chỗ đọc rơi về
-    #: `display_name`, không bao giờ hiện ô trống.
+    #: Bản Việt hoá của `display_name`, chép từ `business_cards.company_name_vi` lúc xác nhận thẻ
+    #: — không gọi thêm lượt model nào. `NULL` thì chỗ đọc rơi về `display_name`.
     display_name_vi: Mapped[str | None] = mapped_column(String(255))
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
@@ -80,11 +62,10 @@ class Company(Base):
 
     @property
     def vi_name(self) -> str:
-        """Tên để hiện ra: bản Việt nếu có, không thì bản gốc (`I-36`).
+        """Tên để hiện ra: bản Việt nếu có, không thì bản gốc.
 
-        Một chỗ duy nhất quyết định việc này, y như `display_name()` của `CardExportRow`.
-        Rải `a or b` ở từng chỗ đọc thì chỉ cần sót một chỗ là danh sách hiện chữ Hàn còn
-        file xuất ra hiện tiếng Việt, hoặc ngược lại.
+        Một chỗ duy nhất quyết định việc này — rải `a or b` ở từng chỗ đọc thì sót một chỗ là
+        danh sách hiện chữ Hàn còn file xuất ra hiện tiếng Việt.
         """
         return self.display_name_vi or self.display_name
 
@@ -100,12 +81,8 @@ class CompanyProfile(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Suy ra được qua `company_id`, nhưng `0005` vẫn gắn thẳng vào đây (xem `OWNED_TABLES` trong
-    # revision): lọc mà phải JOIN thêm một bảng mới biết của ai là chỗ dễ quên, quên một chỗ là
-    # rò dữ liệu. `services/kb.py` đọc đúng cột này để biết chunk hồ sơ thuộc về ai.
-    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
-    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
-    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    #: Khoá tách dữ liệu. Suy ra được qua `company_id` nhưng vẫn gắn thẳng vào đây: lọc mà phải
+    #: JOIN thêm một bảng mới biết của ai là chỗ dễ quên, quên một chỗ là rò dữ liệu.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
@@ -113,8 +90,7 @@ class CompanyProfile(Base):
         index=True,
     )
 
-    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
-    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
+    #: Người tạo — KHÔNG phải khoá tách dữ liệu.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -142,9 +118,8 @@ class CompanyProfile(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="draft", server_default="draft"
     )
-    #: Lần gần nhất hồ sơ được **đi tra lại** với Internet (task NEXT-06, revision `0011`).
-    #: Tách khỏi `updated_at` có chủ đích: `updated_at` đổi cả khi người dùng sửa tay một
-    #: trường, mà sửa tay không phải là đã đối chiếu lại với nguồn.
+    #: Lần gần nhất hồ sơ được **đi tra lại** với Internet. Tách khỏi `updated_at`: sửa tay một
+    #: trường không phải là đã đối chiếu lại với nguồn.
     last_checked_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -156,17 +131,16 @@ class CompanyProfile(Base):
 
 
 class ProfileChange(Base):
-    """Một lượt làm mới **có phát hiện khác biệt** (task NEXT-06, revision `0011`).
+    """Một lượt làm mới **có phát hiện khác biệt**.
 
-    Chỉ sinh dòng khi thật sự có gì đó khác. Lượt làm mới không đổi gì chỉ cập nhật
-    `CompanyProfile.last_checked_at` — ghi cả những lượt ấy thì nhật ký đầy dòng "không có gì
-    mới" và phần đáng đọc bị chôn mất.
+    Lượt không đổi gì chỉ cập nhật `CompanyProfile.last_checked_at` — ghi cả những lượt ấy thì
+    nhật ký đầy dòng "không có gì mới".
     """
 
     __tablename__ = "profile_changes"
     __table_args__ = (
-        # Màn hình chỉ hỏi đúng "còn thay đổi nào chưa xem không". Dòng đã xem là phần lớn bảng
-        # sau vài tuần, không đáng số hoá — tên và mệnh đề `WHERE` khớp từng chữ với `0011`.
+        # Partial: màn hình chỉ hỏi "còn thay đổi nào chưa xem không"; tên và mệnh đề `WHERE`
+        # phải khớp từng chữ với migration.
         Index(
             "ix_profile_changes_unseen",
             "workspace_id",
@@ -176,9 +150,7 @@ class ProfileChange(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
-    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
-    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    #: Khoá tách dữ liệu: mọi câu `WHERE` lọc qua cột này, không qua `user_id`.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
@@ -186,8 +158,7 @@ class ProfileChange(Base):
         index=True,
     )
 
-    #: **Không có cột người tạo.** Một thay đổi hồ sơ do máy phát hiện khi đi tra lại (task
-    #: 11.x), không do ai nhập; gán nó cho người bấm nút là ghi một sự thật không đúng.
+    #: **Không có cột người tạo**: thay đổi do máy phát hiện khi đi tra lại, không do ai nhập.
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="CASCADE"),
@@ -197,8 +168,7 @@ class ProfileChange(Base):
     #: `{"changes": {trường: {"old": …, "new": …}}, "missing": [trường]}` — xem
     #: `services/profile_diff.py`. `missing` **không phải** thay đổi: giá trị cũ vẫn được giữ.
     changes: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    #: Mã số thuế / tên pháp lý / địa chỉ / website đổi. Mã số thuế đổi nghĩa là **pháp nhân
-    #: đổi** — sáp nhập, tách công ty, hoặc hồ sơ cũ gắn nhầm doanh nghiệp.
+    #: Mã số thuế / tên pháp lý / địa chỉ / website đổi. Mã số thuế đổi nghĩa là **pháp nhân đổi**.
     notable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     acknowledged_at: Mapped[datetime | None] = mapped_column()
     detected_at: Mapped[datetime] = mapped_column(

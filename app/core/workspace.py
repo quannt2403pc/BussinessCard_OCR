@@ -1,19 +1,15 @@
 """Không gian làm việc đang mở của request, và kiểm vai trò.
 
-Chủ sở hữu: T | Task: NEXT-05 | xem Task.md
+Chủ sở hữu: T | Task: NEXT-05
 
-**Đây là chỗ duy nhất quyết định một request được đọc/ghi dữ liệu của không gian nào.** Từ
-`NEXT-05`, mọi câu lọc dữ liệu đi qua `workspace_id` lấy từ đây, chứ không còn qua `user_id`.
+**Chỗ duy nhất quyết định một request được đọc/ghi dữ liệu của không gian nào.**
 
-Ba luật, mỗi luật chặn một đường hỏng đã thấy trước:
+Ba luật:
 
-1. **Không gian đang mở phải được xác nhận là người đó thật sự có chân trong đó**, mỗi request.
-   `users.active_workspace_id` chỉ là *chỗ ghi nhớ*, không phải bằng chứng — bị gỡ khỏi không
-   gian xong mà cột ấy còn trỏ vào đó thì người vừa bị gỡ vẫn đọc được dữ liệu cho tới khi họ
-   tự đổi. Nên mỗi lượt đều tra lại bảng thành viên.
-2. **Người chưa ở không gian nào thì `RequireWorkspace` ném `409`, không phải `403`.** Đây
-   không phải thiếu quyền mà là thiếu một bước khởi tạo, và giao diện cần phân biệt để mời họ
-   tạo không gian thay vì báo "bạn không có quyền".
+1. **Mỗi request đều tra lại bảng thành viên.** `users.active_workspace_id` chỉ là chỗ ghi nhớ,
+   không phải bằng chứng — người vừa bị gỡ vẫn đọc được dữ liệu cho tới khi họ tự đổi.
+2. **Người chưa ở không gian nào thì `409`, không phải `403`**: thiếu một bước khởi tạo chứ
+   không phải thiếu quyền, và giao diện cần phân biệt để mời họ tạo không gian.
 3. **Quyền ghi kiểm bằng tập hợp vai trò**, không so chuỗi rải rác — xem `WRITER_ROLES`.
 """
 

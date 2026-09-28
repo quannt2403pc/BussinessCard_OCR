@@ -1,37 +1,25 @@
 """Client Gemini qua CLIProxy: generate_text / generate_vision. FILE DÙNG CHUNG — chỉ Q sửa.
 
-Chủ sở hữu: Q | Task: 2.3 | xem Task.md
+Chủ sở hữu: Q | Task: 2.3
 
-Đường đi: `app` → CLIProxy `POST /v1beta/models/<model>:generateContent` → provider
-(channel `antigravity`, OAuth của người dùng). Payload theo chuẩn **Gemini native**.
+Đường đi: `app` → CLIProxy `POST /v1beta/models/<model>:generateContent` → provider. Payload theo
+chuẩn **Gemini native**.
 
-Đã kiểm chứng trên container thật (v7.2.156, 2026-09-11) — bốn cách hỏng, ba cách trả lời:
+Bốn cách hỏng, đã kiểm chứng trên container thật:
 
 | Tình huống | CLIProxy trả | Ném ra |
 |------------|--------------|--------|
 | Model sai tên | `400 unknown provider for model …` | `LLMInvalidModelError` |
 | Model đúng, **chưa từng có credential** | `400 unknown provider for model …` ← y hệt dòng trên | `LLMNotConnectedError` |
-| Model đúng, credential vừa bị xoá | `503 auth_unavailable: no auth available (providers=…)` | `LLMNotConnectedError` |
+| Model đúng, credential vừa bị xoá | `503 auth_unavailable` | `LLMNotConnectedError` |
 | Credential có nhưng token hỏng/hết hạn | `401 authentication_error` | `LLMNotConnectedError` |
 
-Hai dòng đầu **giống hệt nhau** nhưng cách sửa trái ngược: một bên phải sửa `LLM_MODEL` trong
-`.env`, một bên chỉ cần bấm nút OAuth. `_explain_unknown_provider()` phân biệt bằng cách tra
-danh mục model của channel — đừng bỏ bước đó để "cho gọn".
+Hai dòng đầu **giống hệt nhau** nhưng cách sửa trái ngược: một bên sửa `LLM_MODEL`, một bên chỉ
+cần bấm nút OAuth. `_explain_unknown_provider()` phân biệt bằng cách tra danh mục model.
 
-Một điều nữa: route gọi model **không cần** management key (`api-keys: []` nghĩa là CLIProxy
-không kiểm tra client). Ta cũng cố ý không gửi key ở đây để khỏi đụng bộ đếm ban của I-05.
+Route gọi model **không cần** management key, và ta cố ý không gửi để khỏi đụng bộ đếm ban (I-05).
 
-Về vision (phần cuối của I-03): danh mục channel **khai** `gemini-3-flash` nhận ảnh —
-`GET /v0/management/model-definitions/antigravity` trả `supportedInputModalities:
-["text","image","audio","video"]` (đo 2026-09-11, không cần OAuth). Đó là *lời khai của danh
-mục*, **chưa phải bằng chứng gọi được**: một lời gọi `inline_data` thật cần credential OAuth.
-Đã thử với ảnh PNG 640×360 thật (2026-09-11): dừng ở `LLMNotConnectedError` vì chưa có token.
-Lưu ý **đừng đọc kết quả đó thành "payload đúng"** — CLIProxy chặn ở bước định tuyến theo
-credential, *trước khi* đọc tới body, nên nó chưa từng nhìn thấy `inline_data` của ta.
-Vision chỉ được coi là kiểm chứng khi có token và lời gọi trả về chữ — **bắt buộc trước 3.4**.
-
-**Không có `embed()`** — CLIProxy không có endpoint embedding, việc đó do service `embedder`
-đảm nhiệm (Plan.md mục 2.6, `services/embeddings.py` task 6.4).
+**Không có `embed()`** — CLIProxy không có endpoint embedding, việc đó do service `embedder` lo.
 """
 
 from __future__ import annotations
@@ -64,14 +52,11 @@ SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "ima
 #: `finishReason` nghĩa là câu trả lời bị chặn chứ không phải model sinh ra nội dung rỗng.
 BLOCKED_FINISH_REASONS = frozenset({"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"})
 
-#: Tool bật tra cứu Internet của Gemini (I-13, dùng ở enrichment F2 — task 4.7).
+#: Tool bật tra cứu Internet của Gemini (dùng ở enrichment F2).
 #:
-#: **camelCase, không phải `google_search`**: executor của antigravity đọc đúng khoá này
-#: (`internal/runtime/executor/antigravity_executor.go:829` — `tool.Get("googleSearch")`),
-#: gõ snake_case thì tool bị bỏ qua **im lặng**, model trả lời bằng kiến thức nội tại và
-#: không có nguồn nào — đúng kịch bản bịa thông tin của rủi ro R4.
-#:
-#: Khai ở đây để F2 không phải tự gõ lại chuỗi: `generate_text(prompt, tools=[TOOL_GOOGLE_SEARCH])`.
+#: **camelCase, không phải `google_search`**: executor của antigravity đọc đúng khoá này, gõ
+#: snake_case thì tool bị bỏ qua **im lặng**, model trả lời bằng kiến thức nội tại và không có
+#: nguồn nào — đúng kịch bản bịa thông tin của rủi ro R4.
 TOOL_GOOGLE_SEARCH: dict[str, dict[str, Any]] = {"googleSearch": {}}
 
 
@@ -82,18 +67,15 @@ class LLMError(RuntimeError):
 class LLMNotConnectedError(LLMError):
     """Chưa kết nối OAuth, hoặc token hết hạn — gom ba dạng response ở bảng đầu file vào một lỗi.
 
-    Gom lại vì cách xử lý y hệt nhau: mời người dùng bấm "Kết nối AI" ở
-    `/settings`. Router chỉ cần bắt đúng loại này để hiện lời mời đó.
+    Gom lại vì cách xử lý y hệt nhau: mời người dùng bấm "Kết nối AI" ở `/settings`.
     """
 
 
 class LLMProviderBlockedError(LLMNotConnectedError):
     """Nhà cung cấp từ chối **chính tài khoản**, và việc cần làm nằm ngoài ứng dụng (I-42).
 
-    Đo thật 2026-09-28: Google trả `403 PERMISSION_DENIED / VALIDATION_REQUIRED —
-    "Verify your account to continue."` kèm một `validation_url`. Đăng nhập lại không chữa được;
-    người dùng phải mở link đó. Câu lỗi vì thế **phải mang theo link**, nếu không nó lại là một
-    ngõ cụt nữa.
+    Google trả `403 VALIDATION_REQUIRED` kèm một `validation_url`; đăng nhập lại không chữa được.
+    Câu lỗi vì thế **phải mang theo link**, nếu không nó lại là một ngõ cụt nữa.
     """
 
 
@@ -104,8 +86,7 @@ class LLMBlockedError(LLMError):
 class LLMInvalidModelError(LLMError):
     """`settings.llm_model` không có trong channel đang dùng (I-03).
 
-    Đối chiếu danh mục thật: `CliProxyClient.model_ids()` hoặc
-    `GET /v0/management/model-definitions/antigravity`.
+    Đối chiếu danh mục thật bằng `CliProxyClient.model_ids()`.
     """
 
 
@@ -119,15 +100,13 @@ async def generate_text(
     tools: list[dict[str, Any]] | None = None,
     client: CliProxyClient | None = None,
 ) -> str:
-    """Sinh văn bản thuần. Dùng cho nút "Kiểm tra kết nối" (2.4), enrichment và chat.
+    """Sinh văn bản thuần. Dùng cho nút "Kiểm tra kết nối", enrichment và chat.
 
-    `temperature` để thấp vì mọi chỗ dùng trong dự án đều là trích xuất/tổng hợp có cấu trúc,
-    không phải viết sáng tạo.
+    `temperature` để thấp vì mọi chỗ dùng trong dự án đều là trích xuất/tổng hợp có cấu trúc.
 
-    `tools` đi thẳng vào payload `generateContent` (I-13). F2 bật tra cứu Internet bằng
-    `tools=[TOOL_GOOGLE_SEARCH]`. **Hàm này chỉ trả về text** — cần đọc URL nguồn ở
-    `candidates[0].groundingMetadata.groundingChunks[].web.uri` thì gọi `generate_content()`
-    để lấy JSON thô (xem `docs/adr-websearch.md` mục 2.1).
+    `tools` đi thẳng vào payload `generateContent`; F2 bật tra cứu Internet bằng
+    `tools=[TOOL_GOOGLE_SEARCH]`. **Hàm này chỉ trả về text** — cần URL nguồn thì gọi
+    `generate_content()` để lấy JSON thô.
     """
     parts: list[dict[str, Any]] = [{"text": prompt}]
     payload = _build_payload(
@@ -153,12 +132,12 @@ async def generate_vision(
     tools: list[dict[str, Any]] | None = None,
     client: CliProxyClient | None = None,
 ) -> str:
-    """Sinh văn bản từ **ảnh + prompt** — trái tim của F1 (task 3.4 gọi hàm này).
+    """Sinh văn bản từ **ảnh + prompt** — trái tim của F1.
 
-    Ảnh đi trong `inline_data` dạng base64. Gemini đọc phần tử theo thứ tự nên để ảnh **trước**
-    câu lệnh: model "nhìn" rồi mới đọc yêu cầu, cho kết quả ổn định hơn với danh thiếp.
+    Ảnh đi trong `inline_data` dạng base64 và để **trước** câu lệnh: Gemini đọc phần tử theo thứ
+    tự, model "nhìn" rồi mới đọc yêu cầu cho kết quả ổn định hơn.
 
-    `temperature=0.0`: OCR là trích xuất, mọi mức sáng tạo đều là bịa (rủi ro R3).
+    `temperature=0.0`: OCR là trích xuất, mọi mức sáng tạo đều là bịa (R3).
     """
     if mime_type not in SUPPORTED_IMAGE_TYPES:
         raise LLMError(
@@ -196,8 +175,8 @@ async def generate_content(
 ) -> dict[str, Any]:
     """Lớp thấp: POST thẳng payload Gemini native, trả JSON thô.
 
-    Dùng khi cần đọc thêm `usageMetadata` (logging token ở task 9.5) hoặc tự dựng payload lạ.
-    Retry (mạng/429/5xx) do `CliProxyClient.request()` lo; 4xx không retry.
+    Dùng khi cần đọc thêm `usageMetadata` hoặc tự dựng payload lạ. Retry do
+    `CliProxyClient.request()` lo; 4xx không retry.
     """
     model_name = model or settings.llm_model
     path = f"/v1beta/models/{model_name}:generateContent"
@@ -211,9 +190,8 @@ async def generate_content(
             timeout=LLM_TIMEOUT,
         )
 
-    # Đo quanh **cả** nhánh hỏng, không chỉ nhánh chạy được (task 9.5): lời gọi treo 120 giây
-    # rồi timeout là con số đáng ghi nhất trong cả file log, mà ghi sau `return` thì không bao
-    # giờ thấy nó.
+    # Đo quanh **cả** nhánh hỏng, không chỉ nhánh chạy được: lời gọi treo 120 giây rồi timeout là
+    # con số đáng ghi nhất trong cả file log, mà ghi sau `return` thì không bao giờ thấy nó.
     started = time.perf_counter()
     try:
         if client is not None:
@@ -239,8 +217,8 @@ async def _translate_error(
 ) -> LLMError:
     """Dịch lỗi tầng CLIProxy thành lỗi tầng LLM — bảng bốn dòng ở đầu file.
 
-    Tách khỏi `generate_content()` để đúng một chỗ ghi log thời gian gọi (9.5) dùng được cho
-    cả nhánh chạy được lẫn bốn nhánh hỏng, thay vì rải `log_llm_call()` vào từng `except`.
+    Tách khỏi `generate_content()` để đúng một chỗ ghi log thời gian gọi dùng được cho cả nhánh
+    chạy được lẫn bốn nhánh hỏng.
     """
     if isinstance(exc, CliProxyAuthError):
         return LLMNotConnectedError(
@@ -248,8 +226,7 @@ async def _translate_error(
             "Vào /settings bấm 'Kết nối AI' để đăng nhập lại."
         )
     if isinstance(exc, CliProxyNoCredentialError):
-        # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, nhưng dán lên
-        # UI thì rối. Đẩy vào log, trả cho người dùng đúng một câu và một việc cần làm.
+        # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, rối trên UI.
         logger.info("CLIProxy báo thiếu credential: %s", exc.message)
         return await _explain_no_credential(model_name, client)
     if isinstance(exc, CliProxyResponseError):
@@ -266,21 +243,13 @@ async def _explain_unknown_provider(
 ) -> LLMError:
     """Dịch `400 unknown provider for model …` thành đúng nguyên nhân.
 
-    Đây là bẫy đo được trên container thật (2026-09-11, task 2.3): **CLIProxy trả y hệt một câu
-    cho hai sự cố hoàn toàn khác nhau.**
+    **CLIProxy trả y hệt một câu cho hai sự cố hoàn toàn khác nhau**: model sai tên, và model đúng
+    tên nhưng chưa có credential nào. Lý do: nó định tuyến theo *client đã nạp*, không có
+    credential thì cũng chẳng có client nào nhận model đó.
 
-    | Tình huống | Response |
-    |------------|----------|
-    | Model sai tên, có credential | `400 unknown provider for model gemini-flash-latest` |
-    | Model đúng tên, **chưa có credential nào** | `400 unknown provider for model gemini-3-flash` |
-    | Model đúng tên, credential hỏng/hết hạn | `401 authentication_error` |
-
-    Lý do: CLIProxy định tuyến theo *client đã nạp*. Không có credential nào thì cũng chẳng có
-    client nào nhận model đó → nó báo "unknown provider" y như khi gõ sai tên model.
-
-    Phân biệt bằng danh mục model của channel: model có trong danh mục ⇒ lỗi là **chưa kết nối**,
-    bảo người dùng bấm nút OAuth; không có trong danh mục ⇒ đúng là **sai `LLM_MODEL`** (I-03).
-    Đoán nhầm ở đây tốn của người dùng cả buổi sửa nhầm `.env` trong khi chỉ cần bấm một nút.
+    Phân biệt bằng danh mục model của channel: có trong danh mục ⇒ **chưa kết nối**, bảo người
+    dùng bấm nút OAuth; không có ⇒ đúng là **sai `LLM_MODEL`** (I-03). Đoán nhầm ở đây tốn của
+    người dùng cả buổi sửa nhầm `.env` trong khi chỉ cần bấm một nút.
     """
     channel = settings.cliproxy_auth_provider
     known = await _model_in_catalogue(model_name, client)
@@ -309,15 +278,12 @@ async def _explain_no_credential(model_name: str, client: CliProxyClient | None)
     | Tình huống | `auth-files` nói gì |
     |------------|---------------------|
     | Chưa ai đăng nhập | không có file nào |
-    | Đã đăng nhập, nhưng **gói không đủ** cho model này | có file, kèm `cooldowns[reason=payment_required]` |
+    | Đã đăng nhập, nhưng **gói không đủ** cho model này | có file, kèm `cooldowns[…]` |
 
-    Trước I-42 cả hai đều ra một câu *"Chưa kết nối OAuth… bấm Kết nối AI"*. Với trường hợp thứ
-    hai đó là lời khuyên **sai**: credential lành lặn, và đăng nhập lại chỉ đưa người dùng đi
-    trọn luồng dán URL của 13.7 để quay về đúng chỗ cũ. Đo thật 2026-09-28 trên
-    `ocrximi.io.vn`: badge xanh, `disabled: false`, `unavailable: false`, mà mọi lượt gọi hỏng
-    trong 38ms.
+    Gộp cả hai thành "chưa kết nối OAuth" là lời khuyên **sai** cho ca thứ hai: credential lành
+    lặn, đăng nhập lại chỉ đưa người dùng đi một vòng để quay về đúng chỗ cũ.
 
-    Không tra được `auth-files` thì rơi về câu cũ — đoán bừa "tại gói cước" còn tệ hơn.
+    Không tra được `auth-files` thì rơi về câu cũ — đoán bừa còn tệ hơn.
     """
     channel = settings.cliproxy_auth_provider
     generic = LLMNotConnectedError(
@@ -341,9 +307,8 @@ async def _explain_no_credential(model_name: str, client: CliProxyClient | None)
     bare = base_model(model_name)
 
     # **Hỏi nhà cung cấp trước, hỏi CLIProxy sau.** `status_message` chép nguyên văn lỗi của
-    # Google nên nó nói đúng chuyện gì xảy ra và phải làm gì; `cooldowns[].reason` là nhãn
-    # CLIProxy tự đặt, và nó gắn `payment_required` cho **mọi** 403 upstream — kể cả lần đo
-    # 2026-09-28, nơi Google thật ra đòi *xác minh tài khoản* chứ không đòi tiền.
+    # Google nên nói đúng chuyện gì xảy ra; `cooldowns[].reason` là nhãn CLIProxy tự đặt và nó
+    # gắn `payment_required` cho **mọi** 403 upstream.
     for auth_file in files:
         block = auth_file.provider_block
         if block is None:
@@ -410,8 +375,7 @@ def _build_payload(
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    # Chỉ thêm khoá khi thật sự có tool: gửi `"tools": []` là thay đổi hành vi vô ích và
-    # có provider coi mảng rỗng là lỗi.
+    # Chỉ thêm khoá khi thật sự có tool: có provider coi mảng rỗng là lỗi.
     if tools:
         payload["tools"] = tools
     return payload
@@ -420,8 +384,8 @@ def _build_payload(
 def _extract_text(data: dict[str, Any]) -> str:
     """Rút text từ response Gemini, phân biệt rõ "bị chặn" với "trả rỗng".
 
-    Gộp mọi `parts[].text` của candidate đầu: model có lúc tách câu trả lời thành nhiều phần
-    (nhất là khi kèm ảnh), lấy mỗi `parts[0]` sẽ cắt cụt câu trả lời — lỗi âm thầm.
+    Gộp mọi `parts[].text` của candidate đầu: model có lúc tách câu trả lời thành nhiều phần, lấy
+    mỗi `parts[0]` sẽ cắt cụt câu trả lời — lỗi âm thầm.
     """
     feedback = data.get("promptFeedback")
     if isinstance(feedback, dict) and feedback.get("blockReason"):

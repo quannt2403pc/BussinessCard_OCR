@@ -1,27 +1,19 @@
 """Việt hoá danh thiếp sau khi quét: dịch chức vụ / loại hình pháp nhân, phiên âm tên riêng.
 
-Chủ sở hữu: Q | Task: EX-02 | xem Task.md
+Chủ sở hữu: Q | Task: EX-02
 
-Bước thứ hai của hậu xử lý F1, chạy ngay sau `services/normalize.py` (3.6) và là **lượt gọi
-model thứ hai** — lý do tách khỏi prompt OCR nằm ở đầu `app/prompts/translate.py`.
+Bước thứ hai của hậu xử lý F1 và là **lượt gọi model thứ hai** — lý do tách khỏi prompt OCR nằm ở
+đầu `app/prompts/translate.py`. Hai tầng, theo đúng thứ tự này:
 
-Hai tầng, cố ý xếp theo thứ tự này:
+1. **Bảng tra cứu tất định** (`LEGAL_FORMS`, `JOB_TITLES`) — không gọi mạng, test được không cần
+   model, và giữ một cách dịch duy nhất: `株式会社` luôn là *Công ty Cổ phần*.
+2. **Model** — phiên âm tên riêng của **bất cứ ngôn ngữ nào**, thứ bảng tra cứu không phủ nổi.
 
-1. **Bảng tra cứu tất định** (`LEGAL_FORMS`, `JOB_TITLES`) — không gọi mạng, luôn ra cùng một
-   kết quả, test được bằng `pytest` không cần model. Phủ phần lặp đi lặp lại và hay bị dịch mỗi
-   lúc một khác: `株式会社` phải luôn là *Công ty Cổ phần*, không lúc *Công ty cổ phần* lúc
-   *Tập đoàn*.
-2. **Model** — phủ phần còn lại, tức là chính phần mà bảng tra cứu không bao giờ phủ nổi: phiên
-   âm tên riêng của **bất cứ ngôn ngữ nào** (yêu cầu số 3 của EX). Không có thư viện Python nào
-   cho âm Hán Việt, và một bảng chức vụ viết tay thì luôn thiếu đúng cái chức vụ vừa gặp.
+Model hỏng thì **rơi xuống tầng 1** chứ không ném lỗi: mất bản Việt hoá là mất một tiện ích, mất
+tấm thẻ vừa quét mới là hỏng. Chỗ gọi đọc `translation_meta["source"]` để biết kết quả từ đâu.
 
-Model hỏng (chưa kết nối OAuth, hết hạn mức, trả chữ không phải JSON) thì **rơi xuống tầng 1**
-chứ không ném lỗi lên: mất bản Việt hoá là mất một tiện ích, mất tấm thẻ vừa quét mới là hỏng.
-Chỗ gọi đọc `translation_meta["source"]` để biết kết quả đến từ đâu.
-
-**Không ghi đè bản gốc.** Bốn cột `*_vi` là cột riêng (revision `0006`); `full_name`,
-`company_name_raw`… giữ nguyên chữ trên thẻ để giao diện in bản gốc làm chú thích nhỏ dưới bản
-dịch, và để `ocr_raw_json` còn đối chiếu được với ảnh.
+**Không ghi đè bản gốc** — bốn cột `*_vi` là cột riêng, để giao diện in bản gốc làm chú thích nhỏ
+và để `ocr_raw_json` còn đối chiếu được với ảnh.
 """
 
 from __future__ import annotations
@@ -42,22 +34,18 @@ from app.services.normalize import squash_spaces
 
 logger = logging.getLogger(__name__)
 
-#: Trần độ dài 3 cột `VARCHAR(255)`. Model lảm nhảm một đoạn giải thích vào `company_name_vi` là
-#: chuyện có thật; cắt ở đây để một lượt Việt hoá hỏng không làm hỏng luôn lượt ghi DB.
+#: Trần độ dài 3 cột `VARCHAR(255)` — model lảm nhảm cả đoạn giải thích vào `company_name_vi` là
+#: chuyện có thật.
 _MAX_LEN = 255
 
-#: Loại hình pháp nhân → tiếng Việt, kèm **vị trí được phép khớp**: `s` = chỉ cuối tên,
-#: `p` = chỉ đầu tên, `b` = cả hai đầu. Khoá là chữ **in trên thẻ**, giá trị tiếng Việt là dạng
-#: duy nhất được dùng trong toàn hệ thống.
+#: Loại hình pháp nhân → tiếng Việt, kèm **vị trí được phép khớp**: `s` = chỉ cuối tên, `p` = chỉ
+#: đầu tên, `b` = cả hai đầu.
 #:
 #: Vị trí không phải chi tiết thừa: `Group` chỉ là loại hình khi đứng CUỐI — khớp cả ở đầu thì
-#: `Group Dynamics Institute` bị bóc mất chữ đầu và thành *Tập đoàn Dynamics Institute*, một
-#: công ty khác hẳn. Ngược lại `PT` (Indonesia) và `OOO` (Nga) chỉ đứng đầu, còn `株式会社` thì
-#: thật sự đứng được cả hai đầu.
+#: `Group Dynamics Institute` thành *Tập đoàn Dynamics Institute*, một công ty khác hẳn.
 #:
-#: Thứ tự cũng có ý nghĩa: quét từ trên xuống nên dạng dài phải đứng trước dạng ngắn nằm trong
-#: nó (`股份有限公司` trước `有限公司`, `Co., Ltd.` trước `Ltd`), nếu không dạng ngắn khớp trước
-#: và phần thừa của hậu tố rơi vào tên riêng.
+#: Thứ tự cũng có ý nghĩa: dạng dài phải đứng trước dạng ngắn nằm trong nó (`股份有限公司` trước
+#: `有限公司`), nếu không phần thừa của hậu tố rơi vào tên riêng.
 LEGAL_FORMS: tuple[tuple[str, str, str], ...] = (
     # --- Nhật ---
     ("株式会社", "Công ty Cổ phần", "b"),
@@ -103,9 +91,8 @@ LEGAL_FORMS: tuple[tuple[str, str, str], ...] = (
     ("Group", "Tập đoàn", "s"),
 )
 
-#: Chức vụ hay gặp → tiếng Việt. Không nhằm phủ hết (không bảng nào phủ hết được) mà nhằm **giữ
-#: một cách dịch duy nhất** cho những chức vụ xuất hiện đi xuất hiện lại, và làm lưới đỡ khi
-#: model không gọi được. Khoá đã hạ chữ thường + bỏ dấu chấm, xem `_title_key()`.
+#: Chức vụ hay gặp → tiếng Việt. Không nhằm phủ hết mà nhằm **giữ một cách dịch duy nhất** cho
+#: chức vụ lặp đi lặp lại, và làm lưới đỡ khi không gọi được model. Khoá xem `_title_key()`.
 JOB_TITLES: dict[str, str] = {
     # tiếng Anh
     "ceo": "Tổng giám đốc",
@@ -195,8 +182,8 @@ _HAS_LATIN_RE = re.compile(r"[A-Za-zÀ-ÿ]")
 class TranslationError(RuntimeError):
     """Không Việt hoá được.
 
-    Chỉ nổi lên tới người dùng từ `POST /api/cards/{id}/translate` — họ vừa bấm nút nên cần biết
-    vì sao hỏng. Luồng quét tự động thì nuốt lỗi và rơi về bảng tra cứu (xem docstring đầu file).
+    Chỉ nổi lên tới người dùng từ nút *Dịch lại*. Luồng quét tự động nuốt lỗi và rơi về bảng tra
+    cứu.
     """
 
 
@@ -228,12 +215,11 @@ async def translate_card(
 ) -> Translation:
     """Việt hoá 4 trường của một danh thiếp.
 
-    `fields` là dict trường đã chuẩn hoá (khoá trùng tên cột `business_cards`). Trả về
-    `Translation` với `meta["source"]` cho biết kết quả đến từ đâu: `llm` · `mixed` (model thiếu
-    trường, bảng tra cứu lấp) · `dictionary` (model hỏng hẳn) · `skipped` (không có gì để dịch).
+    Trả `Translation` với `meta["source"]` cho biết kết quả đến từ đâu: `llm` · `mixed` (model
+    thiếu trường, bảng tra cứu lấp) · `dictionary` (model hỏng hẳn) · `skipped`.
 
-    Mặc định **không ném lỗi**: luồng quét gọi hàm này và một lượt dịch hỏng không được phép làm
-    hỏng lượt quét. `raise_on_error=True` dành cho nút *Dịch lại* — ở đó im lặng mới là sai.
+    Mặc định **không ném lỗi**: một lượt dịch hỏng không được phép làm hỏng lượt quét.
+    `raise_on_error=True` dành cho nút *Dịch lại*, ở đó im lặng mới là sai.
     """
     source = _source_fields(fields)
     if not source:
@@ -250,8 +236,7 @@ async def translate_card(
             logger.warning("Việt hoá bằng model thất bại, dùng bảng tra cứu: %s", exc)
             if raise_on_error:
                 # Ném lại **nguyên loại lỗi cũ**, không bọc: router phân biệt
-                # `LLMNotConnectedError` (503, mời bấm nút kết nối OAuth) với lỗi gọi model khác
-                # (502). Bọc hết vào `TranslationError` là xoá mất chính chỗ phân biệt đó.
+                # `LLMNotConnectedError` (503) với lỗi gọi model khác (502).
                 raise
             meta["error"] = str(exc)[:300]
             if not values:
@@ -264,8 +249,8 @@ async def translate_card(
             }
             filled = {key: value for key, value in model_values.items() if value}
             meta["source"] = "llm" if len(filled) >= len(values) else "mixed"
-            # Model thật đã gọi, không phải mặc định của hệ thống (I-34, EX-14). Cắt tiền tố
-            # credential vì `translation_meta` là dữ liệu đọc được trên giao diện.
+            # Model thật đã gọi, không phải mặc định của hệ thống. Cắt tiền tố credential vì
+            # `translation_meta` là dữ liệu đọc được trên giao diện.
             meta["model"] = llm.base_model(model or settings.llm_model)
             values.update(filled)
             for key in ("source_language", "script", "name_method", "note"):
@@ -331,9 +316,8 @@ async def _ask_model(
 ) -> dict[str, Any]:
     """Một lượt gọi model, trả về JSON đã bóc khỏi câu trả lời.
 
-    `temperature=0.0` vì đây là việc chuyển đổi có đáp án chứ không phải viết sáng tạo: cùng một
-    tấm thẻ mở hai lần phải ra cùng một cách phiên âm, nếu không người dùng sẽ thấy tên mình đổi
-    mỗi lần bấm *Dịch lại*.
+    `temperature=0.0` vì đây là việc chuyển đổi có đáp án: cùng một tấm thẻ mở hai lần phải ra
+    cùng một cách phiên âm.
     """
     text = await llm.generate_text(
         prompts.build_prompt(dict(source), language=language),
@@ -362,8 +346,8 @@ def _offline_values(source: Mapping[str, str]) -> dict[str, str | None]:
     company = source.get("company_name_raw")
     if company:
         vi_form, remainder = split_legal_form(company)
-        # Chỉ ghép được khi phần tên riêng đã là chữ Latin. Phần chữ Hán/Kana còn lại mà đem ghép
-        # với "Công ty Cổ phần" thì ra một chuỗi nửa Việt nửa Nhật — tệ hơn là để trống cho model.
+        # Chỉ ghép được khi phần tên riêng đã là chữ Latin — ghép chữ Hán/Kana với "Công ty Cổ
+        # phần" ra một chuỗi nửa Việt nửa Nhật, tệ hơn là để trống cho model.
         if vi_form and _is_latin(remainder):
             out["company_name_vi"] = f"{vi_form} {remainder}"
 
@@ -373,10 +357,8 @@ def _offline_values(source: Mapping[str, str]) -> dict[str, str | None]:
 def _finalize(values: Mapping[str, str | None], source: Mapping[str, str]) -> dict[str, str | None]:
     """Dọn giá trị cuối: cắt độ dài, và **bỏ bản dịch trùng y hệt bản gốc**.
 
-    Bỏ bản trùng là quy tắc quan trọng nhất ở đây: thẻ tiếng Việt, hay thẻ tiếng Anh viết bằng
-    chữ Latin, thì bản "Việt hoá" chính là bản gốc — giao diện in cả hai sẽ thành hai dòng chữ
-    giống hệt nhau chồng lên nhau. `None` ở cột `*_vi` mang đúng một nghĩa: *bản gốc dùng được
-    luôn, không cần chú thích gì thêm*.
+    Thẻ tiếng Việt hay tiếng Anh thì bản "Việt hoá" chính là bản gốc, in cả hai là hai dòng giống
+    hệt chồng lên nhau. `None` ở cột `*_vi` nghĩa là *bản gốc dùng được luôn*.
     """
     out: dict[str, str | None] = {}
     for name, column in prompts.VI_COLUMNS.items():
@@ -428,10 +410,9 @@ def _strip_cjk_form(text: str, form: str, position: str) -> str | None:
 def _strip_latin_form(text: str, form: str, position: str) -> str | None:
     """Bóc loại hình viết bằng chữ Latin — khớp nguyên từ, đúng vị trí cho phép.
 
-    Hai chỗ dễ sai, cả hai đã gặp thật ở `normalize_company.py` của T (task 3.7/10.7): không
-    khớp nguyên từ thì `Ltd` khớp vào giữa `Altdorf`; không tôn trọng vị trí thì `Group` trong
-    `Group Dynamics Institute` bị bóc mất. Dấu chấm/phẩy trong `Co., Ltd.` là tuỳ hứng của người
-    in thẻ nên so khớp lỏng ở đúng chỗ đó, không so từng ký tự.
+    Hai chỗ dễ sai: không khớp nguyên từ thì `Ltd` khớp vào giữa `Altdorf`; không tôn trọng vị
+    trí thì `Group` trong `Group Dynamics Institute` bị bóc mất. Dấu chấm/phẩy trong `Co., Ltd.`
+    so khớp lỏng vì đó là tuỳ hứng của người in thẻ.
     """
     parts = [re.escape(part) for part in form.replace(".", " ").split() if part]
     if not parts:

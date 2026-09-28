@@ -4,37 +4,21 @@ Revision ID: 0009
 Revises: 0008
 Create Date: 2026-09-24 19:30:00.000000+07:00
 
-Task NEXT-03 (T). Cung ngoai le nhu `0008`: quy uoc so 5 noi "chi Q sinh revision", **Q cho phep
-T tu sinh cho rieng cac dong NEXT-xx, 2026-09-24**. Moi viec khac van theo quy uoc cu.
+Task NEXT-03 (T) -- Q cho phep T tu sinh revision cho rieng cac dong NEXT-xx.
 
-RUI RO: thap. Mot bang moi va mot cot NULL duoc tren `business_cards` -- khong viet lai bang,
-khong doi kieu cot nao dang co.
+RUI RO thap: mot bang moi va mot cot NULL duoc tren `business_cards`.
 
-VI SAO LA BANG CHU KHONG PHAI MOT COT CHU TREN `business_cards`:
+`business_cards.event_id` la SET NULL chu khong CASCADE: xoa nhan mot hoi cho **khong duoc** keo
+theo may tram tam the thu ve tu hoi cho do.
 
-  Su kien thi it ma danh thiep thi nhieu. Ten su kien hay bi go sai o tam thu nam muoi, va sua
-  mot cho phai sua duoc cho ca lo. Bang rieng con cho gan ngay dien ra va dem so the ma khong
-  phai GROUP BY tren chuoi.
+Hai index unique: chong trung ten su kien theo tung nguoi dung, va (partial, WHERE is_active)
+**nhieu nhat mot su kien dang dien ra cho moi nguoi** -- hai dong cung bat thi viec chon dong nao
+thanh ngau nhien theo thu tu Postgres tra ve.
 
-VI SAO `business_cards.event_id` LA SET NULL CHU KHONG CASCADE:
+Khong co buoc doi du lieu cho `relationship_status`: nhung dong dang mang `closed` giu nguyen,
+gan bua chung sang `lost` la bia ra du lieu chua ai nhap.
 
-  Xoa nhan mot hoi cho **khong duoc** keo theo may tram tam danh thiep thu ve tu hoi cho do.
-  Mat nhan con gan lai duoc, mat the thi khong.
-
-HAI INDEX UNIQUE, MOI CAI MOT VIEC:
-
-  - `ix_events_user_id_name`: chong trung theo tung nguoi dung, cung luat voi `companies`
-    (Plan.md muc 3). Hai nguoi cung di mot hoi cho thi ai cung co su kien cua minh.
-  - `ix_events_one_active` (partial, WHERE is_active): **nhieu nhat mot su kien dang dien ra cho
-    moi nguoi**. Co nay quyet dinh the vua quet duoc dong dau vao dau; hai dong cung bat thi viec
-    chon dong nao thanh ngau nhien theo thu tu Postgres tra ve.
-
-KHONG CO BUOC DOI DU LIEU CHO `relationship_status`:
-
-  NEXT-03 tach ket cuc thanh `won` / `lost` o tang ung dung (cot la VARCHAR(16), khong co CHECK
-  nen DDL khong phai doi gi). Nhung dong dang mang `closed` **giu nguyen**: `closed` co nghia cu
-  la *da dung, khong ro thang hay thua*. Gan bua chung sang `lost` la bia ra du lieu chua ai
-  nhap, va bia thang vao con so ma ca bao cao dua len.
+File nay khong dau tieng Viet: xem canh bao o dau alembic.ini (I-07).
 """
 
 import sqlalchemy as sa

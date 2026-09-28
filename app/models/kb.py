@@ -1,11 +1,9 @@
 """Bảng kb_chunks (vector(384)).
 
-Chủ sở hữu: Q | Task: 1.6 | xem Task.md
+Chủ sở hữu: Q | Task: 1.6
 
-Số chiều lấy từ `settings.embedding_dim` (mặc định 384 = `multilingual-e5-small`, Plan.md 2.6).
-Nếu task 2.6 chốt model khác số chiều, T phải báo Q **trong ngày** để Q sinh revision đổi kiểu cột
-trước D6 — chỉ Q được sinh revision (quy ước số 5, Task.md).
-Index `ivfflat` (cosine) KHÔNG tạo ở đây mà ở task 6.3, khi đã có dữ liệu để index học.
+Số chiều lấy từ `settings.embedding_dim`. Đổi model khác số chiều thì cần một Alembic revision
+đổi kiểu cột. Index `ivfflat` (cosine) tạo ở revision riêng, khi đã có dữ liệu để index học.
 """
 
 import uuid
@@ -20,18 +18,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.config import settings
 from app.core.db import Base
 
-#: Số cụm (`lists`) của index `ivfflat`. **Đo thật 2026-09-16, không lấy theo công thức chung.**
+#: Số cụm (`lists`) của index `ivfflat`, đo thật chứ không theo công thức chung: KB cỡ vài trăm
+#: chunk, để 100 cụm thì mỗi cụm còn 2–3 dòng mà một lượt tìm chỉ dò **một** cụm — hỏi top-5 chỉ
+#: nhận về 2 kết quả, không lỗi nào báo.
 #:
-#: pgvector khuyên `lists = số dòng / 1000`, nhưng KB của bản demo chỉ cỡ vài trăm chunk
-#: (30 danh thiếp + 10 hồ sơ). Để 100 cụm thì mỗi cụm còn 2–3 dòng, mà một lượt tìm mặc định
-#: chỉ dò **một** cụm (`ivfflat.probes = 1`) — hỏi top-5 nhưng chỉ nhận về 2 kết quả, và không
-#: có lỗi nào báo. 10 cụm giữ mỗi cụm vài chục dòng, đủ cho quy mô này.
-#:
-#: ⚠️ Index này **học phân cụm từ dữ liệu có sẵn đúng lúc nó được tạo**. Migration 0003 chạy khi
-#: `kb_chunks` còn rỗng nên centroid vô nghĩa: đã đo, chèn 3 dòng rồi tìm chỉ ra 1 dòng
-#: (pgvector cũng tự cảnh báo *"ivfflat index created with little data"*). Vì vậy
-#: `POST /api/kb/reindex` **luôn `REINDEX` lại index này ở cuối** — xem
-#: `repositories/kb.py::rebuild_vector_index()`.
+#: ⚠️ Index học phân cụm từ dữ liệu **có sẵn lúc nó được tạo**, nên `POST /api/kb/reindex` luôn
+#: `REINDEX` lại ở cuối — xem `repositories/kb.py::rebuild_vector_index()`.
 IVFFLAT_LISTS = 10
 
 
@@ -49,13 +41,8 @@ class KBChunk(Base):
     __table_args__ = (
         # Lọc chunk theo nguồn khi reindex lại một danh thiếp / hồ sơ (task 6.4).
         Index("ix_kb_chunks_source", "source_type", "source_id"),
-        # Vector search (task 6.3, revision 0003). `vector_cosine_ops` phải khớp với toán tử
-        # `<=>` mà `repositories/kb.py::search_similar` dùng — sai opclass thì câu truy vấn vẫn
-        # chạy nhưng bỏ qua index và quét toàn bảng, tức là hỏng về tốc độ chứ không báo lỗi.
-        #
-        # Khai ở đây *và* trong revision 0003: thiếu khai ở model thì `alembic check` coi index
-        # trong DB là thừa và sinh lệnh `drop_index` ở revision sau (Q giữ `alembic check` sạch
-        # từ I-16).
+        # `vector_cosine_ops` phải khớp toán tử `<=>` mà `search_similar` dùng — sai opclass thì
+        # câu truy vấn vẫn chạy nhưng bỏ qua index và quét toàn bảng, không báo lỗi gì.
         Index(
             "ix_kb_chunks_embedding",
             "embedding",
@@ -67,17 +54,9 @@ class KBChunk(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    # Cột tách dữ liệu **quan trọng nhất** của F3: rò một chunk là trợ lý AI đọc được dữ liệu
-    # của không gian khác rồi trả lời ra thành câu — đường rò khó thấy nhất mà A9′ nhắm tới. Mọi
-    # câu tìm kiếm phải có nó trong `WHERE` (`repositories/kb.py::scope_filters`), không lọc lại
-    # sau khi đã lấy về. Task 12.3 lọc theo `user_id`; `NEXT-05` đổi sang không gian làm việc.
-    #
-    # **Không có cột người tạo.** Chunk là dữ liệu dẫn xuất, sinh lại được từ nguồn bất cứ lúc
-    # nào, nên "ai tạo" ở đây chỉ là người bấm nút index gần nhất — một câu trả lời sai lệch mà
-    # không ai cần. Nguồn thật (`business_cards`, `companies`) mới giữ người tạo.
-    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
-    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
-    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    #: Cột tách dữ liệu **quan trọng nhất** của F3: rò một chunk là trợ lý đọc được dữ liệu của
+    #: không gian khác rồi trả lời ra thành câu. Mọi câu tìm kiếm phải có nó trong `WHERE`.
+    #: Không có cột người tạo — chunk là dữ liệu dẫn xuất, sinh lại được bất cứ lúc nào.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),

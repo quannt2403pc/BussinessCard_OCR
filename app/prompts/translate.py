@@ -1,27 +1,21 @@
 """Prompt Việt hoá danh thiếp sau khi quét: dịch chức vụ / loại hình pháp nhân, phiên âm tên riêng.
 
-Chủ sở hữu: Q | Task: EX-01 | xem Task.md
+Chủ sở hữu: Q | Task: EX-01
 
-**Vì sao là lượt gọi model thứ hai chứ không nhét thêm trường vào `prompts/ocr.py`:**
-prompt OCR đã được đo hai lần (task 9.3 rồi 10.8) và đang ở 100% trên ảnh sắc nét; ghi chú của
-9.3 chốt hẳn *"không sửa gì ở quy tắc 1–3"*. Quy tắc 3 của nó — **giữ nguyên chữ bản địa, không
-dịch, không phiên âm** — là thứ giữ cho `ocr_raw_json` còn đối chiếu được với ảnh. Trộn thêm
-việc dịch vào cùng một lời gọi là vừa phá quy tắc đó, vừa buộc phải đo lại toàn bộ A3, vừa làm
-một lần dịch sai kéo theo cả kết quả đọc chữ. Tách ra thì lượt Việt hoá hỏng cũng chỉ mất phần
-Việt hoá: thẻ vẫn quét được, vẫn review được, bấm *Dịch lại* là xong.
+**Vì sao là lượt gọi model thứ hai chứ không nhét thêm trường vào `prompts/ocr.py`:** quy tắc 3
+của prompt OCR — giữ nguyên chữ bản địa, không dịch, không phiên âm — là thứ giữ cho
+`ocr_raw_json` còn đối chiếu được với ảnh. Trộn việc dịch vào cùng một lời gọi là phá quy tắc đó
+và buộc phải đo lại toàn bộ A3. Tách ra thì lượt Việt hoá hỏng cũng chỉ mất phần Việt hoá.
 
-Ba loại chữ trên danh thiếp cần ba cách xử lý khác hẳn nhau, và đó là toàn bộ nội dung prompt:
+Ba loại chữ cần ba cách xử lý khác hẳn nhau, và đó là toàn bộ nội dung prompt:
 
-1. **Chức vụ và loại hình pháp nhân** (`部長`, `주식회사`, `Co., Ltd.`) — **dịch nghĩa**. Đây là
-   từ vựng chung, có từ tương đương trong tiếng Việt, và người đọc cần hiểu nghĩa.
-2. **Tên riêng** (người, công ty, địa danh) — **không dịch nghĩa**, chuyển sang đúng cách người
-   Việt vẫn viết: tiếng Nhật → Romaji, tiếng Trung → âm Hán Việt, còn lại → dạng Latin thông
-   dụng. `さくらテクノロジー` là *Sakura Technology*, không phải *Công nghệ Hoa Anh Đào*.
-3. **Số, email, website** — không gửi lên, `services/normalize.py` (3.6) đã lo và chúng không
-   có gì để dịch.
+1. **Chức vụ và loại hình pháp nhân** (`部長`, `주식회사`, `Co., Ltd.`) — **dịch nghĩa**.
+2. **Tên riêng** — **không dịch nghĩa**, chuyển sang đúng cách người Việt vẫn viết (Nhật → Romaji,
+   Trung → âm Hán Việt, còn lại → Latin thông dụng). `さくらテクノロジー` là *Sakura Technology*,
+   không phải *Công nghệ Hoa Anh Đào*.
+3. **Số, email, website** — không gửi lên, `services/normalize.py` đã lo.
 
-⚠️ Như mọi prompt trong dự án: có ghi "chỉ trả JSON, không bọc trong khối ```" nhưng **đừng tin
-là đủ** (I-15). `services/llm_json.py` gỡ hàng rào trước khi `json.loads()`.
+⚠️ Có ghi "chỉ trả JSON, không bọc trong khối ```" nhưng **đừng tin là đủ** (I-15).
 """
 
 from __future__ import annotations
@@ -29,8 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-#: Trường được Việt hoá. Khoá đầu ra là `<tên trường>_vi`, trùng tên cột `business_cards`
-#: (revision `0006`) nên `services/translate.py` không phải dựng lớp ánh xạ tên.
+#: Trường được Việt hoá. Khoá đầu ra là `<tên trường>_vi`, trùng tên cột `business_cards`.
 TRANSLATABLE_FIELDS: tuple[str, ...] = (
     "full_name",
     "job_title",
@@ -39,7 +32,7 @@ TRANSLATABLE_FIELDS: tuple[str, ...] = (
 )
 
 #: Cột lưu kết quả, theo đúng thứ tự trên. `company_name_raw` → `company_name_vi`: bỏ hậu tố
-#: `_raw` cho khỏi có cột tên `company_name_raw_vi` đọc như một lỗi đánh máy.
+#: `_raw` cho khỏi có cột đọc như một lỗi đánh máy.
 VI_COLUMNS: dict[str, str] = {
     "full_name": "full_name_vi",
     "job_title": "job_title_vi",
@@ -118,10 +111,9 @@ QUY TẮC — đọc hết trước khi trả lời:
 def build_prompt(fields: dict[str, Any], *, language: str | None = None) -> str:
     """Prompt cho một tấm thẻ. `fields` chỉ chứa các khoá trong `TRANSLATABLE_FIELDS`.
 
-    Ngôn ngữ do OCR đoán được (`language_detected`) đi vào prompt như **gợi ý, không phải mệnh
-    lệnh**: thẻ song ngữ hay thẻ Nhật in tên công ty bằng chữ Hán làm trường đó sai thường xuyên,
-    và model nhìn thẳng vào chữ thì đoán đúng hơn. Vì vậy vẫn bắt nó tự trả `source_language` —
-    trường đó mới là thứ được ghi vào `translation_meta`.
+    `language_detected` đi vào prompt như **gợi ý, không phải mệnh lệnh**: thẻ song ngữ làm trường
+    đó sai thường xuyên. Model vẫn phải tự trả `source_language` — đó mới là thứ được ghi vào
+    `translation_meta`.
     """
     payload = json.dumps(fields, ensure_ascii=False, indent=2)
     hint = (

@@ -1,43 +1,19 @@
-{# Quét danh thiếp: một màn hình duy nhất, một ảnh hay ba mươi ảnh đều đi chung đường. #}
-{# Chủ sở hữu: Q | Task: 5.3 · NEXT-09 (T sửa, Q review) · gộp hai màn hình ở I-38 | xem Task.md #}
-{#
-  Bản 5.3 gửi **cả loạt trong một request**. Ở văn phòng thì đó là lựa chọn đúng: server nhận
-  hết, lưu ảnh xuống volume rồi quét ở nền, nên đóng tab việc vẫn chạy tiếp.
+{# Quét danh thiếp: một màn hình duy nhất, một ảnh hay ba mươi ảnh đều đi chung đường.
+   Chủ sở hữu: Q | Task: 5.3 · NEXT-09 · I-38
 
-  Nhưng hội chợ là chỗ sóng yếu, và ở đó một request mang 30 ảnh là **một điểm gãy duy nhất**:
-  rớt mạng ở ảnh thứ 28 thì mất cả 30, mà người dùng thì đã đi khỏi bàn của khách rồi.
+   **Hội chợ là chỗ sóng yếu**, và ở đó một request mang 30 ảnh là một điểm gãy duy nhất. Hợp đồng
+   server giữ nguyên, phía trình duyệt đổi bốn thứ:
 
-  NEXT-09 giữ nguyên hợp đồng server và đổi phía trình duyệt:
+   1. Ảnh vào **IndexedDB trước**, trước khi chạm mạng — đóng tab hay hết pin đều không mất.
+   2. Gửi theo **lô nhỏ**, mỗi lô một request; lô hỏng thì chỉ lô đó phải gửi lại.
+   3. Mất mạng thì **dừng chứ không báo lỗi**, tự chạy tiếp khi có sóng.
+   4. Luôn hiện rõ **cái nào chưa lên máy chủ**.
 
-  1. Ảnh vào **IndexedDB trước**, trước khi chạm mạng. Từ đó trở đi, đóng tab, hết pin hay
-     tắt máy đều không mất — mở lại trang là hàng đợi còn nguyên.
-  2. Gửi theo **lô nhỏ**, mỗi lô một request. Lô hỏng thì chỉ lô đó phải gửi lại.
-  3. Mất mạng thì **dừng chứ không báo lỗi**, và tự chạy tiếp khi có sóng (`online`).
-  4. Luôn hiện rõ **cái nào chưa lên máy chủ** — đó là câu hỏi duy nhất người dùng có lúc
-     đứng dậy rời hội chợ.
+   `I-38` gộp `/cards/upload` và `/cards/batch` làm một — hai trang cũ chỉ khác nhau ở số ảnh
+   người dùng định chọn, thứ họ chưa biết cho tới khi mở hộp chọn file ra. Giữ lại từ trang cũ
+   đúng một thứ: **nút chụp ảnh** (`capture="environment"`).
 
-  ---
-  **I-38 gộp `/cards/upload` và `/cards/batch` làm một, và đây là trang còn lại.**
-
-  Hai trang cũ chỉ khác nhau ở **số ảnh người dùng định chọn** — một thứ họ chưa biết cho tới
-  khi mở hộp chọn file ra. Bắt chọn trước là bắt trả lời một câu hỏi của hệ thống chứ không
-  phải của họ, và chọn sai thì phải quay ra bấm lại từ đầu. Trang cũ còn nhận nhiều ảnh rồi tự
-  gửi tuần tự, nên "hàng loạt" thậm chí không phải ranh giới thật.
-
-  Giữ lại từ `/cards/upload` cũ đúng một thứ: **nút chụp ảnh** (`capture="environment"`), thứ
-  duy nhất trang này không có. Đó là đường đi của người đứng tại hội chợ, chính là đối tượng mà
-  cả `NEXT-09` sinh ra để phục vụ.
-
-  Mất khi gộp, và chấp nhận: bảng 7 trường model đọc được hiện ngay dưới mỗi ảnh vừa quét. Nó
-  gắn với `POST /api/cards/upload` (trả kết quả đồng bộ), còn đường này quét ở nền nên lúc
-  request trả về thì chưa có gì để hiện. Nút *Review →* của từng dòng mở đúng thẻ đó với đầy đủ
-  trường, ảnh gốc và ô sửa — nhiều hơn hẳn bảng vừa mất.
-
-  `POST /api/cards/upload` **không bị gỡ**: nó là hợp đồng API có test, chỉ không còn màn hình
-  nào gọi tới.
-
-  ⚠️ Tên file do người dùng đặt, ghi vào DOM bằng `textContent`.
-#}
+   ⚠️ Tên file do người dùng đặt, ghi vào DOM bằng `textContent`. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 

@@ -1,26 +1,11 @@
-{# Layout dùng chung: <head>, header + nav 4 mục, menu người dùng, bong bóng chat. #}
-{# Chủ sở hữu: Q | Task: 1.3, dựng lại ở 14.7 (D14) | xem Task.md, docs/ui-kit.md #}
-{#
-  Trang con kế thừa file này:
-      {% extends "base.html" %}
-      {% block title %}Danh thiếp{% endblock %}
-      {% block content %} ... {% endblock %}
-  Biến `active_nav` (home | cards | companies | settings) để tô sáng mục nav đang mở.
+{# Layout dùng chung: <head>, header + nav, menu người dùng, bong bóng chat.
+   Chủ sở hữu: Q | Task: 1.3, 14.7 | xem docs/ui-kit.md
 
-  Ba thay đổi của 14.7 so với bản D1, đều có lý do đo được chứ không phải gu thẩm mỹ:
+   Trang con kế thừa bằng `{% extends "base.html" %}` + block `title` / `content`.
+   Biến `active_nav` (home | cards | companies | settings) để tô sáng mục nav đang mở.
 
-  1. **Nav còn 4 mục** (EX-09 rút tiếp còn **3**, xem ghi chú ở `nav_items`). Bản cũ có 5 mục nav +
-     4 liên kết bên phải = 9 mục trên một hàng, tràn ngang
-     ở 375px. `Trạng thái kết nối` / `API` / tên người dùng / `Đăng xuất` gom vào **một** menu
-     người dùng; `Bảng số liệu` gộp vào trang chủ theo **QĐ-2** (`/dashboard` → 301 về `/`).
-  2. **Tên sản phẩm là `OCR Xì Mi`**, không phải `BusinessCard OCR`. `BusinessCard_OCR` từ nay chỉ
-     còn là tên repo. `alt` của logo viết có dấu, có khoảng trắng — trình đọc màn hình gặp
-     `OCRXÌMI` sẽ đánh vần từng chữ cái thay vì đọc ra tên.
-  3. **Khối nội dung mặc định của D1 đã xoá.** `/` nay render `home.html`; dòng "Khung dự án đã
-     dựng xong (D1)" chính là thứ khách vào `ocrximi.io.vn` nhìn thấy đầu tiên trước D14.
-
-  Cần đổi file này → báo Q (quy ước chống xung đột số 2, Task.md).
-#}
+   `alt` của logo và `og:site_name` viết **có dấu, có khoảng trắng**: trình đọc màn hình gặp
+   `OCRXÌMI` sẽ đánh vần từng chữ cái thay vì đọc ra tên. #}
 {% from "_macros.html" import icon %}
 <!DOCTYPE html>
 <html lang="vi">
@@ -30,8 +15,7 @@
   <title>{% block title %}Trang chủ{% endblock %} · OCR Xì Mi</title>
   <meta name="description" content="Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác bằng AI.">
 
-  {# Thẻ xem trước khi dán link vào Zalo/Slack/Facebook. `og:site_name` viết có dấu — cùng lý do
-     với `alt` của logo. #}
+  {# Thẻ xem trước khi dán link vào Zalo/Slack/Facebook. #}
   <meta property="og:site_name" content="OCR Xì Mi">
   <meta property="og:title" content="{{ self.title() }} · OCR Xì Mi">
   <meta property="og:description" content="Số hoá danh thiếp và lập hồ sơ doanh nghiệp đối tác bằng AI.">
@@ -41,16 +25,14 @@
   <link rel="icon" href="{{ url_for('static', path='img/favicon.ico') }}" sizes="any">
   <link rel="apple-touch-icon" href="{{ url_for('static', path='img/apple-touch-icon.png') }}">
 
-  {# Plus Jakarta Sans, đúng 3 nét (400/500/600). `preconnect` cắt một vòng bắt tay TLS; `swap`
-     để chữ hiện ngay bằng font hệ thống thay vì trang trắng trong lúc chờ tải. #}
+  {# `preconnect` cắt một vòng bắt tay TLS; `swap` để chữ hiện ngay bằng font hệ thống. #}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
   <script src="https://cdn.tailwindcss.com"></script>
-  {# Token màu của docs/ui-kit.md mục 1. Tailwind chạy bằng CDN nên **không có bước build** —
-     cấu hình phải khai ở đây, ngay sau thẻ script của CDN. Bản sao dưới dạng biến CSS nằm ở
-     `static/css/app.css`; đổi màu thì sửa cả hai chỗ, và chỉ hai chỗ đó. #}
+  {# Token màu của docs/ui-kit.md. Tailwind chạy bằng CDN nên **không có bước build** — cấu hình
+     phải khai ở đây. Bản sao dạng biến CSS ở `static/css/app.css`; đổi màu thì sửa cả hai chỗ. #}
   <script>
     tailwind.config = {
       theme: {
@@ -81,12 +63,10 @@
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}?v={{ asset_v }}">
   {% block head %}{% endblock %}
 </head>
-{# `min-h-dvh` chứ không `min-h-screen`: trên điện thoại `100vh` tính cả phần thanh địa chỉ đang
-   trượt, nên trang luôn thừa ra một dải cuộn không có gì. #}
+{# `min-h-dvh` chứ không `min-h-screen`: trên điện thoại `100vh` tính cả thanh địa chỉ đang trượt. #}
 <body class="flex min-h-dvh flex-col bg-surface font-sans text-slate-800 antialiased">
 
-  {# Nav 3 mục từ EX-09: `Trợ lý AI` rời khỏi đây vì trang riêng đã gỡ — hỏi trợ lý nay là bong
-     bóng nổi góc phải dưới, có mặt trên **mọi** trang chứ không phải một chỗ phải đi tới. #}
+  {# Nav 3 mục: `Trợ lý AI` rời khỏi đây vì trang riêng đã gỡ, nay là bong bóng trên mọi trang. #}
   {% set nav_items = [
     ('cards',     'Danh thiếp',   '/cards',     'card'),
     ('companies', 'Doanh nghiệp', '/companies', 'building'),
@@ -101,9 +81,8 @@
         <span class="text-base font-semibold tracking-tight text-brand-ink">OCR Xì Mi</span>
       </a>
 
-      {# Task 12.4: chưa đăng nhập thì chỉ còn trang `/auth/*`, nên nav trỏ vào các trang bị chặn
-         chỉ là những liên kết cụt — ẩn cả khối đi. `current_user` do context processor của
-         `core/templates.py` đưa vào **mọi** template, không route nào phải truyền. #}
+      {# Chưa đăng nhập thì nav chỉ toàn liên kết cụt — ẩn cả khối đi. `current_user` do context
+         processor đưa vào **mọi** template, không route nào phải truyền. #}
       {% if current_user %}
       <ul class="hidden items-center gap-1 text-sm md:flex">
         {% for key, label, href, icon_name in nav_items %}
@@ -121,7 +100,7 @@
 
       <div class="ml-auto flex items-center gap-1">
         {# Menu người dùng — gộp 4 thứ từng nằm rời trên nav. `<details>` chứ không JS: nó đã có
-           sẵn bàn phím (Enter/Space mở, Tab đi tiếp) và không cần một dòng script nào để mở ra. #}
+           sẵn bàn phím (Enter/Space mở, Tab đi tiếp). #}
         <details class="user-menu relative">
           <summary class="btn-icon list-none" aria-label="Menu tài khoản: {{ current_user.email }}">
             {{ icon("user") }}
@@ -139,22 +118,19 @@
             <a href="/account" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("user", "sm") }} Tài khoản
             </a>
-            {# NEXT-05 (T, Q review): một dòng duy nhất T thêm vào file của Q. Đặt trong menu tài
-               khoản chứ không lên nav: đổi workspace là việc vài tuần một lần, còn nav
-               giữ đúng 3 mục theo EX-09. #}
+            {# Đặt trong menu tài khoản chứ không lên nav: đổi workspace là việc vài tuần một lần. #}
             <a href="/workspaces" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("users", "sm") }} Workspace
             </a>
-            {# Liên kết Swagger chỉ hiện khi `DEBUG=true` (I-43). Trên `ocrximi.io.vn` ba đường
-               `/docs`, `/redoc`, `/openapi.json` bị tắt hẳn ở `app/main.py`, nên để nguyên mục
-               này là dựng một liên kết cụt ngay trong menu tài khoản của mọi người dùng thật. #}
+            {# Liên kết Swagger chỉ hiện khi bật `DOCS_ENABLED`; trên production ba đường đó bị
+               tắt hẳn nên để nguyên mục này là dựng một liên kết cụt. #}
             {% if docs_enabled %}
             <a href="/docs" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("file", "sm") }} API
             </a>
             {% endif %}
-            {# POST chứ không phải link: đăng xuất là hành động đổi trạng thái, mà `GET` thì mọi thứ
-               prefetch trước một liên kết đều đăng xuất người dùng hộ họ. #}
+            {# POST chứ không phải link: `GET` thì mọi thứ prefetch trước một liên kết đều đăng
+               xuất người dùng hộ họ. #}
             <form method="post" action="/auth/logout">
               <button type="submit"
                       class="link flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-muted hover:bg-surface">
@@ -189,20 +165,14 @@
 
   {% block flash %}{% endblock %}
 
-  {# `scroll-padding-bottom`: nút tròn của bong bóng chat nổi ở góc phải dưới. Không chừa chỗ thì
-     phần tử cuối cùng mà bàn phím Tab tới sẽ nằm **dưới** nút đó — WCAG 2.2 AA gọi đúng tên là
-     lỗi *Focus Not Obscured*. #}
+  {# `scroll-padding-bottom`: không chừa chỗ cho nút bong bóng chat thì phần tử cuối cùng bàn
+     phím Tab tới sẽ nằm **dưới** nó — WCAG 2.2 AA gọi là lỗi *Focus Not Obscured*. #}
   <main class="mx-auto w-full max-w-6xl flex-1 scroll-pb-24 px-4 py-8 sm:px-6">
     {% block content %}{% endblock %}
   </main>
 
-  {# Chân trang thật, dính đáy trang kể cả khi nội dung ngắn (`body` là flex cột, `main` co giãn).
-     Bản cũ chỉ là một dòng chữ xám "bản demo nội bộ · /health" — ghi chú cho người phát triển,
-     không phải chân trang cho người dùng.
-
-     Cố ý **không có logo**: đo ở 14.10, biểu tượng thu xuống 16px thành một vệt mờ không đọc ra
-     hình gì. Bản đủ wordmark (`logo-full.webp`) dùng ở trang đăng nhập và `og-image`, nơi nó có
-     đủ chỗ thở. #}
+  {# Chân trang dính đáy kể cả khi nội dung ngắn (`body` là flex cột, `main` co giãn).
+     Cố ý **không có logo**: thu xuống 16px thì biểu tượng thành một vệt mờ không đọc ra hình gì. #}
   <footer class="mt-8 border-t border-line bg-white">
     <div class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm sm:flex-row sm:items-start sm:px-6">
       <div class="sm:max-w-sm">
@@ -219,8 +189,7 @@
           {{ label }}
         </a>
         {% endfor %}
-        {# NEXT-07 của T (file của Q, Q review PR): lời thông báo về dữ liệu cá nhân mà không ai
-           tìm thấy thì không phải là lời thông báo. Để ở chân trang, chỗ người ta quen tìm. #}
+        {# Lời thông báo về dữ liệu cá nhân, để ở chân trang — chỗ người ta quen tìm. #}
         <a href="/privacy" class="link text-xs text-muted underline-offset-4 hover:text-brand-700 hover:underline">
           Dữ liệu cá nhân
         </a>
@@ -235,9 +204,7 @@
     </div>
   </footer>
 
-  {# Bong bóng chat (14.5, EX-09) — **mọi** trang đã đăng nhập, không trừ trang nào: từ EX-09 đây
-     là nơi duy nhất hỏi được trợ lý. Vẫn giữ điều kiện `current_user`: bong bóng gọi `/api/chat`,
-     hiện nó cho khách là mời bấm vào một đường chắc chắn 401. #}
+  {# Bong bóng chat — nơi duy nhất hỏi được trợ lý. Chỉ hiện khi đã đăng nhập: nó gọi `/api/chat`. #}
   {% if current_user %}
     {% include "_assistant_widget.html" %}
   {% endif %}

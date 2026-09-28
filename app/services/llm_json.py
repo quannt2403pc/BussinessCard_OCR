@@ -1,15 +1,12 @@
 """Bóc một object JSON ra khỏi chuỗi chữ do model trả về.
 
-Chủ sở hữu: Q | Task: EX-02 | xem Task.md
+Chủ sở hữu: Q | Task: EX-02
 
-Tách ra khỏi `services/ocr.py` khi thêm lượt Việt hoá (EX-02): cả hai lượt gọi model đều nhận
-JSON và đều vấp đúng một chỗ — **I-15, model bọc kết quả trong khối ```json dù prompt cấm**.
-Chép đôi 60 dòng đếm ngoặc sang file thứ hai là cách chắc chắn nhất để hai bên lệch nhau sau
-vài lần sửa.
+Tách khỏi `services/ocr.py` vì cả lượt quét lẫn lượt Việt hoá đều vấp đúng một chỗ: **I-15, model
+bọc kết quả trong khối ```json dù prompt cấm**.
 
-Hàm ở đây ném `JsonExtractError` (một `ValueError`) chứ không ném lỗi của F1: chỗ gọi tự dịch
-sang lỗi của mình (`OcrParseError`, `TranslationError`) để thông báo cho người dùng vẫn nói
-đúng việc vừa hỏng là quét ảnh hay Việt hoá.
+Ném `JsonExtractError` chứ không ném lỗi của F1 — chỗ gọi tự dịch sang lỗi của mình để thông báo
+vẫn nói đúng việc vừa hỏng là quét ảnh hay Việt hoá.
 """
 
 from __future__ import annotations

@@ -1,12 +1,9 @@
 """Bảng business_cards.
 
-Chủ sở hữu: Q | Task: 1.6, 12.5 | xem Task.md
+Chủ sở hữu: Q | Task: 1.6, 12.5
 
-**Từ D12 mỗi danh thiếp thuộc về một người dùng** (`user_id`, task 12.3/12.5). Cột này khai ở
-đây phải khớp **từng tên index** với revision `0005`, không chỉ khớp về ý: `conftest.py` dựng
-schema test bằng `Base.metadata.create_all()` chứ không chạy migration, nên model và migration
-là hai nguồn sự thật song song — lệch tên index thì test chạy trên một lược đồ khác với lược đồ
-thật, và `alembic check` sinh ra một cặp drop/create thừa ở revision sau (I-16).
+⚠️ Tên index ở đây phải khớp **từng chữ** với migration: `conftest.py` dựng schema test bằng
+`create_all()` chứ không chạy migration, nên model và migration là hai nguồn sự thật song song.
 """
 
 import uuid
@@ -29,17 +26,9 @@ class CardStatus(StrEnum):
 
 
 class RelationshipStatus(StrEnum):
-    """Vòng đời **quan hệ** với người trên thẻ (task NEXT-01, tách đôi kết cục ở NEXT-03).
+    """Vòng đời quan hệ với người trên thẻ.
 
-    Ranh giới vẫn giữ: không có "cơ hội", "giá trị hợp đồng", "giai đoạn phễu" — thêm chúng là
-    biến sản phẩm thành CRM nửa vời, thua mọi CRM thật. Thứ duy nhất `NEXT-03` thêm vào là
-    **tách kết cục thành thắng và thua**, vì báo cáo theo sự kiện phải trả lời được "hội chợ này
-    có đáng tiền không", mà một trạng thái `closed` gộp cả hai thì không tính ra tỉ lệ nào cả.
-    Chuyện này đã hẹn trước ngay trong `NEXT-01`.
-
-    `CLOSED` **không bị xoá và không bị chuyển đổi**: nó giữ đúng nghĩa cũ — *đã dừng, không rõ
-    thắng hay thua*. Gán bừa những dòng ấy sang `lost` là bịa ra dữ liệu chưa ai nhập, và bịa
-    ngay vào con số mà cả báo cáo dựa lên. Giao diện không mời chọn nó nữa; báo cáo đếm riêng.
+    `CLOSED` giữ nghĩa cũ: đã dừng, không rõ thắng hay thua. Giao diện không mời chọn nữa.
     """
 
     NEW = "new"  # vừa quét, chưa liên hệ lần nào
@@ -61,41 +50,29 @@ class BusinessCard(Base):
 
     __tablename__ = "business_cards"
     __table_args__ = (
-        # Đề xuất số 1 của `docs/db-tuning.md` (T đo ở task 9.8), migration `0004` ở task 9.2.
-        # **Một index phục vụ cả hai chiều đọc**: `GET /api/cards` sắp xếp `uploaded_at DESC,
-        # id DESC`, còn export của T duyệt keyset `(uploaded_at, id)` tăng dần — Postgres quét
-        # btree được theo cả hai chiều nên không cần index thứ hai.
-        # Số đo: danh sách thẻ trang 1 2.46 → 0.02 ms; export mỗi lô 6.62 → 0.35 ms.
+        # Một index cho cả hai chiều đọc: danh sách thẻ (DESC) và keyset export (ASC).
         Index("ix_business_cards_uploaded_at_id", "uploaded_at", "id"),
-        # Chống trùng ảnh **theo từng người dùng**, không toàn cục (task 12.3, Plan.md mục 3).
-        # Để unique toàn cục thì B upload đúng tấm thẻ A đã có sẽ bị từ chối, và câu từ chối đó
-        # tự khai ra rằng A có tấm thẻ ấy. Đây cũng là index phục vụ `get_by_hash()`.
+        # Chống trùng ảnh theo từng không gian, không toàn cục. Cũng phục vụ `get_by_hash()`.
         Index(
             "ix_business_cards_workspace_id_image_hash",
             "workspace_id",
             "image_hash",
             unique=True,
         ),
-        # Khối *Cần liên hệ hôm nay* của trang chủ hỏi đúng một câu:
-        # `WHERE user_id = ? AND follow_up_at <= ?` (task NEXT-01). Phần lớn thẻ không có hẹn nên
-        # index **partial** — chỉ số hoá đúng những dòng có hẹn. Tên và mệnh đề `WHERE` phải khớp
-        # từng chữ với revision `0008`, xem cảnh báo I-16 ở đầu file.
+        # Khối *Cần liên hệ hôm nay*; partial vì phần lớn thẻ không có hẹn.
         Index(
             "ix_business_cards_follow_up",
             "workspace_id",
             "follow_up_at",
             postgresql_where=text("follow_up_at IS NOT NULL"),
         ),
-        # Gần hết bảng để `NULL` ở cột này, nên index đầy đủ chỉ tổ phí (task NEXT-04). Câu duy
-        # nhất cần tới nó là "liệt kê những thẻ đã gộp vào thẻ X". Tên và mệnh đề `WHERE` phải
-        # khớp từng chữ với revision `0010` — xem cảnh báo I-16 ở đầu file.
+        # Partial: gần hết bảng để `NULL`; chỉ dùng cho "những thẻ đã gộp vào thẻ X".
         Index(
             "ix_business_cards_merged_into",
             "merged_into_id",
             postgresql_where=text("merged_into_id IS NOT NULL"),
         ),
-        # Khối *việc của tôi*: `WHERE workspace_id = ? AND assigned_to_user_id = ?`. Partial vì
-        # phần lớn liên hệ chưa giao cho ai (task NEXT-05).
+        # Khối *việc của tôi*; partial vì phần lớn liên hệ chưa giao cho ai.
         Index(
             "ix_business_cards_assigned_to",
             "workspace_id",
@@ -106,9 +83,7 @@ class BusinessCard(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    #: **Khoá tách dữ liệu** từ `NEXT-05` (revision `0015`). Mọi câu `WHERE` lọc dữ liệu đi
-    #: qua cột này, không còn qua `user_id`. `CASCADE`: xoá một không gian là xoá sạch dữ liệu
-    #: của nó — không để lại bản ghi mồ côi mà không ai truy cập được nữa.
+    #: Khoá tách dữ liệu: mọi câu `WHERE` lọc qua cột này, không qua `user_id`.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
@@ -116,8 +91,7 @@ class BusinessCard(Base):
         index=True,
     )
 
-    #: **Người tạo**, không còn là khoá tách dữ liệu (`NEXT-05`). Giữ lại vì nó vẫn trả
-    #: lời được "ai nhập bản ghi này" và là giá trị mặc định hợp lý cho người phụ trách.
+    #: Người tạo — KHÔNG phải khoá tách dữ liệu.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -126,13 +100,8 @@ class BusinessCard(Base):
     )
 
     # --- Ảnh gốc ---
-    #
-    # `NULL` được phép từ revision `0014`, nhưng **không đường nào sinh ra nó nữa**: cột nới ra
-    # cho `NEXT-08` (nhập từ chữ ký email), mà task ấy đã bị cắt. Siết lại thành `NOT NULL` thì
-    # phải chọn giữa xoá những liên hệ đã nhập và ghi vào đó một chuỗi rỗng — mà chuỗi rỗng là
-    # một đường dẫn *hợp lệ* trỏ vào thư mục gốc. Để nguyên là hướng ít rủi ro hơn hẳn.
     image_path: Mapped[str | None] = mapped_column(Text)
-    # SHA-256 của file gốc (task 3.1). Unique theo `(user_id, image_hash)` — xem __table_args__.
+    # SHA-256 của file gốc. Unique theo `(workspace_id, image_hash)` — xem __table_args__.
     image_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
@@ -147,25 +116,16 @@ class BusinessCard(Base):
     address: Mapped[str | None] = mapped_column(Text)
     website: Mapped[str | None] = mapped_column(String(255))
     language_detected: Mapped[str | None] = mapped_column(String(16))
-    # Điểm tin cậy từng trường do prompt OCR trả về (task 3.3) — UI tô vàng trường thấp (task 5.1).
+    # Điểm tin cậy từng trường do prompt OCR trả về; UI tô vàng trường thấp.
     confidence: Mapped[dict | None] = mapped_column(JSONB)
 
-    # --- Việt hoá sau khi quét (EX-02, revision 0006) ---
-    #
-    # **Cột riêng, không ghi đè cột gốc.** Bốn cột trên vẫn giữ nguyên chữ in trên thẻ (quy tắc 3
-    # của `prompts/ocr.py`) — mất bản gốc là mất luôn khả năng đối chiếu với ảnh, và giao diện
-    # còn phải in nó làm chú thích nhỏ dưới bản dịch.
-    #
-    # `NULL` ở đây mang đúng một nghĩa: **bản gốc dùng được luôn, không cần bản dịch** — thẻ
-    # tiếng Việt và thẻ tiếng Anh rơi hết vào ca này (`services/translate.py::_finalize`). Nó
-    # KHÔNG có nghĩa "chưa dịch"; muốn biết đã dịch hay chưa thì đọc `translation_meta`.
+    # --- Việt hoá sau khi quét ---
+    # Cột riêng, không ghi đè bản gốc. `NULL` = bản gốc dùng được luôn, KHÔNG phải "chưa dịch".
     full_name_vi: Mapped[str | None] = mapped_column(String(255))
     job_title_vi: Mapped[str | None] = mapped_column(String(255))
     company_name_vi: Mapped[str | None] = mapped_column(String(255))
     address_vi: Mapped[str | None] = mapped_column(Text)
-    # Nguồn bản dịch (`llm` / `dictionary` / `mixed` / `failed` / `skipped`), ngôn ngữ & hệ chữ
-    # model nhận ra, cách phiên âm, và cờ `stale` bật khi người dùng sửa tay trường gốc mà chưa
-    # bấm *Dịch lại* (task EX-04).
+    # Nguồn bản dịch, ngôn ngữ/hệ chữ, cách phiên âm, cờ `stale` khi sửa tay bản gốc.
     translation_meta: Mapped[dict | None] = mapped_column(JSONB)
 
     # --- Trạng thái & liên kết ---
@@ -176,13 +136,8 @@ class BusinessCard(Base):
         server_default=CardStatus.PENDING,
         index=True,
     )
-    # Gắn khi người dùng confirm, qua company_matching.upsert_company() của T (task 4.3).
-    #
-    # Khoá ngoại khớp đúng ràng buộc đã có trong DB từ migration 0001 (Postgres tự đặt tên
-    # `business_cards_company_id_fkey`) — khai không tên, giống migration và `company.py`,
-    # để autogenerate so theo cột/bảng và không sinh lệnh drop/create thừa.
-    # `SET NULL` để xoá một công ty không kéo theo danh thiếp: dữ liệu gốc trên thẻ vẫn nằm
-    # ở `company_name_raw` và `ocr_raw_json`, gắn lại được sau.
+    # Gắn khi người dùng confirm, qua `company_matching.upsert_company()`.
+    # `SET NULL`: xoá công ty không kéo theo danh thiếp — dữ liệu gốc còn ở `company_name_raw`.
     company_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="SET NULL"),
@@ -190,20 +145,13 @@ class BusinessCard(Base):
     )
     notes: Mapped[str | None] = mapped_column(Text)
 
-    #: Người phụ trách liên hệ này (task NEXT-05). `NULL` = chưa giao, và đó là mặc định.
-    #: `SET NULL`: xoá một tài khoản thì liên hệ **ở lại với tổ chức**, chỉ mất người phụ trách
-    #: — đó chính là điểm của cả task này. `NEXT-01` cố ý hoãn trường này lại tới đây, vì khi
-    #: dữ liệu còn thuộc về từng cá nhân thì không có ai khác để giao.
+    #: Người phụ trách; `NULL` = chưa giao. `SET NULL` để xoá tài khoản không kéo theo liên hệ.
     assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
     )
 
-    # --- Theo dõi quan hệ (task NEXT-01 của T; T sửa file của Q, Q review PR) ---
-    #
-    # Khác hẳn `status` ở trên: `status` là vòng đời **quét** (pending → needs_review →
-    # confirmed), còn hai cột này là vòng đời **quan hệ**. Trộn hai thứ vào một cột thì thẻ đã
-    # xác nhận xong không còn chỗ nào ghi "đã gọi cho người ta chưa".
+    # Vòng đời **quan hệ**, tách khỏi `status` (vòng đời quét) ở trên.
     relationship_status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -214,18 +162,8 @@ class BusinessCard(Base):
     #: dùng, vì một hàng chờ đầy việc không ai hẹn là hàng chờ bị bỏ qua.
     follow_up_at: Mapped[date | None] = mapped_column(Date)
 
-    # --- Gộp liên hệ trùng (task NEXT-04 của T; T sửa file của Q, Q review PR) ---
-    #
-    # **Gộp mềm, không xoá.** Máy chỉ *gợi ý* hai thẻ là một người — trùng số tổng đài hay trùng
-    # địa chỉ `info@` là chuyện thường — nên đoán sai mà xoá là mất một tấm ảnh thật vì một phỏng
-    # đoán. Dòng mang giá trị ở đây biến mất khỏi mọi danh sách, bản xuất và con số báo cáo,
-    # nhưng vẫn đọc được và **gỡ gộp được**.
-    #
-    # ⚠️ Hệ quả: mọi câu liệt kê phải kèm `merged_into_id IS NULL`. Sáu chỗ, liệt kê đủ trong
-    # docstring của revision `0010`.
-    #
-    # `SET NULL`: xoá hẳn thẻ chính thì các bản trùng **quay lại làm thẻ độc lập**, không biến
-    # mất theo. Chúng vốn là dữ liệu thật.
+    # Gộp mềm: bản trùng ở lại, biến khỏi mọi danh sách nhưng gỡ gộp được.
+    # Mọi câu liệt kê phải kèm `merged_into_id IS NULL`.
     merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("business_cards.id", ondelete="SET NULL"),

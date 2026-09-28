@@ -1,24 +1,13 @@
 """Hàng đợi nền cho upload hàng loạt danh thiếp: giới hạn đồng thời + retry có backoff.
 
-Chủ sở hữu: Q | Task: 5.2 | xem Task.md
+Chủ sở hữu: Q | Task: 5.2
 
-Phân vai rõ ràng giữa request và nền:
+Phân vai: **trong request** (`routers/cards.py`) đọc file, băm, chống trùng, ghi ảnh xuống volume,
+tạo bản ghi `pending` — việc nhanh và không lấy lại được nếu mất. **Ở nền** (file này) gọi vision,
+phần mất 3–5 giây/ảnh và chạm rate limit. Hệ quả: restart container thì mất job nhưng không mất ảnh.
 
-* **Trong request** (`routers/cards.py`): đọc file, băm, chống trùng, tiền xử lý, ghi ảnh xuống
-  volume, tạo bản ghi `pending`. Toàn bộ là việc nhanh và **không lấy lại được nếu mất** — làm
-  ngay để ảnh người dùng vừa chọn không bốc hơi cùng với tiến trình.
-* **Ở nền** (file này): gọi vision cho từng ảnh. Đây mới là phần mất 3–5 giây/ảnh và là phần
-  duy nhất chạm rate limit của rủi ro **R5**.
-
-Hệ quả có chủ đích: mất job (restart container) thì **không mất ảnh**. Bản ghi còn nằm trong DB
-ở trạng thái `pending` kèm ghi chú, quét lại được. Nếu làm ngược — giữ byte ảnh trong RAM rồi
-lưu ở nền — một lần `docker compose restart` giữa chừng là người dùng phải chụp lại cả chồng.
-
-**Job nằm trong bộ nhớ tiến trình, cố ý không lưu DB.** Job chỉ là *tiến trình hiển thị*, còn
-kết quả thật đã nằm ở `business_cards`. Dựng thêm một bảng + Alembic revision cho dữ liệu sống
-vài phút là cái giá không tương xứng với một bản demo chạy đúng một tiến trình uvicorn
-(`docker-compose.yml`). Chỗ hụt được nói thẳng ra cho người dùng: poll một `job_id` đã mất thì
-trả 404 kèm đúng lý do, chứ không im lặng trả một job rỗng.
+**Job nằm trong bộ nhớ tiến trình, cố ý không lưu DB** — job chỉ là tiến trình hiển thị, kết quả
+thật đã ở `business_cards`. Poll một `job_id` đã mất thì trả 404 kèm lý do, không im lặng trả rỗng.
 """
 
 from __future__ import annotations
@@ -40,22 +29,18 @@ from app.services import llm, ocr, user_credentials
 
 logger = logging.getLogger(__name__)
 
-#: Số ảnh được gọi vision cùng lúc. Hai, không phải "càng nhiều càng nhanh": mỗi lượt là một
-#: lời gọi Gemini qua CLIProxy bằng **một** credential OAuth duy nhất, bắn 10 request song song
-#: chỉ đổi "chờ lâu" lấy "429 rồi hỏng cả loạt" (rủi ro R5, Plan.md mục 6).
+#: Số ảnh gọi vision cùng lúc. Hai, vì cả lô đi bằng **một** credential OAuth — bắn 10 request
+#: song song chỉ đổi "chờ lâu" lấy "429 rồi hỏng cả loạt" (rủi ro R5).
 MAX_CONCURRENCY = 2
 
-#: Số lượt thử mỗi ảnh ở tầng job. Bên dưới còn hai tầng thử lại nữa và chúng bù cho nhau:
-#: `CliProxyClient` retry lỗi mạng/429/5xx, `ocr.extract_card` gọi lại 1 lần khi model trả chữ
-#: không phải JSON. Tầng này lo ca còn lại — hai tầng kia đã cạn lượt mà vẫn hỏng.
+#: Số lượt thử mỗi ảnh ở tầng job. Dưới còn hai tầng nữa: `CliProxyClient` retry lỗi mạng/429/5xx,
+#: `ocr.extract_card` gọi lại 1 lần khi model trả chữ không phải JSON.
 MAX_ATTEMPTS = 3
 
-#: Nghỉ bao lâu trước lượt thử thứ 2 và thứ 3. Dài hơn backoff 0.5s→1s của `CliProxyClient` vì
-#: lỗi đi được tới đây thường là rate limit thật, mà rate limit đo bằng giây chứ không mili giây.
+#: Nghỉ bao lâu trước lượt thử thứ 2 và thứ 3 — lỗi tới được đây thường là rate limit thật.
 BACKOFF_SECONDS: tuple[float, ...] = (2.0, 5.0)
 
-#: Số job giữ lại trong bộ nhớ. Job cũ nhất bị đẩy ra khi tràn — trang `/cards/upload` chỉ poll
-#: job vừa tạo, còn giữ vô hạn thì một tiến trình chạy cả tuần sẽ phình dần.
+#: Số job giữ lại trong bộ nhớ; job cũ nhất bị đẩy ra khi tràn.
 MAX_JOBS = 20
 
 
@@ -76,21 +61,16 @@ class BatchItemError(RuntimeError):
 class BatchItem:
     """Một ảnh trong một lượt batch.
 
-    `image_path` là đường dẫn **tuyệt đối** do `routers/cards.py` giải ra lúc lưu file, cố ý
-    không phải đường dẫn tương đối trong DB: giải lại ở đây đồng nghĩa với chép lại logic kiểm
-    "có nằm trong `UPLOAD_DIR` không" lần thứ hai, mà hai bản sao của một quy tắc bảo mật là chỗ
-    chắc chắn sẽ lệch nhau. Trường này không bao giờ ra tới API — đường dẫn nội bộ của container
-    không phải thứ để trả cho trình duyệt.
+    `image_path` là đường dẫn **tuyệt đối** do `routers/cards.py` giải ra lúc lưu file. Giải lại
+    ở đây là chép lần thứ hai quy tắc "có nằm trong `UPLOAD_DIR` không". Không bao giờ ra tới API.
     """
 
     filename: str
-    #: Chủ sở hữu bản ghi (task 12.5). Job chạy **sau** khi request đã trả 202, tức không còn
-    #: cookie phiên nào để hỏi lại "ai đang upload" — người sở hữu phải đi kèm từng mục ngay từ
-    #: lúc xếp hàng, nếu không `card_repo.get()` (nay đòi `workspace_id`) không tra lại được bản ghi.
+    #: Không gian sở hữu bản ghi. Job chạy **sau** khi request đã trả 202, không còn cookie phiên
+    #: nào để hỏi lại, nên phải đi kèm từng mục ngay từ lúc xếp hàng.
     workspace_id: uuid.UUID | None = None
-    #: **Người bấm upload**, giữ riêng khỏi `workspace_id` (task NEXT-05). Lượt quét đi bằng
-    #: credential OAuth *của chính người đó* (13.2) và dùng model *họ* chọn — hai thứ ấy thuộc
-    #: về cá nhân, không thuộc về tổ chức.
+    #: **Người bấm upload**, giữ riêng khỏi `workspace_id`: credential OAuth và model là của
+    #: cá nhân, không của tổ chức.
     user_id: uuid.UUID | None = None
     card_id: uuid.UUID | None = None
     image_path: Path | None = None
@@ -107,17 +87,15 @@ class BatchJob:
     """Một lượt upload hàng loạt."""
 
     id: uuid.UUID
-    #: Không gian nhận lô này. `GET /api/cards/batch-jobs/{id}` đối chiếu trường **này**:
-    #: `job_id` là UUID khó đoán, nhưng "khó đoán" không phải kiểm soát truy cập — tiến trình
-    #: quét của tổ chức khác vẫn là dữ liệu của tổ chức khác.
+    #: Không gian nhận lô này — `job_id` là UUID khó đoán, nhưng "khó đoán" không phải kiểm soát
+    #: truy cập.
     workspace_id: uuid.UUID
-    #: Người bấm nút. Không dùng để phân quyền (`NEXT-05`), chỉ để chọn credential CLIProxy và
-    #: model OCR của đúng người ấy — xem `_process()`.
+    #: Người bấm nút. Không dùng để phân quyền, chỉ để chọn credential CLIProxy và model OCR.
     user_id: uuid.UUID
     items: list[BatchItem]
     created_at: datetime
     finished_at: datetime | None = None
-    #: Lý do dừng sớm cả job (hiện chỉ có một: chưa kết nối OAuth — xem `_process`).
+    #: Lý do dừng sớm cả job (hiện chỉ có một: chưa kết nối OAuth).
     aborted_reason: str | None = None
 
     @property
@@ -143,11 +121,11 @@ class BatchJob:
 
 # --------------------------------------------------------------------------- sổ job
 
-#: `OrderedDict` chứ không `dict` thường: cần đẩy job **cũ nhất** ra khi tràn `MAX_JOBS`.
+#: `OrderedDict` chứ không `dict`: cần đẩy job **cũ nhất** ra khi tràn `MAX_JOBS`.
 _JOBS: OrderedDict[uuid.UUID, BatchJob] = OrderedDict()
 
-#: Giữ tham chiếu mạnh tới task đang chạy. `asyncio.create_task` chỉ giữ tham chiếu yếu — không
-#: neo lại thì bộ gom rác có quyền dọn task giữa chừng, và job đứng im không rõ lý do.
+#: Giữ tham chiếu mạnh tới task đang chạy — `create_task` chỉ giữ tham chiếu yếu, không neo lại
+#: thì bộ gom rác có quyền dọn task giữa chừng.
 _TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -174,10 +152,9 @@ def get_job(job_id: uuid.UUID) -> BatchJob | None:
 def start(job: BatchJob) -> None:
     """Chạy job ở nền, trả về ngay.
 
-    Dùng `asyncio.create_task` chứ không `BackgroundTasks` của FastAPI: Starlette chạy background
-    task **trước khi nhả kết nối HTTP**, nên một job 30 ảnh (~1 phút) sẽ giữ nguyên connection đó
-    suốt thời gian chạy. Trình duyệt chỉ mở tối đa 6 connection mỗi host và trang `/cards/upload`
-    cần một cái để poll — giữ lại là tự bóp cổ chính mình.
+    Dùng `asyncio.create_task` chứ không `BackgroundTasks`: Starlette chạy background task
+    **trước khi nhả kết nối HTTP**, nên job 30 ảnh sẽ giữ nguyên connection suốt thời gian chạy —
+    trong khi trang `/cards/upload` còn cần một connection để poll.
     """
     task = asyncio.create_task(run_job(job))
     _TASKS.add(task)
@@ -190,9 +167,7 @@ async def run_job(job: BatchJob) -> None:
     logger.info("Batch job %s: bắt đầu quét %d/%d ảnh", job.id, len(pending), job.total)
 
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-    # `return_exceptions=True`: một ảnh ném lỗi ngoài dự kiến không được kéo theo cả loạt còn
-    # lại. `_process` đã bọc mọi lỗi đã biết, cái lọt được tới đây là lỗi lập trình — ghi log
-    # rồi đi tiếp vẫn hơn là bỏ dở 29 ảnh kia.
+    # `return_exceptions=True`: một ảnh ném lỗi ngoài dự kiến không được kéo theo cả loạt còn lại.
     results = await asyncio.gather(
         *(_process(job, item, semaphore) for item in pending), return_exceptions=True
     )
@@ -230,8 +205,7 @@ async def _process(job: BatchJob, item: BatchItem, semaphore: asyncio.Semaphore)
             try:
                 await _scan(item)
             except llm.LLMNotConnectedError as exc:
-                # Chưa bấm OAuth thì 29 ảnh còn lại cũng hỏng y hệt. Dừng cả job ngay thay vì
-                # đốt một phút để in ra 30 lần cùng một câu.
+                # Chưa bấm OAuth thì 29 ảnh còn lại cũng hỏng y hệt — dừng cả job ngay.
                 job.aborted_reason = (
                     f"Dừng cả lượt vì chưa kết nối CLIProxy: {exc} "
                     "Vào /settings bấm “Kết nối AI” rồi quét lại."
@@ -239,8 +213,7 @@ async def _process(job: BatchJob, item: BatchItem, semaphore: asyncio.Semaphore)
                 _fail(item, job.aborted_reason)
                 return
             except (llm.LLMInvalidModelError, llm.LLMBlockedError, BatchItemError) as exc:
-                # Sai tên model / bị chặn nội dung / bản ghi đã bị xoá: thử lại y nguyên cũng ra
-                # đúng kết quả đó, chỉ tốn thêm lượt gọi.
+                # Sai tên model / bị chặn nội dung / bản ghi đã bị xoá: thử lại cũng vô ích.
                 _fail(item, str(exc))
                 return
             except (llm.LLMError, ocr.OcrError) as exc:
@@ -266,9 +239,8 @@ async def _process(job: BatchJob, item: BatchItem, semaphore: asyncio.Semaphore)
 async def _scan(item: BatchItem) -> None:
     """Đọc ảnh từ volume → gọi vision → ghi kết quả vào bản ghi `pending` đã có.
 
-    Đọc file **ở đây** chứ không giữ sẵn byte trong `BatchItem`: 30 ảnh × 10MB nằm trong RAM cả
-    phút chỉ để chờ tới lượt là cái giá không đáng, trong khi đọc lại từ volume mất vài mili
-    giây. Mỗi lượt mở session riêng vì session của request đã đóng từ lúc trả 202.
+    Đọc file ở đây chứ không giữ byte trong `BatchItem`: 30 ảnh × 10MB nằm trong RAM cả phút là
+    cái giá không đáng. Mỗi lượt mở session riêng vì session của request đã đóng từ lúc trả 202.
     """
     if item.card_id is None or item.image_path is None:  # không xảy ra: router luôn gán đủ
         raise BatchItemError("Mục này không có ảnh để quét.")
@@ -281,19 +253,17 @@ async def _scan(item: BatchItem) -> None:
     if item.workspace_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.workspace_id`)
         raise BatchItemError("Mục này không biết thuộc về ai.")
 
-    # `raise` chứ không `assert`, giống hệt dòng trên. `assert` ở đây đã làm hỏng cả một lượt
-    # quét thật (I-39): nó không được `_process()` bắt như `BatchItemError`, nên nó nổ thành
-    # "Lỗi ngoài dự kiến" kèm traceback — người dùng thấy đúng một câu vô nghĩa, và `python -O`
-    # thì còn bỏ qua hẳn dòng này rồi chết ở chỗ khác.
+    # `raise` chứ không `assert`: `assert` không được `_process()` bắt như `BatchItemError` nên
+    # nổ thành "Lỗi ngoài dự kiến" kèm traceback, và `python -O` thì bỏ qua hẳn (I-39).
     if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
         raise BatchItemError("Mục này không biết ai bấm upload.")
 
     async with SessionLocal() as db:
-        # `item.user_id`, KHÔNG phải `workspace_id`: model quét là lựa chọn cá nhân và
-        # credential OAuth cũng vậy (13.2 + NEXT-05).
+        # `item.user_id`, KHÔNG phải `workspace_id`: model quét và credential OAuth là lựa chọn
+        # cá nhân.
         model = await user_credentials.model_for_user_id(db, item.user_id, "ocr")
-    # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
-    # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).
+    # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một bộ cột
+    # như đường upload 1 ảnh, kể cả 4 cột Việt hoá.
     result = await ocr.extract_and_translate(data, mime_type=image_service.OUTPUT_MIME, model=model)
 
     async with SessionLocal() as db:
@@ -302,8 +272,7 @@ async def _scan(item: BatchItem) -> None:
             raise BatchItemError("Bản ghi đã bị xoá trong lúc chờ quét.")
 
         card_status, notes = ocr.status_and_notes(result, None)
-        # Gán tay vì `update_fields(notes=None)` nghĩa là "giữ nguyên", không phải "xoá trắng" —
-        # thiếu dòng này thì ghi chú "đang chờ quét" ở lại mãi sau khi đã quét xong.
+        # Gán tay vì `update_fields(notes=None)` nghĩa là "giữ nguyên", không phải "xoá trắng".
         card.notes = notes
         await card_repo.update_fields(db, card, result.card_fields(), status=card_status)
 
@@ -320,8 +289,8 @@ async def _scan(item: BatchItem) -> None:
 def _fail(item: BatchItem, reason: str) -> None:
     """Đánh dấu một ảnh hỏng, và ghi lý do lên bản ghi `pending` để còn thấy được ở `/cards`.
 
-    Ghi vào DB chứ không chỉ giữ trong job: job biến mất sau `MAX_JOBS` lượt hoặc sau restart,
-    còn câu hỏi "vì sao thẻ này chưa quét được" thì vẫn phải trả lời được vào ngày mai.
+    Ghi vào DB chứ không chỉ giữ trong job: job biến mất sau restart, còn câu hỏi "vì sao thẻ
+    này chưa quét được" thì vẫn phải trả lời được vào ngày mai.
     """
     item.status = ItemStatus.ERROR
     item.error = reason

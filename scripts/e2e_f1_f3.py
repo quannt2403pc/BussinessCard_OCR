@@ -1,30 +1,25 @@
 """Kịch bản kiểm thử đầu–cuối nhóm F1 (OCR danh thiếp) + F3 (trợ lý AI/RAG) trên hệ thật.
 
-Chủ sở hữu: Q | Task: 10.1, 10.3 | xem Task.md
+Chủ sở hữu: Q | Task: 10.1, 10.3
 
     python -m scripts.e2e_f1_f3                  # chạy cả hai bộ: flow + edge
-    python -m scripts.e2e_f1_f3 --suite flow     # chỉ 10.1 — luồng nghiệp vụ
-    python -m scripts.e2e_f1_f3 --suite edge     # chỉ 10.3 — trường hợp biên
-    python -m scripts.e2e_f1_f3 --suite outage   # 10.3 phần cắt dịch vụ (tự stop/start container)
+    python -m scripts.e2e_f1_f3 --suite flow     # chỉ luồng nghiệp vụ
+    python -m scripts.e2e_f1_f3 --suite edge     # chỉ trường hợp biên
+    python -m scripts.e2e_f1_f3 --suite outage   # phần cắt dịch vụ (tự stop/start container)
     python -m scripts.e2e_f1_f3 --keep           # giữ lại dữ liệu đã tạo để xem trên UI
 
-**Chạy ở MÁY, không phải trong container** — cùng lý do với `scripts/check_multilang_ocr.py`
-(task 9.3): ảnh danh thiếp dựng bằng phông chữ của Windows, image `python:3.12-slim` không có
-phông nào. Script gọi API qua `localhost:8000` nên stack phải đang chạy (`docker compose up -d`).
+**Chạy ở MÁY, không phải trong container**: ảnh dựng bằng phông chữ của Windows, image
+`python:3.12-slim` không có phông nào. Stack phải đang chạy (`docker compose up -d`).
 
-Ranh giới của bộ này — nói trước để không ai đọc nhầm kết quả:
+Ranh giới của bộ này:
 
-* **Không phải phép đo tiêu chí A3.** A3 đòi 30 ảnh *chụp thật* (task 3.9 của T, vẫn chưa có),
-  phép đo là task 7.8. Ở đây ảnh dựng bằng phông nên chữ sắc nét tuyệt đối. Bộ này trả lời câu
-  "luồng có chạy đúng đầu–cuối không", không phải "model đọc ảnh thật chính xác bao nhiêu".
-* **Không đụng F2.** Hồ sơ doanh nghiệp là của T (task 10.6/10.7). Chỗ duy nhất chạm tới F2 là
-  kiểm `confirm` có gắn được `company_id` — đó là điểm nối đã chốt ở họp D2, không phải test F2.
-* **Mọi dữ liệu tạo ra đều bị xoá ở cuối** (trừ `--keep`). Chạy trên DB dev đang có dữ liệu
-  demo nên script không được để lại rác — I-24 đã cho thấy rác dữ liệu thử làm hỏng truy hồi.
+* **Không phải phép đo tiêu chí A3** — ảnh dựng bằng phông nên chữ sắc nét tuyệt đối. Bộ này trả
+  lời "luồng có chạy đúng đầu–cuối không", không phải "model đọc ảnh thật chính xác bao nhiêu".
+* **Không đụng F2**, trừ chỗ kiểm `confirm` có gắn được `company_id`.
+* **Mọi dữ liệu tạo ra đều bị xoá ở cuối** (trừ `--keep`) — rác dữ liệu thử làm hỏng truy hồi.
 
-Bộ `outage` **dừng container thật** (`cliproxy`, `embedder`) rồi bật lại trong `finally`. Đây là
-cách duy nhất kiểm được đúng điều D10 yêu cầu: "mất kết nối OAuth / CLIProxy chết". Không chạy
-chung với `flow`/`edge` vì trong lúc nó chạy thì mọi lời gọi model đều hỏng.
+Bộ `outage` **dừng container thật** rồi bật lại trong `finally`, nên không chạy chung với hai bộ
+kia: trong lúc nó chạy thì mọi lời gọi model đều hỏng.
 """
 
 from __future__ import annotations
@@ -41,9 +36,8 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# Windows: stdout mặc định cp1252, in tiếng Việt có dấu ra pipe/file là UnicodeEncodeError.
-# Cùng cách xử lý với `.claude/hooks/*.py`. Không có dòng này thì `... | tee log.txt` chết ngay
-# dòng in đầu tiên — và bộ kiểm thử mà không ghi log lại được thì dùng vào việc gì.
+# Windows: stdout mặc định cp1252, in chữ có dấu ra pipe/file là UnicodeEncodeError — bộ kiểm
+# thử mà không ghi log lại được thì dùng vào việc gì.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -51,8 +45,8 @@ if hasattr(sys.stderr, "reconfigure"):
 
 BASE_URL = "http://localhost:8000"
 
-#: Gọi model mất 3–5 giây/ảnh (đo ở 9.3). Chờ rộng tay: timeout ngắn làm test đỏ vì mạng chậm
-#: chứ không vì mã sai, và đó là loại đỏ dạy người ta bỏ qua màu đỏ.
+#: Gọi model mất 3–5 giây/ảnh. Chờ rộng tay: timeout ngắn làm test đỏ vì mạng chậm chứ không vì
+#: mã sai, và đó là loại đỏ dạy người ta bỏ qua màu đỏ.
 TIMEOUT = 180.0
 
 #: Phông Latin có sẵn trên Windows.
@@ -75,10 +69,8 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
 def render_card(lines: tuple[tuple[str, int], ...], *, seed: str = "") -> bytes:
     """Vẽ một danh thiếp 1000×600 nền trắng chữ đen.
 
-    `seed` in mờ ở góc dưới bằng màu gần trắng: hai thẻ khác `seed` ra hai file khác nhau nên
-    hash khác nhau, tức chống trùng (task 3.1) không nuốt mất thẻ thứ hai — nhưng chữ mờ tới
-    mức không vào được trường nào. Cần thế vì nhiều ca phải upload *hai thẻ khác nhau về nội
-    dung* mà nội dung lại do chính ca đó quy định.
+    `seed` in mờ ở góc dưới bằng màu gần trắng: hai thẻ khác `seed` ra hai file khác hash nên
+    chống trùng không nuốt mất thẻ thứ hai, mà chữ mờ tới mức không vào được trường nào.
     """
     image = Image.new("RGB", (1000, 600), "white")
     draw = ImageDraw.Draw(image)
@@ -145,9 +137,8 @@ EN_CARD = (
     ("northwind-marine.co.uk", 20),
 )
 
-#: Thẻ hai mặt: mặt trước tên/chức vụ, mặt sau liên hệ. Ghép hai mặt thành MỘT bản ghi nằm
-#: ngoài phạm vi bản demo (Plan.md mục 1.4) — ca này kiểm hệ thống *cư xử đúng như đã tuyên bố*:
-#: hai ảnh thành hai bản ghi, không cái nào chết, không cái nào giả vờ ghép.
+#: Thẻ hai mặt. Ghép hai mặt thành MỘT bản ghi nằm ngoài phạm vi bản demo — ca này kiểm hệ thống
+#: *cư xử đúng như đã tuyên bố*: hai ảnh thành hai bản ghi, không cái nào giả vờ ghép.
 TWO_SIDED_FRONT = (
     ("ANDO KOUGYOU CO., LTD.", 26),
     ("", 8),
@@ -558,9 +549,8 @@ def suite_edge(run: Runner) -> None:
         if not run.check(response.status_code == 201, f"mong 201, nhận {response.status_code}"):
             return response.text[:200]
         card = response.json()["card"]
-        # `ocr_raw_json` chỉ có trong `CardDetailOut`, không có trong `CardOut` của response
-        # upload — phải gọi thêm một lượt chi tiết. Lượt chạy đầu 2026-09-21 báo TRƯỢT ở đây
-        # chính vì đọc nhầm chỗ, xem `docs/bugs-f1-f3.md` mục "Ghi nhận không phải bug".
+        # `ocr_raw_json` chỉ có trong `CardDetailOut`, không có trong response upload — phải gọi
+        # thêm một lượt chi tiết.
         detail = run.http.get(f"/api/cards/{card['id']}", timeout=TIMEOUT).json()
         raw = detail.get("ocr_raw_json") or {}
         run.check(
@@ -701,13 +691,9 @@ def suite_outage(run: Runner) -> None:
         _compose("stop", "cliproxy")
         try:
             status = run.http.get("/api/integration/status", timeout=TIMEOUT).json()
-            # Hợp đồng ghi ở đầu `routers/integration.py` mục 2: **CLIProxy chết ≠ đã ngắt kết
-            # nối**. Token nằm trong volume `cliproxy_auths`, container chết không làm mất nó,
-            # nên `connected` giữ giá trị cache còn `reachable` mới là thứ tụt xuống false —
-            # `templates/settings.html::refreshStatus()` đọc đúng `reachable` và vẽ badge xám
-            # "Không gọi được CLIProxy", không vẽ đỏ "Chưa kết nối". Lượt chạy đầu 2026-09-21
-            # báo TRƯỢT ở đây vì bài test đòi `connected=false`, tức đòi sai; xem
-            # `docs/bugs-f1-f3.md` mục "Ghi nhận không phải bug".
+            # Hợp đồng ở đầu `routers/integration.py`: **CLIProxy chết ≠ đã ngắt kết nối**. Token
+            # nằm trong volume nên `connected` giữ giá trị cache, còn `reachable` mới là thứ tụt
+            # xuống false và là thứ badge đọc.
             run.check(
                 status["reachable"] is False,
                 f"CLIProxy đã chết mà vẫn báo gọi được: reachable={status['reachable']}",

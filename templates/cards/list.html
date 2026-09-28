@@ -1,17 +1,11 @@
-{# Màn hình danh thiếp đã quét: bảng + tìm kiếm + lọc + badge trạng thái. #}
-{# Chủ sở hữu: Q | Task: 4.4 | xem Task.md #}
-{#
-  Dữ liệu do JavaScript gọi `GET /api/cards` (task 4.1) đổ vào, không render sẵn từ server:
-  tìm kiếm và lọc phải đổi được mà không tải lại trang, và trang vẫn mở được khi DB chết để
-  hiện đúng lý do — cùng lối với `/settings` (task 2.5).
+{# Màn hình danh thiếp đã quét: bảng + tìm kiếm + lọc + badge trạng thái.
+   Chủ sở hữu: Q | Task: 4.4
 
-  ⚠️ Mọi giá trị của một danh thiếp đều do **model ngôn ngữ sinh ra từ ảnh người lạ đưa**. Chỉ
-  ghi vào DOM bằng `textContent`, tuyệt đối không `innerHTML`: một danh thiếp in sẵn thẻ
-  <script> là đủ để chạy mã trong trang này.
+   Dữ liệu do JavaScript gọi `GET /api/cards` đổ vào, không render sẵn từ server: tìm kiếm và lọc
+   phải đổi được mà không tải lại trang.
 
-  Màn hình chi tiết / sửa từng trường là task 5.1. Ở đây mới có hai hành động chạy thẳng trên
-  danh sách: Xác nhận (task 4.3) và Xoá (task 4.2).
-#}
+   ⚠️ Mọi giá trị của một danh thiếp đều do **model sinh ra từ ảnh người lạ đưa**. Chỉ ghi vào DOM
+   bằng `textContent`, tuyệt đối không `innerHTML`. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 
