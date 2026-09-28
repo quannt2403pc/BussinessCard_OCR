@@ -50,8 +50,8 @@ router = APIRouter(tags=["workspaces"])
 
 Session = Annotated[AsyncSession, Depends(get_db)]
 
-LAST_ADMIN_DETAIL = "Không gian làm việc phải còn ít nhất một quản trị."
-NOT_A_MEMBER_DETAIL = "Người này không ở trong không gian làm việc."
+LAST_ADMIN_DETAIL = "Workspace phải còn ít nhất một quản trị."
+NOT_A_MEMBER_DETAIL = "Người này không ở trong workspace."
 
 
 @router.get("/workspaces", response_class=HTMLResponse, tags=["ui"])
@@ -119,7 +119,7 @@ async def rename_workspace(
     _require_active(workspace_id, workspace.id)
     renamed = await workspace_repo.rename(db, workspace_id, payload.name)
     if renamed is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có không gian làm việc này.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có workspace này.")
     await db.commit()
     return WorkspaceOut(
         id=renamed.id,
@@ -143,7 +143,7 @@ async def activate_workspace(
     """
     member = await membership(db, user_id=user.id, workspace_id=workspace_id)
     if member is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có không gian làm việc này.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có workspace này.")
 
     await workspace_repo.set_active(db, user_id=user.id, workspace_id=workspace_id)
     await db.commit()
@@ -211,9 +211,7 @@ async def invite_member(
             f"Chưa có tài khoản nào dùng {payload.email}. Nhờ họ đăng ký trước rồi mời lại.",
         )
     if await membership(db, user_id=invited.id, workspace_id=workspace_id) is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "Người này đã ở trong không gian làm việc rồi."
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "Người này đã ở trong workspace rồi.")
 
     await workspace_repo.add_member(
         db, workspace_id=workspace_id, user_id=invited.id, role=payload.role
@@ -298,7 +296,7 @@ def _require_active(asked: uuid.UUID, active: uuid.UUID) -> None:
     if asked != active:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Chỉ thao tác được trên không gian đang mở. Chuyển sang nó trước.",
+            "Chỉ thao tác được trên workspace đang mở. Chuyển sang nó trước.",
         )
 
 

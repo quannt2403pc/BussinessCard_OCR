@@ -1,33 +1,38 @@
-{# Không gian làm việc: danh sách, tạo, chuyển, và thành viên của không gian đang mở. #}
-{# Chủ sở hữu: T | Task: NEXT-05 | xem Task.md #}
+{# Workspace: danh sách, tạo, chuyển, và thành viên của workspace đang mở. #}
+{# Chủ sở hữu: T | Task: NEXT-05, sửa giao diện ở I-37 (Q làm, T review) | xem Task.md #}
 {#
   Một trang, hai khối, và thứ tự đó là có chủ đích: khối trên trả lời "tôi đang ở đâu", khối
   dưới "ai làm chung với tôi". Đảo lại thì người vừa được mời vào hai tổ chức sẽ sửa thành viên
   của nhầm nơi.
 
-  Mọi thao tác thành viên chạy trên **không gian đang mở** — API từ chối id khác (xem
+  Mọi thao tác thành viên chạy trên **workspace đang mở** — API từ chối id khác (xem
   `routers/workspaces.py::_require_active`). Vì vậy bấm *Chuyển* là nạp lại cả hai khối.
+
+  I-37 đổi ba thứ, không đổi một dòng logic nào:
+  1. Thuật ngữ trên màn hình: "không gian làm việc" → **workspace**. Chữ trong mã (`workspace_id`,
+     `ActiveWorkspace`) vốn đã là `workspace`, nên đây là dẹp chỗ lệch giữa mã và giao diện.
+  2. Gỡ các đoạn giải thích cơ chế theo `NEXT-10` — trang này sinh sau khi `NEXT-10` chạy nên
+     chưa từng bị quét. Giữ đúng loại chữ mà luật cho giữ: ràng buộc (*phải có tài khoản sẵn,
+     không gửi thư mời*) và hậu quả (*dữ liệu ở lại*).
+  3. `window.prompt()` / `window.confirm()` → hai `<dialog>` của chính trang. Hộp của trình duyệt
+     chặn cả tab, không nhận được `aria-live` của trang, và trên iOS Safari nó hiện tên máy chủ
+     lên đầu hộp. `<dialog>` + `showModal()` thì bẫy focus và Esc là việc của trình duyệt, không
+     phải việc của ta — cùng lối `settings.html` dùng từ 13.7.
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 
-{% block title %}Không gian làm việc{% endblock %}
+{% block title %}Workspace{% endblock %}
 
 {% block content %}
-<div>
-  <h1 class="text-2xl font-semibold text-brand-ink">Không gian làm việc</h1>
-  <p class="mt-1 text-sm text-muted">
-    Danh thiếp, công ty và hồ sơ thuộc về <strong>không gian làm việc</strong>, không thuộc về
-    tài khoản. Mọi thành viên trong cùng một không gian nhìn thấy cùng một dữ liệu.
-  </p>
-</div>
+<h1 class="text-2xl font-semibold text-brand-ink">Workspace</h1>
 
-<section class="mt-6 rounded-lg border border-line bg-white p-5" aria-label="Danh sách không gian">
+<section class="mt-6 rounded-lg border border-line bg-white p-5" aria-label="Danh sách workspace">
   <div class="flex flex-wrap items-center gap-3">
     <h2 class="text-sm font-semibold text-brand-ink">Của tôi</h2>
     <form id="create-form" class="ml-auto flex flex-wrap items-center gap-2">
-      <label class="sr-only" for="create-name">Tên không gian mới</label>
-      <input id="create-name" type="text" maxlength="120" required placeholder="Tên không gian mới"
+      <label class="sr-only" for="create-name">Tên workspace mới</label>
+      <input id="create-name" type="text" maxlength="120" required placeholder="Tên workspace mới"
              class="w-56 rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
       <button type="submit" class="btn">{{ icon("plus") }} Tạo</button>
     </form>
@@ -39,16 +44,12 @@
 
 <section class="mt-4 rounded-lg border border-line bg-white p-5" aria-label="Thành viên">
   <h2 class="text-sm font-semibold text-brand-ink">
-    Thành viên của <span id="mem-workspace">không gian đang mở</span>
+    Thành viên của <span id="mem-workspace">—</span>
   </h2>
-  <p class="mt-1 text-xs text-muted">
-    <strong>Quản trị</strong> mời, gỡ và đổi vai trò · <strong>Thành viên</strong> đọc và ghi dữ
-    liệu · <strong>Chỉ xem</strong> đọc thôi.
-  </p>
 
   <form id="invite-form" class="mt-3 hidden flex-wrap items-end gap-2">
     <label class="text-sm">
-      <span class="text-slate-600">Email tài khoản đã đăng ký</span>
+      <span class="text-slate-600">Email</span>
       <input id="invite-email" type="email" required placeholder="nguoi@congty.vn"
              class="mt-1 block w-64 rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
     </label>
@@ -63,8 +64,10 @@
     </label>
     <button type="submit" class="btn">{{ icon("plus") }} Thêm</button>
   </form>
+  {# Ràng buộc, không phải lời giải thích: không có tài khoản sẵn thì mời không được, và người
+     được mời sẽ không nhận được gì nếu ta không tự nhắn cho họ. #}
   <p id="invite-note" class="mt-2 hidden text-xs text-muted">
-    Người được mời phải tự đăng ký tài khoản trước — hệ thống không gửi thư mời.
+    Không gửi thư mời — người được mời phải có tài khoản sẵn.
   </p>
 
   <div id="mem-list" class="mt-3 divide-y divide-line text-sm">
@@ -73,6 +76,36 @@
 </section>
 
 <div id="message" class="hidden" role="status" aria-live="polite"></div>
+
+{# --- Hai hộp thoại thay cho prompt() và confirm() của trình duyệt (I-37) ------------------
+   `p-0` trên `<dialog>` rồi mới đệm bên trong: để đường viền bao sát mép, giống hộp của 13.7.
+   Nút *Huỷ* mang `data-close` nên một listener duy nhất ở cuối file đóng được mọi hộp.
+-------------------------------------------------------------------------------------------- #}
+<dialog id="rename-dialog"
+        class="w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-slate-200 p-0 text-slate-800 shadow-2xl backdrop:bg-slate-900/60">
+  <form id="rename-form" class="px-6 py-5">
+    <h2 class="text-base font-semibold text-slate-900">Đổi tên workspace</h2>
+    <label class="sr-only" for="rename-name">Tên mới</label>
+    <input id="rename-name" type="text" maxlength="120" required
+           class="mt-3 block w-full rounded-md border border-line px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600">
+    <div class="mt-4 flex justify-end gap-2">
+      <button type="button" data-close class="btn">Huỷ</button>
+      <button type="submit" class="btn-primary">Lưu</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="remove-dialog"
+        class="w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-slate-200 p-0 text-slate-800 shadow-2xl backdrop:bg-slate-900/60">
+  <form id="remove-form" class="px-6 py-5">
+    <h2 id="remove-title" class="text-base font-semibold text-slate-900"></h2>
+    <p id="remove-note" class="mt-1 text-sm text-slate-600"></p>
+    <div class="mt-4 flex justify-end gap-2">
+      <button type="button" data-close class="btn">Huỷ</button>
+      <button id="remove-confirm" type="submit" class="btn-primary"></button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -109,7 +142,67 @@
       return body;
     }
 
-    // --- không gian --------------------------------------------------------
+    // --- hộp thoại ---------------------------------------------------------
+
+    /**
+     * Mở một `<dialog>` và chờ người dùng quyết định. Trả `null` nếu họ bỏ qua — bằng nút *Huỷ*,
+     * Esc, hay bấm ra ngoài — và trả `valueOf()` nếu họ xác nhận.
+     *
+     * Chốt ở sự kiện `close` chứ không ở từng nút: `<dialog>` có nhiều đường đóng hơn số nút
+     * ta vẽ ra, nên gắn vào nút là bỏ sót Esc và lời hứa treo mãi không giải quyết.
+     */
+    function ask(dialog, form, valueOf) {
+      return new Promise((resolve) => {
+        let value = null;
+        const onSubmit = (event) => {
+          event.preventDefault();
+          value = valueOf();
+          dialog.close();
+        };
+        const onClose = () => {
+          form.removeEventListener("submit", onSubmit);
+          dialog.removeEventListener("close", onClose);
+          resolve(value);
+        };
+        form.addEventListener("submit", onSubmit);
+        dialog.addEventListener("close", onClose);
+        dialog.showModal();
+      });
+    }
+
+    document.querySelectorAll("dialog [data-close]").forEach((button) => {
+      button.addEventListener("click", () => button.closest("dialog").close());
+    });
+
+    // Bấm ra ngoài hộp thì đóng. `<dialog>` nhận cú bấm trên cả phần backdrop, nên phân biệt
+    // bằng `event.target === dialog` — bấm vào ruột hộp thì target là phần tử bên trong.
+    document.querySelectorAll("dialog").forEach((dialog) => {
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+    });
+
+    function askNewName(current) {
+      const input = $("rename-name");
+      input.value = current;
+      return ask($("rename-dialog"), $("rename-form"), () => input.value.trim());
+    }
+
+    // Tự rời và gỡ người khác là hai câu khác nhau, kể cả ở nút xác nhận: nút vẫn ghi "Gỡ"
+    // trong lúc tiêu đề hỏi "Rời workspace này?" là hai câu nói về hai việc khác nhau, mà
+    // người dùng chỉ đọc kỹ đúng một trong hai.
+    function askRemove(member) {
+      $("remove-title").textContent = member.is_me
+        ? "Rời workspace này?"
+        : `Gỡ ${member.email} khỏi workspace?`;
+      $("remove-note").textContent = member.is_me
+        ? "Dữ liệu bạn đã nhập vẫn ở lại."
+        : "Dữ liệu họ đã nhập vẫn ở lại.";
+      $("remove-confirm").textContent = member.is_me ? "Rời khỏi" : "Gỡ";
+      return ask($("remove-dialog"), $("remove-form"), () => true);
+    }
+
+    // --- workspace ---------------------------------------------------------
 
     function workspaceRow(item) {
       const row = el("div", "flex flex-wrap items-center gap-3 py-3");
@@ -144,12 +237,12 @@
         const data = await call("/api/workspaces");
         list.replaceChildren();
         if (!data.items.length) {
-          list.append(el("p", "py-4 text-muted", "Chưa có không gian nào. Tạo một cái để bắt đầu."));
+          list.append(el("p", "py-4 text-muted", "Chưa có workspace nào."));
           return;
         }
         data.items.forEach((item) => list.append(workspaceRow(item)));
       } catch (err) {
-        list.replaceChildren(el("p", "py-4 text-muted", "Không đọc được danh sách không gian."));
+        list.replaceChildren(el("p", "py-4 text-muted", "Không đọc được danh sách workspace."));
       }
     }
 
@@ -165,8 +258,8 @@
     }
 
     async function renameWorkspace(item) {
-      const name = window.prompt("Tên mới của không gian làm việc:", item.name);
-      if (name === null) return;
+      const name = await askNewName(item.name);
+      if (!name) return;
       try {
         await call(`/api/workspaces/${item.id}`, {
           method: "PATCH",
@@ -242,7 +335,7 @@
           $("mem-workspace").textContent = "—";
           $("invite-form").classList.add("hidden");
           $("invite-note").classList.add("hidden");
-          list.replaceChildren(el("p", "py-4 text-muted", "Chưa ở không gian nào."));
+          list.replaceChildren(el("p", "py-4 text-muted", "Chưa ở workspace nào."));
           return;
         }
         const data = await call(`/api/workspaces/${active.active_id}/members`);
@@ -278,15 +371,12 @@
     }
 
     async function removeMember(member) {
-      const question = member.is_me
-        ? "Rời khỏi không gian này? Dữ liệu bạn đã nhập vẫn ở lại với tổ chức."
-        : `Gỡ ${member.email} khỏi không gian? Dữ liệu họ đã nhập vẫn ở lại.`;
-      if (!window.confirm(question)) return;
+      if (!(await askRemove(member))) return;
       try {
         await call(`/api/workspaces/${await activeId()}/members/${member.user_id}`, {
           method: "DELETE",
         });
-        say("Đã gỡ khỏi không gian làm việc.", "ok");
+        say("Đã gỡ khỏi workspace.", "ok");
       } catch (err) {
         say(err.message, "error");
       }

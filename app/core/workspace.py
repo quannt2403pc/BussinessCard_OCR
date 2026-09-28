@@ -33,9 +33,9 @@ from app.models.workspace import WRITER_ROLES, Role, Workspace, WorkspaceMember
 
 logger = logging.getLogger(__name__)
 
-NO_WORKSPACE_DETAIL = "Bạn chưa ở không gian làm việc nào."
+NO_WORKSPACE_DETAIL = "Bạn chưa ở workspace nào."
 READ_ONLY_DETAIL = "Vai trò chỉ xem không sửa được dữ liệu."
-ADMIN_ONLY_DETAIL = "Chỉ quản trị không gian làm việc mới làm được việc này."
+ADMIN_ONLY_DETAIL = "Chỉ quản trị workspace làm được việc này."
 
 
 @dataclass(frozen=True, slots=True)

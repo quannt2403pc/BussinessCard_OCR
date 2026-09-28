@@ -134,7 +134,7 @@ async def update_follow_up(
     ):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            detail="Người phụ trách phải là thành viên của không gian làm việc này.",
+            detail="Người phụ trách phải là thành viên của workspace này.",
         )
     card = await contact_repo.set_follow_up(
         db,
