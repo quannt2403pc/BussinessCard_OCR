@@ -66,17 +66,23 @@
   <p class="text-slate-700">Kéo &amp; thả một hoặc nhiều ảnh danh thiếp vào đây</p>
   <p class="mt-1 text-sm text-slate-500">JPEG · PNG · WEBP · BMP · TIFF · GIF</p>
 
+  {# Hai nút cùng một khuôn `.btn*`, không cái nào tự vẽ style.
+
+     Bản đầu của I-38 bê nguyên cái `<label>` tự vẽ của màn hình cũ sang, và nó lệch hẳn: `.btn`
+     là `inline-flex` có `gap`, còn `<label>` thì không — icon rơi xuống dòng riêng, hộp cao hơn
+     nút bên cạnh. Lỗi này không nhìn thấy ở màn hình cũ vì ở đó nút kia cũng tự vẽ y như vậy.
+
+     Đổi `<label>` thành `<button>` bấm hộ ô file ẩn, đúng lối `btn-pick` — trang này vốn không
+     chạy được nếu không có JS (cả hàng đợi là JS), nên không mất gì. #}
   <div class="mt-6 flex flex-wrap justify-center gap-3">
     <button type="button" id="btn-pick" class="btn-primary">{{ icon("upload") }} Chọn ảnh</button>
-    {# `capture="environment"` mở thẳng camera sau trên điện thoại; máy tính bỏ qua thuộc tính
-       này và mở hộp thoại chọn file như thường. Không `multiple`: một lần bấm máy là một tấm. #}
-    <label class="cursor-pointer rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-      {{ icon("scan") }} Chụp ảnh
-      <input id="input-capture" type="file" accept="image/*" capture="environment" class="hidden">
-    </label>
+    <button type="button" id="btn-capture" class="btn">{{ icon("scan") }} Chụp ảnh</button>
   </div>
 
   <input id="input-file" type="file" accept="image/*" multiple class="hidden">
+  {# `capture="environment"` mở thẳng camera sau trên điện thoại; máy tính bỏ qua thuộc tính này
+     và mở hộp thoại chọn file như thường. Không `multiple`: một lần bấm máy là một tấm. #}
+  <input id="input-capture" type="file" accept="image/*" capture="environment" class="hidden">
 </section>
 
 <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"
@@ -554,6 +560,7 @@
     window.addEventListener(name, (e) => { if (e.target !== zone && !zone.contains(e.target)) e.preventDefault(); }));
 
   $("btn-pick").addEventListener("click", () => $("input-file").click());
+  $("btn-capture").addEventListener("click", () => $("input-capture").click());
 
   // Hai ô: chọn file (nhiều ảnh) và chụp ảnh (một tấm). Cùng đi vào `enqueue()` nên ảnh chụp
   // tại chỗ cũng được IndexedDB giữ lại y như ảnh chọn từ máy — đúng cảnh cần nhất: đứng ở hội
