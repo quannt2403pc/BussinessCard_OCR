@@ -1,15 +1,42 @@
-{# Kéo-thả ảnh + input capture chụp từ điện thoại. #}
-{# Chủ sở hữu: Q | Task: 4.5 | xem Task.md #}
+{# Quét danh thiếp: một màn hình duy nhất, một ảnh hay ba mươi ảnh đều đi chung đường. #}
+{# Chủ sở hữu: Q | Task: 5.3 · NEXT-09 (T sửa, Q review) · gộp hai màn hình ở I-38 | xem Task.md #}
 {#
-  Gửi từng ảnh một tới `POST /api/cards/upload` (task 3.1). Upload nhiều ảnh bằng MỘT request
-  (`POST /api/cards/batch-upload` + hàng đợi nền) là task 5.2 — ở đây thả nhiều ảnh thì trang
-  tự xếp hàng và gửi tuần tự, đủ dùng và không phải sửa lại khi 5.2 xong.
+  Bản 5.3 gửi **cả loạt trong một request**. Ở văn phòng thì đó là lựa chọn đúng: server nhận
+  hết, lưu ảnh xuống volume rồi quét ở nền, nên đóng tab việc vẫn chạy tiếp.
 
-  Vì sao dùng `XMLHttpRequest` chứ không `fetch`: chỉ XHR mới có `upload.onprogress`. Một lượt
-  quét mất 3–5 giây (đo ở task 3.4) nên thanh tiến trình không phải trang trí — không có nó,
-  người dùng tưởng trang treo và bấm lại.
+  Nhưng hội chợ là chỗ sóng yếu, và ở đó một request mang 30 ảnh là **một điểm gãy duy nhất**:
+  rớt mạng ở ảnh thứ 28 thì mất cả 30, mà người dùng thì đã đi khỏi bàn của khách rồi.
 
-  ⚠️ Tên file và mọi trường model đọc được đều ghi vào DOM bằng `textContent`.
+  NEXT-09 giữ nguyên hợp đồng server và đổi phía trình duyệt:
+
+  1. Ảnh vào **IndexedDB trước**, trước khi chạm mạng. Từ đó trở đi, đóng tab, hết pin hay
+     tắt máy đều không mất — mở lại trang là hàng đợi còn nguyên.
+  2. Gửi theo **lô nhỏ**, mỗi lô một request. Lô hỏng thì chỉ lô đó phải gửi lại.
+  3. Mất mạng thì **dừng chứ không báo lỗi**, và tự chạy tiếp khi có sóng (`online`).
+  4. Luôn hiện rõ **cái nào chưa lên máy chủ** — đó là câu hỏi duy nhất người dùng có lúc
+     đứng dậy rời hội chợ.
+
+  ---
+  **I-38 gộp `/cards/upload` và `/cards/batch` làm một, và đây là trang còn lại.**
+
+  Hai trang cũ chỉ khác nhau ở **số ảnh người dùng định chọn** — một thứ họ chưa biết cho tới
+  khi mở hộp chọn file ra. Bắt chọn trước là bắt trả lời một câu hỏi của hệ thống chứ không
+  phải của họ, và chọn sai thì phải quay ra bấm lại từ đầu. Trang cũ còn nhận nhiều ảnh rồi tự
+  gửi tuần tự, nên "hàng loạt" thậm chí không phải ranh giới thật.
+
+  Giữ lại từ `/cards/upload` cũ đúng một thứ: **nút chụp ảnh** (`capture="environment"`), thứ
+  duy nhất trang này không có. Đó là đường đi của người đứng tại hội chợ, chính là đối tượng mà
+  cả `NEXT-09` sinh ra để phục vụ.
+
+  Mất khi gộp, và chấp nhận: bảng 7 trường model đọc được hiện ngay dưới mỗi ảnh vừa quét. Nó
+  gắn với `POST /api/cards/upload` (trả kết quả đồng bộ), còn đường này quét ở nền nên lúc
+  request trả về thì chưa có gì để hiện. Nút *Review →* của từng dòng mở đúng thẻ đó với đầy đủ
+  trường, ảnh gốc và ô sửa — nhiều hơn hẳn bảng vừa mất.
+
+  `POST /api/cards/upload` **không bị gỡ**: nó là hợp đồng API có test, chỉ không còn màn hình
+  nào gọi tới.
+
+  ⚠️ Tên file do người dùng đặt, ghi vào DOM bằng `textContent`.
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
@@ -20,42 +47,93 @@
 <div class="flex flex-wrap items-center gap-3">
   <div>
     <h1 class="text-2xl font-semibold text-slate-900">Quét danh thiếp</h1>
-    <p class="mt-1 text-sm text-slate-600">Tối đa <strong>{{ max_upload_mb }}MB</strong> mỗi ảnh.</p>
+    <p class="mt-1 text-sm text-slate-600">
+      Tối đa <strong>{{ max_batch_files }}</strong> ảnh, ≤ {{ max_upload_mb }}MB mỗi ảnh.
+      Ảnh <strong>giữ trên máy trước</strong>, mất sóng thì tự gửi tiếp khi có mạng.
+    </p>
   </div>
-  <div class="ml-auto flex items-center gap-2">
-    <a href="/cards/batch" class="btn">{{ icon("upload") }} Hàng loạt</a>
-    <a href="/cards" class="btn">{{ icon("card") }} Danh sách</a>
-  </div>
+  <a href="/cards" class="btn ml-auto">{{ icon("card") }} Danh sách</a>
+</div>
+
+<div id="offline-banner"
+     class="mt-4 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+     role="status">
+  {{ icon("warn", "sm") }} Mất mạng. Ảnh giữ trên máy, tự gửi khi có sóng lại.
 </div>
 
 <section id="dropzone"
          class="mt-6 rounded-lg border-2 border-dashed border-slate-300 bg-white px-6 py-12 text-center transition">
-  <p class="text-slate-700">Kéo &amp; thả ảnh danh thiếp vào đây</p>
+  <p class="text-slate-700">Kéo &amp; thả một hoặc nhiều ảnh danh thiếp vào đây</p>
   <p class="mt-1 text-sm text-slate-500">JPEG · PNG · WEBP · BMP · TIFF · GIF</p>
 
+  {# Hai nút cùng một khuôn `.btn*`, không cái nào tự vẽ style.
+
+     Bản đầu của I-38 bê nguyên cái `<label>` tự vẽ của màn hình cũ sang, và nó lệch hẳn: `.btn`
+     là `inline-flex` có `gap`, còn `<label>` thì không — icon rơi xuống dòng riêng, hộp cao hơn
+     nút bên cạnh. Lỗi này không nhìn thấy ở màn hình cũ vì ở đó nút kia cũng tự vẽ y như vậy.
+
+     Đổi `<label>` thành `<button>` bấm hộ ô file ẩn, đúng lối `btn-pick` — trang này vốn không
+     chạy được nếu không có JS (cả hàng đợi là JS), nên không mất gì. #}
   <div class="mt-6 flex flex-wrap justify-center gap-3">
     <button type="button" id="btn-pick" class="btn-primary">{{ icon("upload") }} Chọn ảnh</button>
-    {# `capture="environment"` mở thẳng camera sau trên điện thoại; máy tính bỏ qua thuộc tính
-       này và mở hộp thoại chọn file như thường. #}
-    <label class="cursor-pointer rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-      {{ icon("scan") }} Chụp ảnh
-      <input id="input-capture" type="file" accept="image/*" capture="environment" class="hidden">
-    </label>
+    <button type="button" id="btn-capture" class="btn">{{ icon("scan") }} Chụp ảnh</button>
   </div>
 
   <input id="input-file" type="file" accept="image/*" multiple class="hidden">
+  {# `capture="environment"` mở thẳng camera sau trên điện thoại; máy tính bỏ qua thuộc tính này
+     và mở hộp thoại chọn file như thường. Không `multiple`: một lần bấm máy là một tấm. #}
+  <input id="input-capture" type="file" accept="image/*" capture="environment" class="hidden">
 </section>
 
 <div id="message" class="mt-4 hidden rounded-md px-4 py-3 text-sm"
      role="status" aria-live="polite"></div>
 
+{# Hàng đợi trên máy — khối quan trọng nhất của NEXT-09. Nó trả lời đúng một câu: **cái nào
+   chưa lên máy chủ**. #}
 <section id="queue-box" class="mt-6 hidden">
-  <div class="flex items-center gap-3">
-    <h2 class="text-base font-semibold text-slate-900">Hàng đợi</h2>
-    <span id="queue-summary" class="text-sm text-slate-500"></span>
-    <button type="button" id="btn-clear" class="btn ml-auto">{{ icon("trash", "sm") }} Dọn hết</button>
+  <div class="rounded-lg border border-slate-200 bg-white p-4">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="text-base font-semibold text-slate-900">Hàng đợi trên máy</h2>
+      <span id="queue-summary" class="text-sm text-slate-500"></span>
+      <button type="button" id="btn-retry" class="btn ml-auto hidden">
+        {{ icon("retry", "sm") }} Gửi lại phần lỗi
+      </button>
+      <button type="button" id="btn-clear-sent" class="btn hidden">
+        {{ icon("check", "sm") }} Dọn phần đã gửi
+      </button>
+    </div>
+    <ul id="queue-list" class="mt-3 divide-y divide-slate-100 text-sm"></ul>
   </div>
-  <ul id="queue" class="mt-3 space-y-3"></ul>
+</section>
+
+<section id="job-box" class="mt-6 hidden">
+  <div class="rounded-lg border border-slate-200 bg-white p-4">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="text-base font-semibold text-slate-900">Tiến trình quét</h2>
+      <span id="job-summary" class="text-sm text-slate-500"></span>
+      <button type="button" id="btn-forget" class="btn ml-auto">{{ icon("close", "sm") }} Bỏ theo dõi</button>
+    </div>
+
+    <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+      <div id="job-bar" class="h-full w-0 rounded-full bg-brand-accent transition-[width] duration-300"></div>
+    </div>
+
+    <div id="job-counts" class="mt-2 flex flex-wrap gap-4 text-xs text-slate-500"></div>
+  </div>
+
+  <div class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="px-4 py-3">Tên file</th>
+          <th class="px-4 py-3">Trạng thái</th>
+          <th class="px-4 py-3">Kết quả</th>
+          <th class="w-24 px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody id="rows" class="divide-y divide-slate-100"></tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}
 
@@ -64,13 +142,49 @@
 (() => {
   "use strict";
 
+  const MAX_FILES = {{ max_batch_files }};
   const MAX_BYTES = {{ max_upload_mb }} * 1024 * 1024;
 
+  // 1.5s: đủ dày để thanh tiến trình trông như đang chạy, đủ thưa để 30 ảnh × 4s chỉ tốn vài
+  // chục request. Ngắn hơn chỉ tạo thêm tải mà mắt người không phân biệt được.
+  const POLL_MS = 1500;
+
+  // Mỗi request mang 5 ảnh. Nhỏ hơn thì số request nhân lên vô ích; lớn hơn thì một lần rớt
+  // sóng kéo theo nhiều ảnh phải gửi lại — mà gửi lại trên mạng yếu mới là phần đắt.
+  const CHUNK = 5;
+
+  // Thử lại 4 lượt rồi mới chịu thua. Backoff 2s, 4s, 8s, 16s: mạng hội chợ hay chập chờn theo
+  // từng nhịp, đợi lâu hơn một chút thường ăn hơn là gõ cửa liên tục.
+  const MAX_ATTEMPTS = 4;
+  const BACKOFF_MS = 2000;
+
+  // `job_id` của từng lô. `sessionStorage` chứ không `localStorage`: job sống trong bộ nhớ
+  // server, hết phiên là hết ý nghĩa — giữ lâu hơn chỉ tổ hiện lại một job đã chết từ hôm qua.
+  const KEY = "bizcard.batch.jobs";
+
+  // Hàng đợi thì ngược lại, phải sống lâu **hơn** cả phiên: ảnh chưa gửi được là thứ người dùng
+  // sẽ mở máy ra tìm vào sáng hôm sau. IndexedDB vì nó giữ được Blob — `localStorage` chỉ chứa
+  // chuỗi, nhét ảnh vào đó là base64 phình 33% và đụng trần 5MB ngay ở ảnh thứ hai.
+  const DB_NAME = "bizcard-batch";
+  const STORE = "queue";
+
+  const BADGES = {
+    pending: ["⏳ chờ",      "bg-slate-50 text-slate-600 ring-slate-200"],
+    running: ["🔄 đang quét", "bg-brand-50 text-brand-700 ring-brand-100"],
+    done:    ["✅ xong",      "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+    error:   ["❌ lỗi",       "bg-rose-50 text-rose-700 ring-rose-200"],
+  };
+
+  const QUEUE_LABELS = {
+    pending:  ["Chờ gửi",     "text-slate-600"],
+    sending:  ["Đang gửi…",   "text-brand-700"],
+    sent:     ["Đã lên máy chủ", "text-emerald-700"],
+    rejected: ["Không gửi được", "text-rose-700"],
+  };
+
   const $ = (id) => document.getElementById(id);
-  const queue = $("queue");
-  let pending = 0;
-  let busy = false;
-  const waiting = [];
+  let timer = null;
+  let pumping = false;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -84,155 +198,314 @@
     toastShow($("message"), text, kind, retry);
   }
 
-  // --- một dòng trong hàng đợi ---------------------------------------------
-
-  function addItem(file) {
-    const li = el("li", "rounded-lg border border-slate-200 bg-white p-4");
-
-    const head = el("div", "flex items-center gap-3");
-    head.append(el("span", "truncate text-sm font-medium text-slate-800", file.name));
-    const state = el("span", "ml-auto shrink-0 text-xs text-slate-500", "đang chờ…");
-    head.append(state);
-    li.append(head);
-
-    const track = el("div", "mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100");
-    const bar = el("div", "h-full w-0 rounded-full bg-brand-accent transition-[width] duration-150");
-    track.append(bar);
-    li.append(track);
-
-    const body = el("dl", "mt-3 hidden grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3");
-    li.append(body);
-
-    queue.prepend(li);
-    $("queue-box").classList.remove("hidden");
-    return { li, state, bar, track, body };
+  function clearMessage() {
+    toastClear($("message"));
   }
 
-  const FIELDS = [
-    ["full_name", "Họ tên"],
-    ["job_title", "Chức vụ"],
-    ["company_name_raw", "Công ty"],
-    ["email", "Email"],
-    ["phone", "Điện thoại"],
-    ["address", "Địa chỉ"],
-    ["website", "Website"],
-  ];
-
-  function showResult(item, body) {
-    const card = body.card;
-    item.body.className = "mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3";
-    item.body.replaceChildren();
-
-    // Trường bắt buộc mà model không đọc được thì tô đỏ ngay tại đây, không đợi màn hình
-    // review: người vừa chụp ảnh là người duy nhất còn cầm tấm danh thiếp trong tay.
-    const missing = new Set(body.missing_required || []);
-    for (const [key, label] of FIELDS) {
-      const value = card[key];
-      // Mỗi cặp nhãn/giá trị gói trong một ô riêng. Thả thẳng <dt>/<dd> vào lưới thì mỗi thẻ
-      // chiếm một ô, nhãn và giá trị của nó rơi vào hai cột khác nhau — đọc ra nghĩa khác hẳn.
-      const cell = el("div");
-      cell.append(el("dt", "text-xs text-muted", label));
-      cell.append(el(
-        "dd",
-        missing.has(key) ? "text-rose-600" : "text-slate-800",
-        value || (missing.has(key) ? "thiếu" : "—"),
-      ));
-      item.body.append(cell);
-    }
-
-    const foot = el("div", "col-span-full mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2 text-xs");
-    if (body.duplicate) {
-      foot.append(el("span", "text-amber-700", "Ảnh này đã quét trước đó — mở lại bản ghi cũ, không tạo bản trùng."));
-    } else if (body.ocr_error) {
-      foot.append(el("span", "text-rose-700", `Ảnh đã lưu nhưng chưa quét được: ${body.ocr_error}`));
-    } else if (body.ocr_ms) {
-      foot.append(el("span", "text-muted", `Quét trong ${(body.ocr_ms / 1000).toFixed(1)}s`));
-    }
-    // Dẫn thẳng vào màn hình review của đúng thẻ vừa quét (task 5.1): người vừa chụp ảnh là
-    // người duy nhất còn cầm tấm danh thiếp trong tay, sửa ngay lúc này là rẻ nhất.
-    const link = el("a", "text-brand-600 hover:underline", "Review thẻ này →");
-    link.href = `/cards/${card.id}`;
-    foot.append(link);
-    item.body.append(foot);
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((e) => e.msg).join("; ");
+    } catch (_) { /* body không phải JSON */ }
+    return `Lỗi HTTP ${res.status}`;
   }
 
-  // --- gửi một ảnh ----------------------------------------------------------
+  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-  function send(file, item) {
-    return new Promise((resolve) => {
-      const form = new FormData();
-      form.append("file", file);
+  // --- hàng đợi trên máy (IndexedDB) ----------------------------------------
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/cards/upload");
+  let dbPromise = null;
 
-      xhr.upload.addEventListener("progress", (e) => {
-        if (!e.lengthComputable) return;
-        const percent = Math.round((e.loaded / e.total) * 100);
-        item.bar.style.width = `${percent}%`;
-        // Gửi xong không có nghĩa là quét xong: server còn gọi vision mất vài giây nữa.
-        item.state.textContent = percent < 100 ? `đang gửi ${percent}%` : "đang quét ảnh…";
-        if (percent >= 100) item.bar.classList.add("animate-pulse");
-      });
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(STORE, { keyPath: "id", autoIncrement: true });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return dbPromise;
+  }
 
-      xhr.addEventListener("load", () => {
-        item.bar.classList.remove("animate-pulse");
-        item.bar.style.width = "100%";
-        let body = null;
-        try { body = JSON.parse(xhr.responseText); } catch (_) { /* không phải JSON */ }
-
-        if (xhr.status >= 200 && xhr.status < 300 && body) {
-          fail(item, false, body.duplicate ? "đã có sẵn" : (body.ocr_error ? "lưu, chưa quét được" : "xong"));
-          showResult(item, body);
-        } else {
-          const detail = body && typeof body.detail === "string" ? body.detail : `Lỗi HTTP ${xhr.status}`;
-          fail(item, true, detail);
-        }
-        resolve();
-      });
-
-      xhr.addEventListener("error", () => {
-        fail(item, true, "Không kết nối được tới máy chủ.");
-        resolve();
-      });
-
-      xhr.send(form);
+  async function tx(mode, run) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE, mode);
+      const result = run(transaction.objectStore(STORE));
+      transaction.oncomplete = () => resolve(result && result.result !== undefined ? result.result : result);
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 
-  function fail(item, isError, text) {
-    item.state.textContent = text;
-    item.state.className = isError
-      ? "ml-auto shrink-0 text-xs text-rose-600"
-      : "ml-auto shrink-0 text-xs text-emerald-600";
-    item.bar.className = isError
-      ? "h-full w-full rounded-full bg-rose-400"
-      : "h-full w-full rounded-full bg-emerald-500";
-  }
+  const putItem = (item) => tx("readwrite", (store) => store.put(item));
+  const addItem = (item) => tx("readwrite", (store) => store.add(item));
+  const allItems = () => tx("readonly", (store) => store.getAll());
+  const dropItem = (id) => tx("readwrite", (store) => store.delete(id));
 
-  // --- hàng đợi -------------------------------------------------------------
+  // --- vẽ hàng đợi ----------------------------------------------------------
 
-  async function pump() {
-    if (busy) return;
-    busy = true;
-    while (waiting.length) {
-      const job = waiting.shift();
-      await send(job.file, job.item);
-      pending -= 1;
-      updateSummary();
+  function queueRow(item) {
+    const row = el("li", "flex flex-wrap items-center gap-3 py-2");
+    row.append(el("span", "min-w-0 flex-1 truncate font-medium text-slate-800", item.name));
+
+    const [label, tone] = QUEUE_LABELS[item.status] || [item.status, "text-slate-600"];
+    row.append(el("span", `shrink-0 text-xs ${tone}`, label));
+
+    if (item.attempts > 0 && item.status !== "sent") {
+      row.append(el("span", "shrink-0 text-xs text-muted", `đã thử ${item.attempts} lượt`));
     }
-    busy = false;
+    if (item.error) {
+      row.append(el("span", "w-full text-xs text-rose-700", item.error));
+    }
+    return row;
   }
 
-  function updateSummary() {
-    $("queue-summary").textContent = pending > 0 ? `còn ${pending} ảnh trong hàng đợi` : "đã xong";
+  async function renderQueue() {
+    const items = await allItems();
+    $("queue-box").classList.toggle("hidden", items.length === 0);
+    if (!items.length) return;
+
+    $("queue-list").replaceChildren(...items.map(queueRow));
+
+    const waiting = items.filter((i) => i.status === "pending" || i.status === "sending").length;
+    const sent = items.filter((i) => i.status === "sent").length;
+    const failed = items.filter((i) => i.status === "rejected").length;
+
+    const parts = [];
+    if (waiting) parts.push(`${waiting} ảnh chưa lên máy chủ`);
+    if (sent) parts.push(`${sent} đã lên`);
+    if (failed) parts.push(`${failed} không gửi được`);
+    $("queue-summary").textContent = parts.join(" · ");
+
+    $("btn-retry").classList.toggle("hidden", !failed);
+    $("btn-clear-sent").classList.toggle("hidden", !sent);
+    return items;
   }
 
-  function enqueue(files) {
+  // --- vẽ tiến trình quét ---------------------------------------------------
+
+  function renderRow(item) {
+    const tr = el("tr", "align-top");
+    tr.append(el("td", "px-4 py-3 font-medium text-slate-800", item.filename));
+
+    const [label, tone] = BADGES[item.status] || [item.status, "bg-slate-50 text-slate-600 ring-slate-200"];
+    const state = el("td", "px-4 py-3");
+    state.append(el("span",
+      `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    if (item.attempts > 1 && item.status !== "error") {
+      // Retry đã cứu được ảnh này. Hiện ra vì nhiều dòng "thử lại lần 2" là dấu hiệu sớm của
+      // rate limit (R5) — biết trước thì còn giảm số ảnh mỗi lượt.
+      state.append(el("div", "mt-1 text-xs text-muted", `thử lại ${item.attempts} lượt`));
+    }
+    tr.append(state);
+
+    const result = el("td", "px-4 py-3 text-sm");
+    if (item.status === "error") {
+      result.append(el("div", "text-rose-700", item.error || "Không rõ lý do."));
+    } else if (item.duplicate) {
+      result.append(el("div", "text-amber-700", "Ảnh đã quét trước đó — mở lại bản ghi cũ."));
+    } else if (item.status === "done") {
+      result.append(el("div", "text-slate-500",
+        item.ocr_ms ? `Đọc xong trong ${(item.ocr_ms / 1000).toFixed(1)}s` : "Đã lưu."));
+    } else {
+      result.append(el("div", "text-muted", "—"));
+    }
+    tr.append(result);
+
+    const actions = el("td", "px-4 py-3 text-right");
+    if (item.card_id) {
+      const link = el("a", "text-sm text-brand-600 hover:underline", "Review →");
+      link.href = `/cards/${item.card_id}`;
+      actions.append(link);
+    }
+    tr.append(actions);
+
+    return tr;
+  }
+
+  /** Gộp nhiều job thành một bản tóm tắt — mỗi lô gửi đi là một job riêng. */
+  function aggregate(jobs) {
+    const merged = {
+      total: 0, done: 0, failed: 0, running: 0,
+      finished: jobs.every((job) => job.finished),
+      items: [], aborted_reason: null,
+    };
+    for (const job of jobs) {
+      merged.total += job.total;
+      merged.done += job.done;
+      merged.failed += job.failed;
+      merged.running += job.running;
+      merged.items.push(...job.items);
+      if (job.aborted_reason) merged.aborted_reason = job.aborted_reason;
+    }
+    return merged;
+  }
+
+  function render(job) {
+    $("job-box").classList.remove("hidden");
+    $("rows").replaceChildren(...job.items.map(renderRow));
+
+    const settled = job.done + job.failed;
+    $("job-bar").style.width = job.total ? `${Math.round((settled / job.total) * 100)}%` : "0%";
+    $("job-bar").className = job.failed && job.finished
+      ? "h-full rounded-full bg-amber-500 transition-[width] duration-300"
+      : "h-full rounded-full bg-brand-accent transition-[width] duration-300";
+
+    $("job-summary").textContent = job.finished
+      ? `Xong — ${settled}/${job.total} ảnh`
+      : `Đang chạy — ${settled}/${job.total} ảnh`;
+
+    $("job-counts").replaceChildren(
+      el("span", "text-emerald-700", `✅ ${job.done} xong`),
+      el("span", "text-brand-700", `🔄 ${job.running} đang quét`),
+      el("span", "text-rose-700", `❌ ${job.failed} lỗi`),
+    );
+
+    if (job.aborted_reason) message(job.aborted_reason, "error");
+  }
+
+  // --- poll -----------------------------------------------------------------
+
+  const jobIds = () => JSON.parse(sessionStorage.getItem(KEY) || "[]");
+
+  function rememberJob(jobId) {
+    const ids = jobIds();
+    if (!ids.includes(jobId)) ids.push(jobId);
+    sessionStorage.setItem(KEY, JSON.stringify(ids));
+  }
+
+  function stopPolling() {
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+
+  async function poll() {
+    const ids = jobIds();
+    if (!ids.length) return;
+
+    const jobs = [];
+    const alive = [];
+    for (const id of ids) {
+      let res;
+      try {
+        res = await fetch(`/api/cards/batch-jobs/${id}`);
+      } catch (err) {
+        // Mất mạng giữa lúc poll: giữ nguyên danh sách job và thử lại chậm hơn. Ảnh đã lên
+        // máy chủ rồi, việc quét vẫn chạy tiếp bên đó.
+        timer = setTimeout(poll, POLL_MS * 2);
+        return;
+      }
+      if (!res.ok) {
+        // Job đã bị dọn khỏi bộ nhớ (restart container, hoặc quá 20 lượt). Bỏ nó khỏi danh
+        // sách chứ không bỏ cả lượt — những lô khác vẫn theo dõi được.
+        continue;
+      }
+      jobs.push(await res.json());
+      alive.push(id);
+    }
+
+    sessionStorage.setItem(KEY, JSON.stringify(alive));
+    if (!jobs.length) {
+      message("Không còn theo dõi được lượt quét nào. Ảnh vẫn nằm ở /cards.", "error");
+      return;
+    }
+
+    const merged = aggregate(jobs);
+    render(merged);
+
+    if (merged.finished) {
+      sessionStorage.removeItem(KEY);
+      if (!merged.aborted_reason) {
+        message(merged.failed
+          ? `Xong ${merged.done} ảnh, ${merged.failed} lỗi — lý do ở cột Kết quả.`
+          : `Xong cả ${merged.done} ảnh. Bấm “Review →” để kiểm từng tấm.`,
+          merged.failed ? "error" : "ok");
+      }
+      return;
+    }
+    timer = setTimeout(poll, POLL_MS);
+  }
+
+  function track() {
+    stopPolling();
+    poll();
+  }
+
+  // --- gửi ------------------------------------------------------------------
+
+  /** Gửi lần lượt từng lô cho tới khi hết ảnh chờ, hoặc mất mạng. */
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      for (;;) {
+        if (!navigator.onLine) return;  // `online` sẽ gọi lại pump()
+
+        const items = await allItems();
+        const waiting = items.filter((i) => i.status === "pending");
+        if (!waiting.length) return;
+
+        const chunk = waiting.slice(0, CHUNK);
+        for (const item of chunk) {
+          item.status = "sending";
+          await putItem(item);
+        }
+        await renderQueue();
+
+        const form = new FormData();
+        for (const item of chunk) form.append("files", new File([item.blob], item.name, { type: item.type }));
+
+        let body = null;
+        let failure = null;
+        try {
+          const res = await fetch("/api/cards/batch-upload", { method: "POST", body: form });
+          if (res.ok) body = await res.json();
+          else failure = await readError(res);
+        } catch (err) {
+          failure = null;  // lỗi mạng — khác hẳn lỗi server, xem bên dưới
+        }
+
+        if (body) {
+          for (const item of chunk) {
+            item.status = "sent";
+            item.error = null;
+            item.jobId = body.job_id;
+            await putItem(item);
+          }
+          rememberJob(body.job_id);
+          track();
+          await renderQueue();
+          continue;
+        }
+
+        // Server từ chối (`failure` có chữ) là lỗi **của lô này** — thử lại cũng thế, nên đếm
+        // lượt và bỏ cuộc sớm. Lỗi mạng (`failure === null`) thì không tính vào giới hạn thử
+        // lại: đứng ở chỗ không có sóng suốt nửa tiếng cũng không phải là ảnh hỏng.
+        for (const item of chunk) {
+          item.status = "pending";
+          if (failure !== null) {
+            item.attempts = (item.attempts || 0) + 1;
+            item.error = failure;
+            if (item.attempts >= MAX_ATTEMPTS) item.status = "rejected";
+          }
+          await putItem(item);
+        }
+        await renderQueue();
+
+        if (failure === null) return;  // đợi sự kiện `online`
+        await sleep(BACKOFF_MS * Math.min(4, chunk[0].attempts || 1));
+      }
+    } finally {
+      pumping = false;
+    }
+  }
+
+  async function enqueue(files) {
     const accepted = [];
     for (const file of files) {
-      // Chặn ngay ở trình duyệt hai ca server cũng chặn (400 / 413) — đỡ tải lên 10MB rồi mới
-      // biết là hỏng, nhất là khi chụp bằng 4G.
+      // Chặn ngay ở trình duyệt hai ca server cũng chặn — đỡ giữ trên máy rồi mới biết là hỏng.
       if (!file.type.startsWith("image/")) {
         message(`Bỏ qua "${file.name}": không phải file ảnh.`, "error");
         continue;
@@ -244,14 +517,26 @@
       accepted.push(file);
     }
     if (!accepted.length) return;
-
-    // Gửi tuần tự, không song song: mỗi lượt là một lời gọi vision qua CLIProxy, bắn 10 request
-    // cùng lúc chỉ đổi lỗi chờ lâu thành lỗi rate limit (rủi ro R5). Hàng đợi nền là task 5.2.
-    for (const file of accepted) {
-      waiting.push({ file, item: addItem(file) });
-      pending += 1;
+    if (accepted.length > MAX_FILES) {
+      message(`Tối đa ${MAX_FILES} ảnh một lượt.`, "error");
+      return;
     }
-    updateSummary();
+
+    clearMessage();
+    for (const file of accepted) {
+      await addItem({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        blob: file,
+        status: "pending",
+        attempts: 0,
+        error: null,
+        jobId: null,
+      });
+    }
+    await renderQueue();
+    message(`Đã giữ ${accepted.length} ảnh trên máy. Đang gửi dần…`, "ok");
     pump();
   }
 
@@ -270,25 +555,61 @@
     if (e.dataTransfer && e.dataTransfer.files.length) enqueue(e.dataTransfer.files);
   });
 
-  // Thả ảnh ra ngoài khung là mở ảnh đó trong tab hiện tại và mất sạch hàng đợi đang chạy.
+  // Thả ảnh ra ngoài khung là mở ảnh đó trong tab hiện tại, mất luôn trang đang theo dõi.
   ["dragover", "drop"].forEach((name) =>
     window.addEventListener(name, (e) => { if (e.target !== zone && !zone.contains(e.target)) e.preventDefault(); }));
 
   $("btn-pick").addEventListener("click", () => $("input-file").click());
+  $("btn-capture").addEventListener("click", () => $("input-capture").click());
 
+  // Hai ô: chọn file (nhiều ảnh) và chụp ảnh (một tấm). Cùng đi vào `enqueue()` nên ảnh chụp
+  // tại chỗ cũng được IndexedDB giữ lại y như ảnh chọn từ máy — đúng cảnh cần nhất: đứng ở hội
+  // chợ, sóng chập chờn, chụp xong là cất vào máy trước đã.
   for (const id of ["input-file", "input-capture"]) {
     $(id).addEventListener("change", (e) => {
       enqueue(e.target.files);
-      // Reset để chọn lại đúng file vừa chọn vẫn kích hoạt `change`.
-      e.target.value = "";
+      e.target.value = "";  // chọn lại đúng những file vừa chọn vẫn kích hoạt `change`
     });
   }
 
-  $("btn-clear").addEventListener("click", () => {
-    queue.replaceChildren();
-    $("queue-box").classList.add("hidden");
-    $("message").className = "mt-4 hidden rounded-md px-4 py-3 text-sm";
+  $("btn-retry").addEventListener("click", async () => {
+    for (const item of await allItems()) {
+      if (item.status !== "rejected") continue;
+      item.status = "pending";
+      item.attempts = 0;
+      item.error = null;
+      await putItem(item);
+    }
+    await renderQueue();
+    pump();
   });
+
+  $("btn-clear-sent").addEventListener("click", async () => {
+    for (const item of await allItems()) {
+      if (item.status === "sent") await dropItem(item.id);
+    }
+    await renderQueue();
+  });
+
+  $("btn-forget").addEventListener("click", () => {
+    // Chỉ ngừng nhìn, không huỷ job: ảnh đã nằm trong volume và server vẫn quét nốt. Nói rõ ra
+    // để không ai tưởng mình vừa huỷ mất việc.
+    stopPolling();
+    sessionStorage.removeItem(KEY);
+    message("Đã ngừng theo dõi. Kết quả xem ở /cards.", "ok");
+  });
+
+  function showOffline() {
+    $("offline-banner").classList.toggle("hidden", navigator.onLine);
+  }
+
+  window.addEventListener("online", () => { showOffline(); pump(); });
+  window.addEventListener("offline", showOffline);
+
+  // Mở lại trang giữa chừng: hàng đợi còn nguyên trong IndexedDB, job đang dở còn trong phiên.
+  showOffline();
+  renderQueue().then(() => pump());
+  if (jobIds().length) track();
 })();
 </script>
 {% endblock %}
