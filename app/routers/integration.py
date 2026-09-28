@@ -35,7 +35,6 @@ from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.integration import IntegrationStatus
-from app.models.user import User
 from app.repositories import model_pref as pref_repo
 from app.schemas.model_pref import FeatureModelsOut, ModelPrefsIn, ModelPrefsOut
 from app.services import llm, model_catalog, user_credentials
@@ -455,8 +454,6 @@ async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
     """Dựng trạng thái khối chọn model. Dùng chung cho cả `GET` lẫn câu trả lời của `PUT`."""
     catalogue = await model_catalog.catalogue()
     choices = await pref_repo.as_dict(db, user_id)
-    owner = await db.get(User, user_id)
-    paid_only = await user_credentials.paid_only_models(owner) if owner else frozenset()
 
     features: list[FeatureModelsOut] = []
     for feature in model_catalog.FEATURES:
@@ -478,7 +475,6 @@ async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
         default_model=settings.llm_model,
         reachable=bool(catalogue),
         features=features,
-        paid_only=sorted(paid_only),
     )
 
 

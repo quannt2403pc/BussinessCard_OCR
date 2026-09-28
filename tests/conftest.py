@@ -492,10 +492,11 @@ def gemini_payload(text: str) -> dict[str, Any]:
 def cliproxy() -> Iterator[CliProxyStub]:
     """CLIProxy giả lập tại đúng `CLIPROXY_BASE_URL` mà `services/llm.py` sẽ gọi.
 
-    `auth-files` được cắm sẵn ngay từ đầu, trả về `stub.files` mỗi lần được hỏi. Từ I-42 đây là
-    **đường nóng**: `user_credentials.paid_only_models()` đọc nó trên mọi lượt gọi model để biết
-    tài khoản này bị chặn model nào vì gói cước. Không cắm sẵn thì mọi test chạm tới `model_for()`
-    đều đỏ vì một route chưa mock, chứ không phải vì điều nó muốn kiểm.
+    `auth-files` được cắm sẵn ngay từ đầu, trả về `stub.files` mỗi lần được hỏi. Từ I-42 nó nằm
+    trên **đường lỗi**: gặp `503 auth_unavailable`, `llm._explain_no_credential()` hỏi lại
+    `auth-files` để biết credential có bị nhà cung cấp chặn không — đó là chỗ duy nhất đọc được
+    lý do thật. Không cắm sẵn thì mọi test dựng cảnh 503 đều đỏ vì một route chưa mock, chứ
+    không phải vì điều nó muốn kiểm.
     """
     with respx.mock(base_url=settings.cliproxy_base_url, assert_all_called=False) as router:
         stub = CliProxyStub(router)

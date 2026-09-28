@@ -245,11 +245,6 @@ class Cooldown:
             retry_at=str(item.get("retry_at") or ""),
         )
 
-    @property
-    def needs_payment(self) -> bool:
-        """Từ chối vì **gói cước**, không phải vì hỏng — đăng nhập lại không chữa được."""
-        return self.reason == "payment_required" or self.http_status in (402, 403)
-
 
 @dataclass(frozen=True)
 class AuthFile:
@@ -301,15 +296,6 @@ class AuthFile:
         "Verify your account to continue."` kèm `validation_url`.
         """
         return ProviderBlock.parse(str(self.raw.get("status_message") or ""))
-
-    def paid_only_models(self) -> frozenset[str]:
-        """Model mà **tài khoản này** bị từ chối vì gói cước.
-
-        Đây là lý do danh sách "Pro" không thể là hằng số trong mã: cùng một model,
-        `quanpyke@gmail.com` gọi được còn `quanpyke1@gmail.com` thì không (đo thật, I-42).
-        Thuộc tính này của **cặp** *(tài khoản, model)*, nên nó phải đọc từ credential đang dùng.
-        """
-        return frozenset(c.model for c in self.cooldowns if c.needs_payment and c.model)
 
     @classmethod
     def from_payload(cls, item: dict[str, Any]) -> AuthFile:

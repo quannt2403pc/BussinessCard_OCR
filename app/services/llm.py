@@ -97,20 +97,6 @@ class LLMProviderBlockedError(LLMNotConnectedError):
     """
 
 
-class LLMPaymentRequiredError(LLMNotConnectedError):
-    """Model này đòi gói trả phí mà tài khoản Google đang kết nối không có (I-42).
-
-    **Kế thừa `LLMNotConnectedError` là cố ý.** Mọi chỗ đang `except LLMNotConnectedError` —
-    `routers/cards.py`, `routers/chat.py`, `card_batch.py`, `enrich_jobs.py` — xử lý đúng như
-    nhau: dừng lại, nói cho người dùng, đừng thử lại. Chỉ **câu chữ** là phải khác, vì lời
-    khuyên "bấm Kết nối AI" ở đây sai hẳn: credential hoàn toàn lành lặn, đăng nhập lại mười
-    lần cũng ra đúng tài khoản không có gói ấy.
-
-    Tách thành lớp riêng để chỗ nào cần phân biệt thì phân biệt được, mà không phải sửa một
-    dòng `except` nào đang có.
-    """
-
-
 class LLMBlockedError(LLMError):
     """Provider chặn câu trả lời (safety / recitation) — thử lại y nguyên cũng vô ích."""
 

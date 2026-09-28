@@ -310,11 +310,6 @@
 
   /** Một ô chọn. Lưu **ngay khi đổi**, không có nút Lưu: ba ô, mỗi ô một lời gọi PUT rẻ, mà thêm
    *  nút Lưu là thêm một trạng thái "đã chọn nhưng chưa lưu" để người dùng tự bỏ quên. */
-  //: Model mà **tài khoản Google đang kết nối** bị từ chối vì gói cước (I-42). Cập nhật mỗi lần
-  //: `/api/integration/models` trả về, vì nó là thuộc tính của cặp (tài khoản, model) chứ không
-  //: phải của riêng model: đổi sang tài khoản có gói là danh sách này rỗng đi.
-  let paidOnly = new Set();
-
   function modelField(feature) {
     const wrap = document.createElement("div");
 
@@ -339,9 +334,7 @@
     for (const id of feature.available) {
       const option = document.createElement("option");
       option.value = id;
-      // Chữ "Pro" ngay trong nhãn chứ không phải một badge cạnh ô chọn: `<option>` không nhận
-      // HTML con, và người dùng cần thấy nó **lúc đang mở danh sách**, đúng lúc chọn.
-      option.textContent = paidOnly.has(id) ? id + " — Pro" : id;
+      option.textContent = id;
       select.appendChild(option);
     }
 
@@ -373,7 +366,6 @@
 
   function renderModelPrefs(data) {
     modelFields.replaceChildren();
-    paidOnly = new Set(data.paid_only || []);
 
     if (!data.reachable) {
       const note = document.createElement("p");
@@ -383,16 +375,7 @@
       return;
     }
     for (const feature of data.features) modelFields.appendChild(modelField(feature));
-
-    // Ràng buộc, không phải lời giải thích: chọn model *Pro* bằng tài khoản không có gói thì
-    // mọi lượt gọi hỏng, và trước I-42 nó hỏng kèm câu "chưa kết nối" hoàn toàn sai đường.
-    if (paidOnly.size) {
-      const note = document.createElement("p");
-      note.className = "text-xs text-muted sm:col-span-3";
-      note.textContent = "Model ghi “Pro” cần gói trả phí mà tài khoản "
-        + (accountLabel.textContent || "đang kết nối") + " không có.";
-      modelFields.appendChild(note);
-    }
+  }
   }
 
   async function saveModel(select) {

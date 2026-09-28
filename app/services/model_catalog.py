@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from typing import Literal, get_args
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.repositories import model_pref as pref_repo
 from app.services.cliproxy_client import CliProxyClient, CliProxyError
-from app.services.llm import LLMPaymentRequiredError
 
 logger = logging.getLogger(__name__)
 
@@ -141,23 +140,11 @@ def forget_catalogue() -> None:
     _catalogue_cache = None
 
 
-async def resolve(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    feature: Feature,
-    *,
-    avoid: Collection[str] = (),
-) -> str:
+async def resolve(db: AsyncSession, user_id: uuid.UUID, feature: Feature) -> str:
     """Tên model **chưa có tiền tố** sẽ dùng cho `feature` của người dùng này.
 
     Thứ tự: lựa chọn của người dùng → `LLM_MODEL` nếu họ chưa chọn → `LLM_MODEL` nếu lựa chọn của
-    họ nay không dùng được nữa → **model khác nếu cái vừa chọn vượt quá gói cước** (`avoid`).
-
-    `avoid` là danh sách model mà **tài khoản Google đang kết nối** bị từ chối vì gói cước —
-    `user_credentials.paid_only_models()` đọc nó từ `cooldowns` của chính credential ấy (I-42).
-    Nó là tham số chứ không phải hằng số trong file này, và đó là điểm mấu chốt: cùng một model,
-    tài khoản có gói thì gọi được, tài khoản free thì không. Một danh sách *Pro* cứng sẽ chặn
-    nhầm người đã trả tiền.
+    họ nay không dùng được nữa.
 
     Nhánh thứ ba là quyết định **M5** của ADR: model đã lưu có thể biến mất khỏi danh mục (danh
     mục tự đổi) hoặc bị bảng năng lực loại sau một lượt đo mới. Lúc đó **rơi về mặc định kèm cảnh
@@ -167,10 +154,7 @@ async def resolve(
     choices = await pref_repo.as_dict(db, user_id)
     chosen = choices.get(feature)
     if not chosen:
-        # **Cả nhánh mặc định cũng phải tránh** — đây mới là đường của người dùng free, không
-        # phải nhánh dưới: họ vừa đăng nhập, chưa chọn gì bao giờ, nên `LLM_MODEL` là thứ duy
-        # nhất họ từng gọi. Thoát sớm ở đây là để nguyên đúng cái lỗi I-42 sinh ra để chữa.
-        return await _dodge_paid_only(settings.llm_model, feature, avoid, user_id)
+        return settings.llm_model
 
     if not supports(chosen, feature):
         logger.warning(
@@ -180,7 +164,7 @@ async def resolve(
             user_id,
             settings.llm_model,
         )
-        return await _dodge_paid_only(settings.llm_model, feature, avoid, user_id)
+        return settings.llm_model
 
     # Danh mục rỗng = không hỏi được CLIProxy, **không** phải "model đã bị gỡ". Tin lựa chọn của
     # người dùng trong trường hợp đó: đổi model của họ vì ta đang mất mạng là một kiểu hỏng khác,
@@ -194,53 +178,6 @@ async def resolve(
             feature,
             settings.llm_model,
         )
-        return await _dodge_paid_only(settings.llm_model, feature, avoid, user_id)
+        return settings.llm_model
 
-    return await _dodge_paid_only(chosen, feature, avoid, user_id)
-
-
-async def _dodge_paid_only(
-    chosen: str,
-    feature: Feature,
-    avoid: Collection[str],
-    user_id: uuid.UUID,
-) -> str:
-    """Đổi sang model khác nếu `chosen` vượt quá gói cước của tài khoản đang kết nối (I-42).
-
-    Vì sao tránh **trước khi gọi** chứ không thử-rồi-đổi: CLIProxy đã ghi `cooldowns` từ lần
-    hỏng đầu, nên ta biết chắc mà không tốn thêm lượt gọi nào. Thử lại rồi mới đổi thì mỗi lượt
-    quét của người dùng free đều mất một vòng gọi hỏng — và với upload hàng loạt là mất một vòng
-    cho **mỗi** tấm thẻ.
-
-    Model thay thế lấy từ `allowed_for()` nên **không bao giờ hạ cấp năng lực**: thay cho *Quét
-    danh thiếp* thì vẫn phải đọc được ảnh, thay cho *Lập hồ sơ* thì vẫn phải tra được Internet.
-    Thà báo lỗi còn hơn lặng lẽ đổi sang model sinh ra hồ sơ trống (`EX-12`, tiêu chí A5).
-    """
-    # **Thoát trước khi hỏi danh mục.** `avoid` rỗng là trường hợp thường gặp nhất — không ai
-    # bị chặn model nào — và bản đầu của I-42 gọi `catalogue()` ngay cả lúc đó, biến một nhánh
-    # vốn trả về tức thì thành một lượt HTTP. 14 test đỏ vì đúng chuyện này, và mỗi lượt quét
-    # của mọi người dùng phải trả giá cho một thứ gần như không bao giờ dùng tới.
-    if chosen not in avoid:
-        return chosen
-
-    catalogue_models = await catalogue()
-    # Danh mục rỗng = không hỏi được CLIProxy. Giữ nguyên lựa chọn, cùng lý do với nhánh trên:
-    # đổi model của người dùng vì ta đang mất mạng là một kiểu hỏng âm thầm hơn.
-    if not catalogue_models:
-        return chosen
-
-    thay_the = next((m for m in allowed_for(feature, catalogue_models) if m not in avoid), None)
-    if thay_the is None:
-        raise LLMPaymentRequiredError(
-            f"Tài khoản Google đang kết nối không có gói dùng được model nào cho "
-            f"{FEATURE_LABELS[feature]!r}. Vào /settings kết nối bằng tài khoản có gói phù hợp."
-        )
-
-    logger.warning(
-        "Model %r vượt gói cước của người dùng %s (%s) — dùng %r thay thế",
-        chosen,
-        user_id,
-        feature,
-        thay_the,
-    )
-    return thay_the
+    return chosen
