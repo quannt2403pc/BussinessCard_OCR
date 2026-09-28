@@ -1,3 +1,5 @@
+import logging
+import time
 import uuid
 from collections.abc import Sequence
 
@@ -7,9 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.user import User
 from app.services import model_catalog
-from app.services.cliproxy_client import AuthFile, CliProxyClient, CliProxyResponseError
+from app.services.cliproxy_client import (
+    AuthFile,
+    CliProxyClient,
+    CliProxyError,
+    CliProxyResponseError,
+)
 from app.services.llm import LLMNotConnectedError
 from app.services.model_catalog import Feature
+
+logger = logging.getLogger(__name__)
 
 NOT_CONNECTED = (
     "Tài khoản của bạn chưa kết nối AI — vào /settings bấm “Kết nối AI” "
@@ -62,7 +71,7 @@ async def model_for(db: AsyncSession, user: User, feature: Feature) -> str:
     """
     if not user.cliproxy_auth_file:
         raise LLMNotConnectedError(NOT_CONNECTED)
-    model = await model_catalog.resolve(db, user.id, feature)
+    model = await model_catalog.resolve(db, user.id, feature, avoid=await paid_only_models(user))
     return f"{credential_prefix(user.id)}/{model}"
 
 
@@ -72,6 +81,56 @@ async def model_for_user_id(db: AsyncSession, user_id: uuid.UUID, feature: Featu
     if user is None or not user.is_active:
         raise LLMNotConnectedError(NOT_CONNECTED)
     return await model_for(db, user, feature)
+
+
+#: Cooldown đổi theo từng phút (mỗi lần Google từ chối là một dòng mới), nhưng `model_for()` chạy
+#: trên **mọi** lượt quét, lượt enrich và lượt hỏi. Nhớ lại 30 giây: đủ ngắn để một model vừa hết
+#: hạn nghỉ được dùng lại gần như ngay, đủ dài để upload 50 ảnh không thành 50 lần hỏi CLIProxy.
+PAID_ONLY_TTL_SECONDS = 30.0
+
+_paid_only_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+async def paid_only_models(user: User) -> frozenset[str]:
+    """Model mà **tài khoản Google của người này** bị từ chối vì gói cước (I-42).
+
+    Đọc từ `cooldowns` của đúng credential họ đang dùng, không phải từ một bảng trong mã. Lý do
+    đã đo được: `gemini-3-flash` trả `403 payment_required` với `quanpyke1@gmail.com` nhưng chạy
+    tốt với `quanpyke@gmail.com` — "Pro" là thuộc tính của **cặp** *(tài khoản, model)*.
+
+    Hỏng thì trả rỗng chứ không ném: không đọc được cooldown là chuyện của CLIProxy, không đáng
+    làm hỏng lượt quét. Hệ quả xấu nhất là người dùng gặp lại đúng lỗi cũ — kèm câu giải thích
+    đúng của `llm._explain_no_credential()`.
+    """
+    name = user.cliproxy_auth_file
+    if not name:
+        return frozenset()
+
+    now = time.monotonic()
+    cached = _paid_only_cache.get(name)
+    if cached is not None and now - cached[0] < PAID_ONLY_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        async with CliProxyClient() as proxy:
+            files = own_files(await proxy.auth_files(), user)
+    except CliProxyError as exc:
+        logger.info("Không đọc được cooldown của %s: %s", name, exc)
+        return frozenset()
+
+    blocked = (
+        frozenset[str]().union(*(f.paid_only_models() for f in files)) if files else frozenset()
+    )
+    _paid_only_cache[name] = (now, blocked)
+    return blocked
+
+
+def forget_paid_only(user: User | None = None) -> None:
+    """Xoá bộ nhớ cooldown. Gọi sau khi người dùng đổi credential, và trong test."""
+    if user is None or not user.cliproxy_auth_file:
+        _paid_only_cache.clear()
+    else:
+        _paid_only_cache.pop(user.cliproxy_auth_file, None)
 
 
 def own_files(files: Sequence[AuthFile], user: User) -> list[AuthFile]:

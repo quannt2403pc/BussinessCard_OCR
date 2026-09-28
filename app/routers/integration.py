@@ -35,6 +35,7 @@ from app.core.db import get_db
 from app.core.security import CurrentUser
 from app.core.templates import templates
 from app.models.integration import IntegrationStatus
+from app.models.user import User
 from app.repositories import model_pref as pref_repo
 from app.schemas.model_pref import FeatureModelsOut, ModelPrefsIn, ModelPrefsOut
 from app.services import llm, model_catalog, user_credentials
@@ -205,7 +206,21 @@ async def get_status(
     detail = None
     if files and not usable:
         # Có credential nhưng CLIProxy đánh dấu hỏng — badge phải đỏ, kèm lý do.
-        detail = "Credential đã lưu nhưng CLIProxy đánh dấu không dùng được. Hãy kết nối lại."
+        #
+        # I-42: câu cũ là *"Hãy kết nối lại"*, và đó là ngõ cụt. Đo thật 2026-09-28: Google
+        # chặn tài khoản với `403 VALIDATION_REQUIRED — "Verify your account to continue."`,
+        # kèm sẵn link xác minh trong `status_message`. Đăng nhập lại mười lần cũng ra đúng
+        # tài khoản chưa xác minh ấy; thứ người dùng cần là **đường link kia**.
+        block = next((b for f in files if (b := f.provider_block) is not None), None)
+        if block is not None:
+            viec_can_lam = (
+                f" Mở {block.action_url} để xác minh rồi bấm Làm mới."
+                if block.needs_verification and block.action_url
+                else " Kết nối bằng tài khoản Google khác."
+            )
+            detail = f"Google từ chối tài khoản này: {block.one_line}{viec_can_lam}"
+        else:
+            detail = "Credential đã lưu nhưng CLIProxy đánh dấu không dùng được. Hãy kết nối lại."
 
     return IntegrationStatusOut(
         provider=provider,
@@ -440,6 +455,8 @@ async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
     """Dựng trạng thái khối chọn model. Dùng chung cho cả `GET` lẫn câu trả lời của `PUT`."""
     catalogue = await model_catalog.catalogue()
     choices = await pref_repo.as_dict(db, user_id)
+    owner = await db.get(User, user_id)
+    paid_only = await user_credentials.paid_only_models(owner) if owner else frozenset()
 
     features: list[FeatureModelsOut] = []
     for feature in model_catalog.FEATURES:
@@ -458,7 +475,10 @@ async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
             )
         )
     return ModelPrefsOut(
-        default_model=settings.llm_model, reachable=bool(catalogue), features=features
+        default_model=settings.llm_model,
+        reachable=bool(catalogue),
+        features=features,
+        paid_only=sorted(paid_only),
     )
 
 
