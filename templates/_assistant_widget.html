@@ -39,13 +39,10 @@
   </button>
 
   {# --- panel ---
-     Desktop: 380×560 neo góc phải dưới, bấm `⤢` thì phóng to giữa màn hình (EX-08). Dưới 640px:
-     tấm phủ toàn màn hình — panel 380px trên điện thoại 375px thì vừa tràn ngang vừa không còn
-     chỗ gõ, và ở cỡ đó thì "phóng to" không còn nghĩa gì nên lớp `.assistant-wide` cũng tắt.
-
-     `max-h` trừ 11rem = 96px lề dưới + 64px header + 16px thở. Đo ở 14.10 trên cửa sổ cao
-     639px: để 8rem thì panel trèo lên che mất header, nửa cái icon tài khoản thò ra trên
-     nóc panel. #}
+     Desktop: 380×560 neo góc phải dưới, bấm `⤢` thì phóng to giữa màn hình. Dưới 640px: tấm phủ
+     toàn màn hình, và lớp `.assistant-wide` tắt vì "phóng to" không còn nghĩa gì.
+     `max-h` trừ 11rem = 96px lề dưới + 64px header + 16px thở — để 8rem thì panel trèo lên che
+     mất header. #}
   <div id="assistant-panel" data-w="panel" hidden
        role="dialog" aria-modal="false" aria-label="Trợ lý AI"
        class="z-panel fixed inset-0 flex flex-col border-slate-200 bg-white/95 shadow-lg backdrop-blur
@@ -55,8 +52,8 @@
       <span class="text-brand-600">{{ icon("sparkles") }}</span>
       <span class="text-sm font-semibold text-brand-ink">Trợ lý AI</span>
 
-      {# Nút phóng to: `aria-pressed` chứ không đổi thành hai nút — với trình đọc màn hình đây là
-         một công tắc hai trạng thái, và nhãn phải nói trạng thái **sắp tới** khi bấm. #}
+      {# `aria-pressed` chứ không đổi thành hai nút: với trình đọc màn hình đây là một công tắc
+         hai trạng thái, và nhãn phải nói trạng thái **sắp tới** khi bấm. #}
       <button type="button" data-w="wide" aria-pressed="false"
               class="btn-icon ml-auto hidden sm:inline-flex" aria-label="Phóng to">
         {{ icon("expand", "sm") }}
@@ -69,8 +66,8 @@
       </button>
     </header>
 
-    {# Bộ lọc phạm vi, kéo từ trang `/assistant` cũ sang (EX-09). Một hàng riêng chứ không nhét
-       vào hàng tiêu đề: ở 375px thì tiêu đề + select + 3 nút 44px không đủ chỗ trên một dòng. #}
+    {# Bộ lọc phạm vi, một hàng riêng chứ không nhét vào hàng tiêu đề: ở 375px thì tiêu đề +
+       select + 3 nút 44px không đủ chỗ trên một dòng. #}
     <div class="border-b border-slate-200 px-4 py-2">
       <label class="sr-only" for="w-scope">Phạm vi dữ liệu</label>
       <select id="w-scope" data-a="scope"

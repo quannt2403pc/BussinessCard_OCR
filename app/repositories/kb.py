@@ -1,32 +1,17 @@
 """Repository `kb_chunks` — đọc/ghi Knowledge Base của F3.
 
-Chủ sở hữu: Q | Task: 6.3 | xem Task.md
+Chủ sở hữu: Q | Task: 6.3
 
-Ba việc, đúng ranh giới của một repository (router/service lo nghiệp vụ, file này lo câu SQL):
+Ba việc: ghi đè chunk theo nguồn (`replace_chunks`), duyệt dữ liệu cần index theo khoá chứ không
+`OFFSET` (`card_batch`, `profile_batch`), và hai cách tìm mỗi cách một câu SQL (`search_similar`,
+`search_fulltext`). Cả hai chỉ trả *ứng viên đã xếp hạng* — ngưỡng điểm và việc trộn là của
+`services/retriever.py`.
 
-1. **Ghi đè chunk theo nguồn** (`replace_chunks`) — index lại một danh thiếp/hồ sơ nhiều lần
-   phải ra cùng một kết quả, không cộng dồn bản cũ.
-2. **Duyệt dữ liệu cần index** (`card_batch`, `profile_batch`) — phân trang theo khoá chứ không
-   `OFFSET`, để `POST /api/kb/reindex` (6.4) không phải nạp cả bảng vào RAM.
-3. **Hai cách tìm, mỗi cách một câu SQL** — `search_similar` (vector, task 7.1) và
-   `search_fulltext` (full-text, task 7.2). Cả hai chỉ trả *ứng viên đã xếp hạng*; ngưỡng điểm
-   và việc trộn hai danh sách là của `services/retriever.py`, cố ý không nằm ở đây.
+**`workspace_id` là tham số bắt buộc của mọi hàm đọc/ghi ở đây.** Rò một chunk không hiện ra ở
+danh sách nào cả, nó đi thẳng vào ngữ cảnh của trợ lý rồi ra thành một câu trả lời tự tin về dữ
+liệu của người khác. Hai nhánh tìm kiếm đều nhận điều kiện qua **cùng một** `scope_filters()`.
 
-Index `ivfflat` (cosine) do revision `0003` tạo và `models/kb.py` khai — xem ghi chú ở đó về
-lý do tạo muộn.
-
-**Task 12.5 — `workspace_id` là tham số bắt buộc của mọi hàm đọc/ghi ở đây.** Đây là file quyết định
-tiêu chí **A9**: rò một chunk không hiện ra ở danh sách nào cả, nó đi thẳng vào ngữ cảnh của trợ
-lý AI rồi ra thành một câu trả lời tự tin về dữ liệu của người khác. Hai nhánh tìm kiếm đều nhận
-điều kiện `workspace_id` qua **cùng một** hàm `scope_filters()` — chép điều kiện lọc ra hai chỗ là
-cách chắc chắn nhất để một hôm nào đó chúng lệch nhau.
-
-Riêng `rebuild_vector_index()` là lệnh `REINDEX` trên cả index, không có khái niệm người dùng —
-xem ghi chú tại hàm.
-
-**Không hàm nào trong file này commit.** Một lượt reindex ghi hàng chục nguồn; commit từng
-nguồn thì nửa chừng hỏng là KB ở trạng thái nửa cũ nửa mới, còn để chỗ gọi quyết định thì nó
-gom được đúng một batch vào một transaction (xem `services/kb.py::index_documents`).
+**Không hàm nào trong file này commit** — chỗ gọi gom cả batch vào một transaction.
 """
 
 from __future__ import annotations
@@ -46,43 +31,32 @@ from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company, CompanyProfile
 from app.models.kb import IVFFLAT_LISTS, KBChunk, KBSourceType
 
-#: Chỉ danh thiếp **đã xác nhận** mới vào KB. Bản `pending`/`needs_review` là dữ liệu model
-#: đoán, chưa ai duyệt — đưa vào KB là để trợ lý trả lời bằng thông tin chưa được kiểm
-#: (rủi ro R3/R4). Luồng 1 trong Plan.md mục 2.2 cũng chỉ sinh embedding sau bước xác nhận.
+#: Chỉ danh thiếp **đã xác nhận** mới vào KB. Bản `pending`/`needs_review` là dữ liệu model đoán,
+#: chưa ai duyệt — đưa vào KB là để trợ lý trả lời bằng thông tin chưa được kiểm (R3/R4).
 INDEXABLE_CARD_STATUSES = (CardStatus.CONFIRMED,)
 
-#: Hồ sơ `draft` là hồ sơ đang chạy dở (task 5.4) — chưa có nội dung thật để index.
-#: Cùng cách hiểu với bộ lọc `has_profile` của T ở `repositories/company.py`.
+#: Hồ sơ `draft` là hồ sơ đang chạy dở — chưa có nội dung thật để index.
 INDEXABLE_PROFILE_STATUSES = ("generated", "verified")
 
 #: Tên index vector — trùng `models/kb.py` và revision `0003`.
 VECTOR_INDEX_NAME = "ix_kb_chunks_embedding"
 
-#: Số cụm `ivfflat` dò mỗi lượt tìm. **Đặt bằng đúng `lists` là cố ý** — đây là điểm còn treo
-#: mà I-22 để lại cho task 7.1.
-#:
-#: `ivfflat` mặc định `probes = 1`: chỉ dò **một** trong `lists` cụm, nên chunk đúng nằm ở cụm
-#: khác là không bao giờ trả về — mất recall một cách im lặng, không có lỗi nào báo. Với
-#: `lists = 10` và KB cỡ vài trăm chunk của bản demo thì `probes = lists` nghĩa là quét hết,
-#: tức **tìm chính xác** chứ không còn xấp xỉ, mất cỡ vài mili giây. Đổi lấy tốc độ chỉ đáng khi
-#: KB lớn hơn nhiều bậc; lúc đó hạ số này xuống và đo lại recall (tiền lệ đo ở task 7.4).
+#: Số cụm `ivfflat` dò mỗi lượt tìm. **Đặt bằng đúng `lists` là cố ý**: mặc định `probes = 1` chỉ
+#: dò một cụm, nên chunk đúng nằm ở cụm khác là không bao giờ trả về — mất recall im lặng. Ở quy
+#: mô KB vài trăm chunk thì quét hết mọi cụm mất vài mili giây. KB lớn hơn nhiều bậc thì hạ số
+#: này xuống và đo lại recall.
 VECTOR_PROBES = IVFFLAT_LISTS
 
-#: Từ điển full-text cho nhánh tìm theo từ khoá (task 7.2).
+#: Từ điển full-text cho nhánh tìm theo từ khoá. `simple` = chỉ tách token và hạ hoa thường,
+#: **không** stemming, **không** bỏ stopword — đúng thứ cần để bắt tên riêng, email, số điện
+#: thoại, mã số thuế. Dùng `english` thì mọi từ tiếng Việt trùng hình thức stopword tiếng Anh
+#: ("a", "so", "the") bị ném đi.
 #:
-#: `simple` = chỉ tách token và hạ hoa thường, **không** stemming, **không** bỏ stopword. Đúng
-#: thứ cần ở đây: Postgres không có cấu hình tiếng Việt, mà nhánh này sinh ra để bắt **tên riêng,
-#: email, số điện thoại, mã số thuế** — những chuỗi mà stemming chỉ làm hỏng. Dùng `english` thì
-#: "Hoa" bị cắt gốc thành "hoa" chung với "hoas", và mọi từ tiếng Việt trùng hình thức stopword
-#: tiếng Anh ("a", "so", "the") bị ném đi.
-#:
-#: ⚠️ `simple` **không bỏ dấu**: gõ "cong ty" sẽ không khớp "công ty". Đó là việc của nhánh
-#: vector (model nhúng đa ngôn ngữ chịu được thiếu dấu), không phải của nhánh này — chia việc
-#: như vậy nên mới cần cả hai (xem `services/retriever.py`).
+#: ⚠️ `simple` **không bỏ dấu**: gõ "cong ty" sẽ không khớp "công ty". Đó là việc của nhánh vector.
 FTS_CONFIG = "simple"
 
 #: Số nguồn đọc mỗi lượt khi reindex. Nhỏ để không giữ transaction lâu, đủ lớn để một lời gọi
-#: embedder gánh được nhiều đoạn (trần một request là 32 — `services/embeddings.MAX_BATCH`).
+#: embedder gánh được nhiều đoạn (trần một request là 32).
 BATCH_SIZE = 20
 
 
@@ -105,9 +79,9 @@ async def replace_chunks(
 ) -> int:
     """Xoá sạch chunk cũ của một nguồn rồi ghi bộ mới. Trả về số chunk đã ghi.
 
-    Xoá-rồi-ghi chứ không `UPDATE` từng dòng: số chunk của một hồ sơ thay đổi theo độ dài mô tả
-    model trả về, nên không có khoá nào để ghép cặp dòng cũ với dòng mới. Bỏ bước xoá thì mỗi
-    lần "Tạo lại hồ sơ" (task 6.7) lại nhân đôi dữ liệu trong KB và trợ lý trích dẫn bản cũ.
+    Xoá-rồi-ghi chứ không `UPDATE` từng dòng: số chunk đổi theo độ dài mô tả model trả về nên
+    không có khoá nào ghép cặp dòng cũ với dòng mới. Bỏ bước xoá thì mỗi lần "Tạo lại hồ sơ" lại
+    nhân đôi dữ liệu trong KB.
     """
     await delete_for_source(
         db, workspace_id=workspace_id, source_type=source_type, source_id=source_id
@@ -136,14 +110,12 @@ async def delete_for_source(
     source_type: KBSourceType | str,
     source_id: uuid.UUID,
 ) -> int:
-    """Gỡ một nguồn khỏi KB (xoá danh thiếp ở 4.2, hoặc trước khi ghi lại). Trả số dòng đã xoá.
+    """Gỡ một nguồn khỏi KB. Trả số dòng đã xoá.
 
-    `workspace_id` trong `WHERE` không phải để chống rò (id nguồn là UUID của chính người đó) mà để
-    **chặn xoá chéo**: một lỗi lập trình truyền sang id của người khác thì câu này không xoá gì
-    cả, thay vì âm thầm móc KB của họ.
+    `workspace_id` trong `WHERE` không phải để chống rò mà để **chặn xoá chéo**: một lỗi lập
+    trình truyền sang id của người khác thì câu này không xoá gì cả.
     """
-    # `Session.execute()` khai kiểu trả về là `Result`; chỉ câu DML mới có `rowcount`, nên
-    # phải nói rõ với mypy thay vì gắn `# type: ignore` mù.
+    # `Session.execute()` khai kiểu trả về là `Result`; chỉ câu DML mới có `rowcount`.
     result = cast(
         "CursorResult[Any]",
         await db.execute(
@@ -173,18 +145,13 @@ async def count_chunks(
 async def rebuild_vector_index(db: AsyncSession) -> None:
     """`REINDEX` index `ivfflat` — **bắt buộc chạy sau khi ghi xong một lượt reindex đầy đủ**.
 
-    Không phải tối ưu hoá, mà là điều kiện để tìm kiếm ra kết quả. `ivfflat` học phân cụm từ dữ
-    liệu **có sẵn lúc index được tạo**; revision `0003` chạy khi `kb_chunks` còn rỗng nên các
-    centroid vô nghĩa. Đo thật 2026-09-16 trên pgvector/pg16: index tạo lúc bảng rỗng, chèn 3
-    dòng rồi `ORDER BY v <=> …` chỉ trả về **1** dòng; `REINDEX` xong trả đủ **3**.
+    Không phải tối ưu hoá mà là điều kiện để tìm kiếm ra kết quả: `ivfflat` học phân cụm từ dữ
+    liệu **có sẵn lúc index được tạo**, mà migration chạy khi `kb_chunks` còn rỗng. Đo thật: index
+    tạo lúc bảng rỗng, chèn 3 dòng rồi tìm chỉ trả về **1**; `REINDEX` xong trả đủ **3**.
 
-    `REINDEX INDEX` (không `CONCURRENTLY`) khoá bảng trong lúc chạy. Chấp nhận được vì đây là
-    thao tác quản trị trên KB cỡ vài trăm dòng, mất vài chục mili giây.
-
-    **Cố ý không có `workspace_id`** (task 12.5): index là một cấu trúc của cả bảng, không chia theo
-    người dùng được. Nó không đọc và không trả về dữ liệu của ai, nên không phải đường rò; đổi
-    lại, một người bấm "Index lại" sẽ khoá bảng `kb_chunks` trong vài chục mili giây của mọi
-    người — cái giá đúng với quy mô hai tài khoản của bản demo.
+    `REINDEX INDEX` (không `CONCURRENTLY`) khoá bảng vài chục mili giây — chấp nhận được ở quy mô
+    này. **Cố ý không có `workspace_id`**: index là cấu trúc của cả bảng, không chia theo người
+    dùng được, và nó không đọc/trả về dữ liệu của ai nên không phải đường rò.
     """
     await db.execute(text(f"REINDEX INDEX {VECTOR_INDEX_NAME}"))
 
@@ -199,11 +166,9 @@ async def card_batch(
     """Một lô danh thiếp cần index, kèm **tên công ty đã chuẩn hoá** (có thể `None`).
 
     Phân trang theo khoá (`id > after`) chứ không `OFFSET`: reindex vừa đọc vừa ghi, mà `OFFSET`
-    trên tập đang thay đổi thì bản ghi bị nhảy cóc hoặc lặp lại. `id` là UUID nên thứ tự không
-    có ý nghĩa nghiệp vụ — ở đây chỉ cần nó **ổn định và duy nhất**, đủ để duyệt hết đúng một lần.
+    trên tập đang thay đổi thì bản ghi bị nhảy cóc hoặc lặp lại.
 
-    Lấy kèm `display_name` bằng `LEFT JOIN` thay vì để `services/kb.py` tự truy vấn từng thẻ:
-    30 danh thiếp là 30 lời gọi DB thừa, và tên công ty là thứ luôn cần khi serialize (6.2).
+    Lấy kèm `display_name` bằng `LEFT JOIN` để `services/kb.py` khỏi truy vấn từng thẻ.
     """
     query = (
         select(BusinessCard, Company.display_name)
@@ -231,8 +196,8 @@ async def profile_batch(
 ) -> Sequence[tuple[CompanyProfile, Company]]:
     """Một lô hồ sơ doanh nghiệp cần index, kèm công ty tương ứng.
 
-    `INNER JOIN`: hồ sơ không có công ty là dữ liệu hỏng (khoá ngoại `NOT NULL` đã chặn), và
-    thiếu tên công ty thì đoạn văn index được cũng không dùng để trả lời được câu nào.
+    `INNER JOIN`: hồ sơ không có công ty là dữ liệu hỏng, và thiếu tên công ty thì đoạn văn index
+    được cũng không trả lời được câu nào.
     """
     query = (
         select(CompanyProfile, Company)
@@ -257,23 +222,14 @@ def scope_filters(
     source_type: KBSourceType | str | None = None,
     company_id: uuid.UUID | None = None,
 ) -> list[ColumnElement[bool]]:
-    """Điều kiện thu hẹp phạm vi tìm kiếm, dùng chung cho **cả hai** nhánh (task 8.5 + 12.5).
+    """Điều kiện thu hẹp phạm vi tìm kiếm, dùng chung cho **cả hai** nhánh.
 
-    `workspace_id` là điều kiện đầu tiên và **không tắt được bằng tham số nào** — khác hẳn hai bộ lọc
-    dưới, vốn do người dùng chọn trên giao diện. Đây là ranh giới của tiêu chí A9.
+    `workspace_id` là điều kiện đầu tiên và **không tắt được bằng tham số nào**, khác hai bộ lọc
+    dưới vốn do người dùng chọn. Một hàm chứ không chép hai lần: hai nhánh lọc lệch nhau thì kết
+    quả trộn ra một tập nửa trong phạm vi nửa ngoài, và không có lỗi nào báo.
 
-    Một hàm chứ không chép hai lần: hai nhánh lọc lệch nhau thì kết quả trộn ra một tập hỗn hợp
-    nửa trong phạm vi nửa ngoài — trợ lý trích dẫn đúng một công ty mà người dùng không hề chọn,
-    và không có lỗi nào báo.
-
-    `company_id` đọc từ **metadata** chứ không từ cột: `kb_chunks.source_id` là id danh thiếp ở
-    chunk danh thiếp nhưng lại là id **công ty** ở chunk hồ sơ (xem `services/kb.py::
-    build_profile_document`), nên lọc theo cột sẽ bỏ sót đúng một nửa. `services/kb.py` ghi
-    `metadata.company_id` cho cả hai loại nguồn chính là để có một khoá chung như thế này.
-
-    Danh thiếp chưa gắn công ty có `metadata.company_id = null`; `->> 'company_id'` trả `NULL`
-    nên nó không bao giờ khớp — đúng ý: chưa biết thuộc công ty nào thì không thuộc phạm vi
-    công ty nào cả.
+    `company_id` đọc từ **metadata** chứ không từ cột: `source_id` là id danh thiếp ở chunk danh
+    thiếp nhưng là id **công ty** ở chunk hồ sơ, nên lọc theo cột sẽ bỏ sót đúng một nửa.
     """
     filters: list[ColumnElement[bool]] = [KBChunk.workspace_id == workspace_id]
     if source_type is not None:
@@ -294,25 +250,17 @@ async def search_similar(
 ) -> Sequence[tuple[KBChunk, float]]:
     """Top-k chunk gần nhất theo **khoảng cách cosine** (0 = trùng khớp, 2 = ngược hướng).
 
-    Trả thẳng khoảng cách chứ không đổi sang "điểm tương đồng": đổi ở đây thì `retriever.py`
-    (7.1) lại phải đoán xem con số đang là khoảng cách hay điểm. Một quy ước, một chỗ đổi.
+    Trả thẳng khoảng cách chứ không đổi sang "điểm tương đồng" — một quy ước, một chỗ đổi.
 
     Toán tử `<=>` là thứ index `ivfflat … vector_cosine_ops` phục vụ; đổi sang khoảng cách khác
-    (L2, tích vô hướng) thì câu truy vấn vẫn chạy nhưng **bỏ qua index** và quét toàn bảng.
+    thì câu truy vấn vẫn chạy nhưng **bỏ qua index** và quét toàn bảng.
 
-    Lọc phạm vi (task 8.5) là mệnh đề `WHERE` **bên cạnh** index vector, tức Postgres lọc rồi mới
-    lấy `LIMIT` — cái bẫy quen thuộc của ANN là lọc sau khi index đã cắt còn k dòng thì kết quả
-    rỗng dù dữ liệu có thật. Ở đây không dính vì `VECTOR_PROBES = lists` quét hết mọi cụm; nếu
-    sau này hạ `probes` xuống thì phải đo lại đúng trường hợp lọc hẹp (một công ty ít chunk).
-
-    ⚠️ **`workspace_id` phải nằm trong `WHERE` của chính câu này** (task 12.5), không được sàng lại
-    danh sách trả về: sàng sau thì top-5 của A bị chunk của B chiếm chỗ rồi bị bỏ đi, A hỏi về dữ
-    liệu của chính mình lại nhận "không có thông tin" — vừa rò (ranking phụ thuộc dữ liệu người
-    khác) vừa sai.
+    ⚠️ **`workspace_id` phải nằm trong `WHERE` của chính câu này**, không được sàng lại danh sách
+    trả về: sàng sau thì top-5 của A bị chunk của B chiếm chỗ rồi bị bỏ đi — vừa rò vừa sai.
     """
-    # `SET LOCAL` chứ không `SET`: chỉ có hiệu lực tới hết transaction hiện tại, nên không rò
-    # sang request khác đang dùng chung connection trong pool. Không truyền được tham số bind cho
-    # câu `SET` nên phải nội suy — giá trị là hằng int của chính module này, không đến từ người dùng.
+    # `SET LOCAL` chứ không `SET`: chỉ có hiệu lực tới hết transaction nên không rò sang request
+    # khác dùng chung connection. Nội suy vì `SET` không nhận tham số bind — giá trị là hằng int
+    # của chính module này.
     await db.execute(text(f"SET LOCAL ivfflat.probes = {VECTOR_PROBES:d}"))
 
     distance = KBChunk.embedding.cosine_distance(list(embedding)).label("distance")
@@ -329,12 +277,10 @@ async def search_similar(
 def content_tsvector() -> ColumnElement[Any]:
     """`to_tsvector('simple', content)` — biểu thức dùng chung cho cả mệnh đề lọc lẫn xếp hạng.
 
-    Một hàm thay vì chép biểu thức hai lần: nếu chỗ lọc và chỗ tính điểm lệch cấu hình từ điển
-    thì câu truy vấn vẫn chạy, chỉ là điểm xếp hạng tính trên một cách tách token khác với cách
-    đã dùng để tìm — sai âm thầm, đúng loại lỗi khó truy nhất.
+    Một hàm thay vì chép hai lần: lọc và tính điểm lệch cấu hình từ điển thì câu truy vấn vẫn
+    chạy, chỉ là điểm tính trên một cách tách token khác — sai âm thầm.
 
-    `sa_cast(literal(...), REGCONFIG)` chứ không truyền thẳng chuỗi: dạng hai tham số của
-    `to_tsvector` nhận `regconfig`, gửi một bind param kiểu text vào đó là để Postgres tự đoán.
+    `sa_cast(literal(...), REGCONFIG)` vì dạng hai tham số của `to_tsvector` nhận `regconfig`.
     """
     return func.to_tsvector(sa_cast(literal(FTS_CONFIG), REGCONFIG), KBChunk.content)
 
@@ -350,31 +296,17 @@ async def search_fulltext(
 ) -> Sequence[tuple[KBChunk, float]]:
     """Top-k chunk chứa **ít nhất một** trong `terms`, kèm điểm `ts_rank_cd` (càng lớn càng khớp).
 
-    Nhận **danh sách từ khoá đã chọn lọc**, không nhận cả câu hỏi. Ranh giới đó là kết quả của
-    một lỗi đo được khi viết test 7.4, đáng ghi lại vì tài liệu Postgres rất dễ làm hiểu nhầm:
-
-    > `websearch_to_tsquery('simple', 'ai dùng email a.nguyen@abc.vn?')`
-    > → `'ai' & 'dùng' & 'email' & 'a.nguyen@abc.vn'`
-
-    `websearch_to_tsquery` **nối mọi từ bằng `AND`** (cái nó thêm so với `plainto_tsquery` chỉ là
-    cú pháp nháy kép / `OR` / `-`, không phải mặc định `OR`). Nên đưa nguyên câu hỏi vào là đòi
-    chunk phải chứa cả "ai" lẫn "dùng" — nhánh full-text chỉ chạy đúng với truy vấn **một từ**,
-    và hỏng im lặng với mọi câu hỏi thật.
-
-    Chuyển sang `OR` cả câu cũng sai, theo hướng ngược lại: `ts_rank_cd` **không có IDF**, nên
-    "ai" trong một chunk được tính ngang với địa chỉ email trong chunk khác, và nhánh này trả về
-    cả KB theo thứ tự gần như ngẫu nhiên. Lời giải là lọc từ khoá **trước** khi xuống đây —
-    `services/retriever.py::query_terms()`.
+    Nhận **danh sách từ khoá đã chọn lọc**, không nhận cả câu hỏi. `websearch_to_tsquery` nối mọi
+    từ bằng `AND`, nên đưa nguyên câu hỏi vào là đòi chunk phải chứa cả "ai" lẫn "dùng" — hỏng im
+    lặng với mọi câu hỏi thật. Chuyển sang `OR` cả câu cũng sai theo hướng ngược lại: `ts_rank_cd`
+    không có IDF nên nhánh này trả về cả KB theo thứ tự gần như ngẫu nhiên. Lọc từ khoá **trước**
+    khi xuống đây — `services/retriever.py::query_terms()`.
 
     Ghép các từ bằng `plainto_tsquery(cfg, :term) || …` chứ không nối chuỗi tsquery: mỗi từ đi
-    xuống dưới dạng tham số bind nên không có đường nào để một dấu `&` hay `!` người dùng gõ vào
-    trở thành cú pháp tsquery, và câu này **không bao giờ ném lỗi cú pháp**.
+    xuống dưới dạng tham số bind nên câu này **không bao giờ ném lỗi cú pháp**.
 
-    Không có index nào phục vụ câu này: KB của bản demo cỡ vài trăm chunk nên Postgres quét bảng
-    và tính `to_tsvector` tại chỗ trong khoảng một mili giây. Muốn index thì phải là index biểu
-    thức (`GIN (to_tsvector('simple', content))`) **và** khai lại đúng biểu thức đó trong model,
-    nếu không mỗi lần autogenerate lại sinh một cặp drop/create thừa — cái giá đó chỉ đáng khi
-    KB lớn hơn hẳn. Số đo ở task 7.4.
+    Không có index nào phục vụ câu này — KB cỡ vài trăm chunk nên Postgres quét bảng trong khoảng
+    một mili giây. Index biểu thức chỉ đáng khi KB lớn hơn hẳn.
     """
     if not terms:
         return []
@@ -398,8 +330,8 @@ async def search_fulltext(
 def _tsquery_or(terms: Sequence[str]) -> ColumnElement[Any]:
     """`plainto_tsquery(term₁) || plainto_tsquery(term₂) || …` — khớp bất kỳ từ khoá nào.
 
-    Một từ khoá gồm nhiều tiếng ("Hòa Phát") vẫn được `plainto_tsquery` nối bằng `AND` bên trong
-    nó, đúng ý: cả cụm phải xuất hiện thì mới tính là khớp cái tên đó.
+    Một từ khoá nhiều tiếng ("Hòa Phát") vẫn được nối bằng `AND` bên trong nó: cả cụm phải xuất
+    hiện mới tính là khớp.
     """
     config = sa_cast(literal(FTS_CONFIG), REGCONFIG)
     query: ColumnElement[Any] = func.plainto_tsquery(config, terms[0])

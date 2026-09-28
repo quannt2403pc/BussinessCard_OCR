@@ -1,13 +1,10 @@
 /**
  * Ô thông báo dùng chung cho mọi trang.
  *
- * Chủ sở hữu: Q | Task: 14.8 (D14) | luật ở docs/ui-kit.md mục 5
+ * Chủ sở hữu: Q | Task: 14.8 | luật ở docs/ui-kit.md mục 5
  *
- * Vì sao gom ra đây: trước D14 có **năm bản copy** của cùng một hàm `message(text, kind)` nằm rải
- * trong `cards/list.html`, `cards/upload.html`, `cards/detail.html`, `cards/batch.html`,
- * `settings.html` — và chúng đã kịp lệch nhau (chỗ nền xanh, chỗ nền lục cho cùng một loại tin).
- * Hai luật mới của `14.1` — *thành công tự tắt sau 4s, lỗi ở lại kèm nút thử lại* — nếu vẫn để
- * năm chỗ thì phải sửa năm lần và chắc chắn sót một.
+ * Gom ra đây vì trước D14 có **năm bản copy** của cùng một hàm `message(text, kind)`, và chúng đã
+ * kịp lệch nhau về màu nền cho cùng một loại tin.
  *
  *     toastShow(box, "Đã lưu.", "success");
  *     toastShow(box, "Tải ảnh không xong. Thử lại.", "error", () => upload(file));
@@ -29,16 +26,14 @@
   //: Tin vui tự tắt; tin xấu ở lại. Thông báo lỗi biến mất trước khi đọc xong là lỗi mất luôn.
   const AUTO_HIDE = { success: 4000, info: 4000 };
 
-  //: "ok" là tên các trang của Q dùng từ D4. Nhận cả hai thay vì đi sửa 12 chỗ gọi — và để
-  //: mặc định về `info`, không về `success`: trước D14 mỗi file mặc định một kiểu (list.html
-  //: xanh lục, batch.html xanh dương) cho cùng một lời gọi thiếu tham số.
+  //: Nhận cả "ok" (tên các trang dùng từ D4) thay vì đi sửa 12 chỗ gọi. Mặc định về `info`,
+  //: không về `success`.
   const ALIAS = { ok: "success" };
 
   const timers = new WeakMap();
 
-  //: Lớp lề của ô thông báo do chính markup quyết định (`data-toast-class`), mặc định `mt-4`.
-  //: Ô trong hộp thoại của /settings dùng `mt-5`; ép cứng ở đây là mỗi lần báo tin hộp thoại lại
-  //: nhảy lên 4px.
+  //: Lớp lề do chính markup quyết định (`data-toast-class`), mặc định `mt-4`: ép cứng ở đây thì
+  //: ô trong hộp thoại của /settings nhảy lên 4px mỗi lần báo tin.
   function baseClass(box) {
     return (box.dataset.toastClass || "mt-4") + " rounded-md px-4 py-3 text-sm";
   }

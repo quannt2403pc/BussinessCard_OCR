@@ -1,16 +1,14 @@
 """Chuẩn hoá SĐT/email đa định dạng & đa quốc gia (hậu xử lý F1).
 
-Chủ sở hữu: Q | Task: 4.10 | xem Task.md
+Chủ sở hữu: Q | Task: 4.10
 
-Kiểm `app/services/normalize.py` (task 3.6). Toàn bộ là hàm thuần — không DB, không mạng, không
-cần fixture của `conftest.py` (task 6.1) — nên chạy được ngay bằng `pytest` trần.
+Toàn bộ là hàm thuần — không DB, không mạng — nên chạy được bằng `pytest` trần.
 
-Hai thứ file này canh, vì đó là hai chỗ hỏng thật sự làm dữ liệu sai mà không ai thấy:
+Hai chỗ hỏng thật sự làm dữ liệu sai mà không ai thấy:
 
-1. **Mã vùng suy từ `language_detected`.** `0912345678` là số Việt hay số Nhật hoàn toàn phụ
-   thuộc trường này. Suy sai thì E.164 ra một số trông rất chuẩn nhưng gọi không được.
-2. **"Không chuẩn hoá được" phải trả bản đã dọn, không trả `None`.** Nguyên tắc "không vứt dữ
-   liệu" ở đầu `normalize.py`: người dùng còn phải review ở task 5.1, mất dữ liệu là mất hẳn.
+1. **Mã vùng suy từ `language_detected`** — suy sai thì E.164 ra một số trông rất chuẩn nhưng
+   gọi không được.
+2. **"Không chuẩn hoá được" phải trả bản đã dọn, không trả `None`** — người dùng còn phải review.
 """
 
 from __future__ import annotations
@@ -65,11 +63,10 @@ def test_normalize_email(raw: str | None, expected: str | None) -> None:
 
 
 def test_chuoi_khong_co_do_cua_CardExtraction_chu_khong_phai_cua_file_nay() -> None:
-    """`"N/A"` → `None` là việc của `CardExtraction` (`schemas/card.py`), không phải của đây.
+    """`"N/A"` → `None` là việc của `CardExtraction`, không phải của đây.
 
-    Ghi lại ranh giới này thành test vì nó rất dễ bị cài đặt hai lần: `normalize.py` chỉ làm
-    sạch định dạng, còn dịch mọi cách model viết "không có" thành `None` nằm ở cửa khẩu dữ liệu
-    phía trước. Trùng lặp thì sau này sửa danh sách marker ở một chỗ, chỗ kia vẫn chạy luật cũ.
+    Ghi ranh giới này thành test vì nó rất dễ bị cài đặt hai lần, và trùng lặp thì sau này sửa
+    danh sách marker ở một chỗ, chỗ kia vẫn chạy luật cũ.
     """
     assert normalize.normalize_email("N/A") == "n/a"
 
@@ -157,10 +154,9 @@ def test_normalize_phone_5_nuoc(raw: str, language: str, expected: str) -> None:
 
 
 def test_cung_mot_chuoi_doc_khac_nhau_theo_ngon_ngu() -> None:
-    """Đây là lý do `language_detected` phải đi kèm: một chuỗi số, ba nước ba số hợp lệ khác nhau.
+    """Lý do `language_detected` phải đi kèm: một chuỗi số, ba nước ba số hợp lệ khác nhau.
 
-    Cả ba đều là số **hợp lệ** ở nước tương ứng, nên không có cách nào phát hiện ra mình suy sai
-    mã vùng bằng cách nhìn kết quả — sai là sai im lặng.
+    Cả ba đều hợp lệ ở nước tương ứng, nên không nhìn kết quả mà biết mình suy sai mã vùng được.
     """
     assert normalize.normalize_phone("0312345678", region="VN") == "+84312345678"
     assert normalize.normalize_phone("0312345678", region="JP") == "+81312345678"

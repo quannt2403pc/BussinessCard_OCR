@@ -1,23 +1,16 @@
 """Thử tìm kiếm Google qua CLIProxy; kiểm tra groundingChunks[].web.uri có ra URL thật không.
 
-Chủ sở hữu: T | Task: 2.7 | xem Task.md
+Chủ sở hữu: T | Task: 2.7
 
-⚠️ **CHƯA CHẠY ĐƯỢC LẦN NÀO** — script viết dựa trên đọc mã nguồn CLIProxyAPI (commit
-`7fac6b15`), chưa kiểm chứng bằng lời gọi thật vì service `cliproxy` chưa tồn tại
-(task 2.1 của Q). Xem `docs/adr-websearch.md` để biết cái gì đã chắc, cái gì còn đoán.
-
-Chạy khi task 2.1 xong và đã kết nối OAuth::
+⚠️ **CHƯA CHẠY ĐƯỢC LẦN NÀO** — viết dựa trên đọc mã nguồn CLIProxyAPI, chưa kiểm chứng bằng lời
+gọi thật. Xem `docs/adr-websearch.md` để biết cái gì đã chắc, cái gì còn đoán.
 
     python scripts/spike_websearch.py --list-models     # model nào hỗ trợ web search
     python scripts/spike_websearch.py --model gemini-3-flash
 
-Ba câu hỏi script này phải trả lời cho F2:
-
-1. Model nào chạy được `googleSearch`? (`supports_web_search` chỉ có sau khi OAuth xong)
-2. Gọi thế nào để bật tìm kiếm?
-3. `groundingChunks[].web.uri` có ra **URL thật** không, hay chỉ là link redirect của Vertex?
-   Đây là câu quan trọng nhất: prompt enrichment (task 2.9) bắt model trả URL nguồn, nếu
-   grounding chỉ đưa link rút gọn không mở được thì cả thiết kế chống bịa R4 phải làm lại.
+Ba câu hỏi phải trả lời cho F2: model nào chạy được `googleSearch`, gọi thế nào để bật, và
+`groundingChunks[].web.uri` có ra **URL thật** không. Câu cuối là quan trọng nhất — nếu grounding
+chỉ đưa link rút gọn không mở được thì cả thiết kế chống bịa R4 phải làm lại.
 """
 
 from __future__ import annotations
@@ -67,9 +60,8 @@ def _get_path(data: object, path: str) -> object:
 def list_models(client: httpx.Client) -> int:
     """Hỏi CLIProxy model nào của channel antigravity chạy được googleSearch.
 
-    `supports_web_search` KHÔNG có trong models.json tĩnh — CLIProxy nạp lúc chạy từ
-    `fetchAvailableModels.webSearchModelIds` (internal/registry/model_registry.go:65-67),
-    nên chỉ đọc được sau khi OAuth xong.
+    `supports_web_search` KHÔNG có trong models.json tĩnh — CLIProxy nạp lúc chạy, nên chỉ đọc
+    được sau khi OAuth xong.
     """
     r = client.get(
         f"{BASE_URL}/v0/management/model-definitions/antigravity",

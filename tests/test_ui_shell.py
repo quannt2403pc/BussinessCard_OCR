@@ -1,18 +1,15 @@
 """Khung giao diện dùng chung: header, bộ nhận diện, bong bóng chat, sprite icon.
 
-Chủ sở hữu: Q | Task: 14.5, 14.7, 14.10 (D14), EX-08/EX-09/EX-11 (EX đợt 2) | xem Task.md
+Chủ sở hữu: Q | Task: 14.5, 14.7, 14.10, EX-08/EX-09/EX-11
 
-Vì sao có file này: ba thứ của D14 đều **không** có test nào chạm tới nếu không viết riêng —
-chúng nằm trong `base.html`, tức là thứ mọi test khác đi qua mà không ai khẳng định gì về nó.
-Ba lỗi cụ thể mà bộ test dưới đây bắt được:
+Ba thứ này nằm trong `base.html` — thứ mọi test khác đi qua mà không ai khẳng định gì về nó. Ba
+lỗi im lặng mà bộ test dưới đây bắt được:
 
-1. Xoá nhầm `logo-mark-64.webp` / `favicon.ico` khi dọn `static/` → tab trình duyệt trống trơn,
-   không một test nào đỏ.
-2. Gỡ trang `/assistant` (EX-09) mà quên `301`, hoặc quên kéo bộ lọc phạm vi và chế độ phóng
-   to sang bong bóng → link hội thoại đã chia sẻ hoá 404, và người dùng mất hai tính năng mà
-   không có gì thay thế. Cả ba thứ đó không một test nào khác chạm tới.
-3. Gõ sai tên icon (`icon("trashh")`) → `<use>` trỏ vào một `#id` không tồn tại, trình duyệt vẽ
-   ô trống **không báo lỗi console**. Đây là lỗi im lặng đúng nghĩa.
+1. Xoá nhầm logo / favicon khi dọn `static/` → tab trình duyệt trống trơn.
+2. Gỡ trang `/assistant` mà quên `301`, hoặc quên kéo bộ lọc phạm vi và chế độ phóng to sang
+   bong bóng → link đã chia sẻ hoá 404 và người dùng mất hai tính năng.
+3. Gõ sai tên icon → `<use>` trỏ vào một `#id` không tồn tại, trình duyệt vẽ ô trống **không báo
+   lỗi console**.
 """
 
 import re
@@ -28,8 +25,7 @@ pytestmark = pytest.mark.anyio
 
 STATIC_DIR: Path = BASE_DIR / "static"
 
-#: File của **Q** đã quét ở task 14.8. `templates/companies/`, `templates/auth/`, `home.html` là
-#: phần của T ở 14.9 — cố ý không đưa vào đây để test không đỏ vì việc của người khác.
+#: File của **Q**. Phần của T cố ý không đưa vào đây để test không đỏ vì việc của người khác.
 Q_TEMPLATES: tuple[Path, ...] = (
     TEMPLATES_DIR / "base.html",
     TEMPLATES_DIR / "_macros.html",
@@ -86,13 +82,10 @@ async def test_ten_san_pham_khong_con_la_ten_repo(app_client, user_a: User) -> N
 
 
 async def test_nav_con_3_muc(app_client, user_a: User) -> None:
-    """QĐ-2 của D14 gộp `Bảng số liệu` vào trang chủ; EX-09 rút tiếp `Trợ lý AI` khỏi nav.
+    """Nav rút còn 3 mục: `Bảng số liệu` gộp vào trang chủ, `Trợ lý AI` thành bong bóng.
 
-    Trước D14 nav có 5 mục + 4 liên kết bên phải = 9 mục một hàng, tràn ngang ở 375px. Trợ lý
-    rời nav vì nó không còn là một trang phải đi tới — bong bóng có mặt sẵn trên mọi trang.
-
-    Khẳng định bằng `href` chứ không bằng nhãn: chữ "Trợ lý AI" vẫn còn trên trang, nằm ở tiêu
-    đề panel bong bóng. Tìm theo nhãn là test xanh trong khi nav vẫn còn nguyên mục cũ.
+    Khẳng định bằng `href` chứ không bằng nhãn: chữ "Trợ lý AI" vẫn còn trên trang ở tiêu đề
+    panel bong bóng, nên tìm theo nhãn là test xanh trong khi nav vẫn còn nguyên mục cũ.
     """
     async with app_client(user_a) as http:
         html = (await http.get("/cards")).text
@@ -131,9 +124,8 @@ async def test_bong_bong_chat_co_tren_moi_trang(app_client, user_a: User) -> Non
 async def test_bong_bong_giu_du_hai_thu_keo_tu_trang_cu(app_client, user_a: User) -> None:
     """EX-08/EX-09: gỡ trang riêng mà bỏ quên hai thứ này là **cắt tính năng**, không phải dọn.
 
-    1. Bộ lọc phạm vi — trang cũ có, panel thì chưa; thiếu nó thì không còn đường hỏi "chỉ trong
-       danh thiếp".
-    2. Nút phóng to — panel 380×560 không đủ để đọc câu trả lời dài kèm danh sách trích dẫn.
+    1. Bộ lọc phạm vi — thiếu nó thì không còn đường hỏi "chỉ trong danh thiếp".
+    2. Nút phóng to — panel 380×560 không đủ đọc câu trả lời dài kèm danh sách trích dẫn.
     """
     async with app_client(user_a) as http:
         html = (await http.get("/")).text
@@ -145,11 +137,9 @@ async def test_bong_bong_giu_du_hai_thu_keo_tu_trang_cu(app_client, user_a: User
 
 
 async def test_duong_dan_assistant_cu_chuyen_huong_ve_trang_chu(app_client, user_a: User) -> None:
-    """EX-09 + QĐ-3: trang riêng đã gỡ, nhưng URL cũ **không được** thành 404.
+    """EX-09: trang riêng đã gỡ, nhưng URL cũ **không được** thành 404.
 
-    `docs/demo-runbook.md`, `docs/test-scenarios.md`, `docs/api.md` và hai dòng gợi ý của
-    `scripts/seed.py` đều trỏ vào `/assistant` — bấm vào một link chết ngay giữa buổi demo là
-    cái giá không đáng trả cho việc xoá sạch một route.
+    Tài liệu demo và hai dòng gợi ý của `scripts/seed.py` đều trỏ vào `/assistant`.
     """
     async with app_client(user_a) as http:
         response = await http.get("/assistant")
@@ -159,10 +149,10 @@ async def test_duong_dan_assistant_cu_chuyen_huong_ve_trang_chu(app_client, user
 
 
 async def test_link_chia_se_hoi_thoai_van_mo_dung_hoi_thoai(app_client, user_a: User) -> None:
-    """`?session=` là đường chia sẻ hội thoại dựng ở 14.5 — nó phải sống sót qua EX-09.
+    """`?session=` là đường chia sẻ hội thoại — nó phải sống sót qua EX-09.
 
-    Bong bóng đọc `?chat=` rồi mở đúng phiên đó (`_assistant_widget.html`), nên chuỗi tham số
-    phải đi trọn từ URL cũ sang URL mới chứ không rơi mất ở bước chuyển hướng.
+    Bong bóng đọc `?chat=` rồi mở đúng phiên đó, nên chuỗi tham số phải đi trọn từ URL cũ sang
+    URL mới chứ không rơi mất ở bước chuyển hướng.
     """
     session_id = uuid.uuid4()
     async with app_client(user_a) as http:
@@ -200,8 +190,7 @@ def test_moi_icon_duoc_goi_deu_co_trong_sprite() -> None:
 def test_sprite_co_du_cap_icon_cua_nut_phong_to() -> None:
     """Nút phóng to đổi icon **bằng JS**, nên test icon ở trên không nhìn thấy hai tên này.
 
-    `_assistant_widget.html` dựng `<use href="…#i-" + name>` từ một biến, không qua macro
-    `icon()` — gõ sai tên ở đó vẫn là lỗi im lặng y hệt, chỉ khác là không regex nào bắt được.
+    Gõ sai tên ở đó vẫn là lỗi im lặng y hệt, chỉ khác là không regex nào bắt được.
     """
     sprite = (STATIC_DIR / "img" / "icons.svg").read_text(encoding="utf-8")
     for name in ("i-expand", "i-collapse"):
@@ -211,9 +200,7 @@ def test_sprite_co_du_cap_icon_cua_nut_phong_to() -> None:
 def test_sprite_co_du_icon_trang_thai_cua_man_hinh_quet() -> None:
     """Bốn badge của *Tiến trình quét* dựng tên icon trong JS, ngoài tầm regex `icon("…")`.
 
-    Cùng điểm mù với nút phóng to ở trên: `cards/upload.html` giữ tên icon trong bảng `BADGES`
-    rồi ghép vào `#i-${name}`, nên gõ sai tên là `<use>` trỏ vào id rỗng — không lỗi, không
-    console, chỉ là badge mất icon và không ai để ý.
+    Gõ sai tên là `<use>` trỏ vào id rỗng — không lỗi, không console, chỉ là badge mất icon.
     """
     sprite = (STATIC_DIR / "img" / "icons.svg").read_text(encoding="utf-8")
     for name in ("i-clock", "i-spinner", "i-check-circle", "i-error"):
@@ -221,17 +208,14 @@ def test_sprite_co_du_icon_trang_thai_cua_man_hinh_quet() -> None:
 
 
 def test_khong_dung_emoji_lam_icon() -> None:
-    """`docs/ui-kit.md` mục 7 chốt **một bộ icon duy nhất** (Lucide qua sprite).
+    """`docs/ui-kit.md` chốt **một bộ icon duy nhất** (Lucide qua sprite).
 
-    Emoji là bộ thứ hai lẻn vào: nó do font hệ thống vẽ nên cùng một trạng thái ra ba hình khác
-    nhau trên Windows / macOS / Android, không nhận `currentColor` nên không đi theo tông màu
-    của badge chứa nó, và trình đọc màn hình đọc ✅ thành "dấu kiểm màu trắng đậm" ngay trước
-    chữ "xong" — lặp một lần thừa.
+    Emoji là bộ thứ hai lẻn vào: font hệ thống vẽ nên cùng một trạng thái ra ba hình khác nhau
+    trên Windows / macOS / Android, không nhận `currentColor`, và trình đọc màn hình đọc ✅ thành
+    "dấu kiểm màu trắng đậm" ngay trước chữ "xong".
 
-    Bỏ qua chú thích Jinja `{# #}` và chú thích JS `//`: emoji trong đó không hiện lên màn hình,
-    và chính đoạn giải thích *vì sao không dùng emoji* lại hay có emoji làm ví dụ. Cách lọc này
-    có thể **bỏ sót** (một `//` trong chuỗi URL sẽ cắt nốt dòng), nhưng không báo nhầm — đúng
-    chiều an toàn cho một test chặn hồi quy.
+    Bỏ qua chú thích Jinja và JS: emoji trong đó không hiện lên màn hình. Cách lọc này có thể bỏ
+    sót nhưng không báo nhầm — đúng chiều an toàn cho một test chặn hồi quy.
     """
     emoji = ("⏳", "🔄", "✅", "❌", "🟢", "🔴", "⭐", "🎉", "👍", "📄", "🔍")
     for path in sorted(TEMPLATES_DIR.rglob("*.html")):
@@ -248,10 +232,9 @@ def test_file_cua_q_khong_con_mau_sky() -> None:
 
 
 def test_o_thong_bao_cua_q_deu_doc_duoc_bang_trinh_doc_man_hinh() -> None:
-    """Task 14.8: `<div id="message">` trần là ô mà trình đọc màn hình **không** biết đã đổi.
+    """`<div id="message">` trần là ô mà trình đọc màn hình **không** biết đã đổi.
 
-    Đây là thứ quan trọng nhất trên trang với người dùng khiếm thị — kết quả upload/quét/lưu
-    đều chỉ báo ở đúng ô này.
+    Đây là thứ quan trọng nhất trên trang với người dùng khiếm thị — mọi kết quả đều báo ở đó.
     """
     for path in Q_TEMPLATES:
         html = path.read_text(encoding="utf-8")
@@ -267,13 +250,9 @@ def test_o_thong_bao_cua_q_deu_doc_duoc_bang_trinh_doc_man_hinh() -> None:
 async def test_batch_giu_anh_tren_may_truoc_khi_gui(app_client, user_a: User) -> None:
     """Trang quét phải khai đủ bộ đồ nghề của `NEXT-09`.
 
-    Phần thật sự đáng kiểm là hành vi lúc mất sóng, mà cái đó chỉ chạy trong trình duyệt thật
-    (đã đo bằng Playwright, xem `Task.md`). Ca này giữ **hợp đồng template**: đổi tên id hay bỏ
-    khối hàng đợi đi thì đoạn JavaScript kia hỏng im lặng — trang vẫn mở được, ảnh vẫn chọn
-    được, chỉ là không còn gì giữ chúng lại khi rớt mạng.
-
-    Từ `I-38` bộ đồ nghề này nằm ở `/cards/upload`: hai màn hình quét gộp làm một, và bản giữ
-    lại là bản chịu được mạng yếu.
+    Hành vi lúc mất sóng chỉ chạy được trong trình duyệt thật; ca này giữ **hợp đồng template**:
+    đổi tên id hay bỏ khối hàng đợi thì đoạn JavaScript kia hỏng im lặng — trang vẫn mở được, ảnh
+    vẫn chọn được, chỉ là không còn gì giữ chúng lại khi rớt mạng.
     """
     async with app_client(user_a) as http:
         html = (await http.get("/cards/upload")).text
@@ -298,10 +277,8 @@ async def test_batch_noi_ro_anh_duoc_giu_tren_may(app_client, user_a: User) -> N
 async def test_mot_man_hinh_quet_duy_nhat_va_duong_cu_van_mo_duoc(app_client, user_a: User) -> None:
     """`I-38`: `/cards/upload` nhận nhiều ảnh, và `/cards/batch` chuyển hướng về đó.
 
-    Hai vế đều đáng khoá lại. Bỏ `multiple` là im lặng quay về đúng cái phiền mà `I-38` gỡ —
-    người dùng chọn được một ảnh một lượt, trang không báo lỗi gì. Còn `/cards/batch` nằm trong
-    tài liệu hướng dẫn và trong trang đánh dấu của cả hai người, nên nó phải mở ra một thứ gì
-    đó chứ không phải 404.
+    Bỏ `multiple` là im lặng quay về đúng cái phiền mà `I-38` gỡ. Còn `/cards/batch` nằm trong
+    tài liệu hướng dẫn nên nó phải mở ra một thứ gì đó chứ không phải 404.
     """
     async with app_client(user_a) as http:
         html = (await http.get("/cards/upload")).text

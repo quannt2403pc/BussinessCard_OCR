@@ -1,20 +1,15 @@
 """F3 — `POST /api/chat`, trả answer + citations.
 
-Chủ sở hữu: Q | Task: 8.2, 8.3 (lịch sử), 8.4 (trang `/assistant`), 8.5 (bộ lọc), 12.5 (tách
-theo người dùng), EX-09 (gỡ trang, chỉ còn bong bóng) | xem Task.md
+Chủ sở hữu: Q | Task: 8.2–8.5, 12.5, EX-09
 
-Router là lớp HTTP mỏng: nghiệp vụ nằm ở `services/assistant.py`, câu SQL ở
-`repositories/chat.py`. Cùng lối `cards.py` → `services/ocr.py`, và nhờ thế phần đáng test nhất
-của D8 (rút trích dẫn, ghép câu hỏi nhiều lượt) test được mà không cần dựng request nào.
+Router là lớp HTTP mỏng: nghiệp vụ ở `services/assistant.py`, câu SQL ở `repositories/chat.py`.
 
 **Thứ tự ghi DB là có chủ đích:** hỏi model **trước**, ghi hội thoại **sau**. Ghi câu hỏi trước
-rồi model hỏng thì lịch sử còn lại một câu hỏi không có câu trả lời — và lượt hỏi kế tiếp sẽ
-nhét đúng câu cụt đó vào prompt như bối cảnh thật. Vì vậy phiên mới cũng chỉ được tạo sau khi đã
-có câu trả lời: model chết thì không để lại phiên rỗng nào trong danh sách.
+rồi model hỏng thì lượt kế tiếp nhét đúng câu cụt đó vào prompt như bối cảnh thật. Phiên mới cũng
+chỉ được tạo sau khi đã có câu trả lời, để model chết không để lại phiên rỗng.
 
-⚠️ Một lượt hỏi giữ connection DB suốt thời gian gọi model (~2-5 giây). Chấp nhận được với bản
-demo một người dùng; nếu về sau nhiều người hỏi cùng lúc thì phải cắt transaction đọc trước khi
-gọi LLM, như luồng enrich của T đã phải làm ở 5.4.
+⚠️ Một lượt hỏi giữ connection DB suốt thời gian gọi model (~2-5 giây). Nhiều người hỏi cùng lúc
+thì phải cắt transaction đọc trước khi gọi LLM.
 """
 
 from __future__ import annotations
@@ -53,19 +48,14 @@ router = APIRouter()
 
 @router.get("/assistant", tags=["ui"])
 async def assistant_page(session: Annotated[uuid.UUID | None, Query()] = None) -> RedirectResponse:
-    """`/assistant` đã gỡ — trợ lý chỉ còn ở bong bóng chat (EX-09). Chuyển **301** về trang chủ.
+    """`/assistant` đã gỡ — trợ lý chỉ còn ở bong bóng chat. Chuyển **301** về trang chủ.
 
-    Giữ lại đúng route này thay vì xoá thẳng, theo **QĐ-3**: `?session=<uuid>` là đường **chia sẻ
-    hội thoại** dựng ở 14.5, và `/assistant` còn nằm trong `docs/demo-runbook.md`,
-    `docs/test-scenarios.md`, `docs/api.md` cùng hai dòng gợi ý của `scripts/seed.py`. Xoá là để
-    người trình bày bấm vào một link `404` ngay giữa buổi demo.
+    Giữ route thay vì xoá thẳng: `?session=<uuid>` là đường **chia sẻ hội thoại**, và `/assistant`
+    còn nằm trong tài liệu demo. Xoá là để người trình bày bấm vào một link `404` giữa buổi demo.
 
-    `?session=` đổi tên thành `?chat=` vì bên nhận nay là bong bóng chứ không phải trang: tham số
-    của `base.html` đọc, không phải của route này. `_assistant_widget.html` mở panel đúng hội thoại
-    rồi **dọn tham số** — để nguyên thì mỗi lần tải lại trang chủ là một lần panel tự bật lên.
-
-    301 chứ không 302: chuyển nhà vĩnh viễn, để trình duyệt và trang đánh dấu của người dùng cập
-    nhật luôn — cùng lối `/dashboard` → `/` ở 14.6.
+    `?session=` đổi tên thành `?chat=` vì bên nhận nay là bong bóng chứ không phải trang.
+    `_assistant_widget.html` mở panel đúng hội thoại rồi **dọn tham số** — để nguyên thì mỗi lần
+    tải lại trang chủ là một lần panel tự bật lên.
     """
     target = f"/?chat={session}" if session else "/"
     return RedirectResponse(target, status_code=status.HTTP_301_MOVED_PERMANENTLY)
@@ -83,9 +73,9 @@ async def chat(
 ) -> ChatOut:
     """Hỏi trợ lý: truy hồi KB → dựng ngữ cảnh → gọi Gemini Flash → trả lời kèm trích dẫn.
 
-    Không tìm được chunk nào thì **không gọi model** và trả thẳng câu "không có thông tin"
-    (`context_chunks = 0`). Tìm được nhưng ngữ cảnh không chứa đáp án thì chính model phải nói
-    không biết — ngưỡng điểm không làm được việc đó, xem `prompts/assistant.py`.
+    Không tìm được chunk nào thì **không gọi model** và trả thẳng câu "không có thông tin". Tìm
+    được nhưng ngữ cảnh không chứa đáp án thì chính model phải nói không biết — ngưỡng điểm không
+    làm được việc đó, xem `prompts/assistant.py`.
     """
     history: list[Turn] = []
     session = None
@@ -128,7 +118,7 @@ async def chat(
         )
 
     # `dataclasses.asdict` chứ không `vars()`: `assistant.Citation` khai `slots=True` nên nó
-    # không có `__dict__`, và `vars()` ném `TypeError` ngay lượt hỏi đầu tiên.
+    # không có `__dict__`.
     citations = [Citation(**dataclasses.asdict(citation)) for citation in result.citations]
     await chat_repo.add_message(
         db, session_id=session.id, role=ChatRole.USER, content=payload.question

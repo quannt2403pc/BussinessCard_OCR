@@ -1,38 +1,27 @@
 """Spike: model nào của channel làm được việc gì? Đo bằng lời gọi thật, không tin cờ năng lực.
 
-Chủ sở hữu: Q | Task: EX-12 | Vấn đề: I-33, I-12 | Kết luận ghi ở `docs/adr-model-per-feature.md`
+Chủ sở hữu: Q | Task: EX-12 | Kết luận ghi ở `docs/adr-model-per-feature.md`
 
     docker compose exec api python -m scripts.spike_model_matrix
-    docker compose exec api python -m scripts.spike_model_matrix --models gemini-3-flash,claude-sonnet-4-6
+    docker compose exec api python -m scripts.spike_model_matrix --models gemini-3-flash
     docker compose exec api python -m scripts.spike_model_matrix --prefix u1a2b3c4d5e6f
 
-**Câu hỏi phải trả lời.** `EX-15` cho người dùng tự chọn model cho từng chức năng. Thả cả danh mục
-vào ô chọn là mời họ tự làm hỏng luồng của mình: channel `antigravity` có 11 model (I-03) nhưng
-**chưa ai đo model nào nhận ảnh** — 2.3 chỉ kiểm chứng vision cho đúng `gemini-3-flash` (I-33).
-Chọn nhầm một model không nhận `inline_data` thì **mọi lượt quét hỏng**, và lỗi chỉ lộ ra lúc
-người dùng bấm upload chứ không phải lúc bấm lưu.
+**Câu hỏi phải trả lời.** Người dùng tự chọn model cho từng chức năng; thả cả danh mục vào ô chọn
+là mời họ tự làm hỏng luồng của mình. Chọn nhầm một model không nhận `inline_data` thì **mọi lượt
+quét hỏng**, và lỗi chỉ lộ ra lúc bấm upload chứ không phải lúc bấm lưu.
 
-**Vì sao đo bằng lời gọi thật.** Cờ `supports_web_search` của CLIProxy **không dùng được để chọn
-model** — I-12 đo 2026-09-11 thấy nó báo *không* cho 11/11 model kể cả model thực tế tra cứu được,
-rồi 2026-09-21 lại báo *có* cho mọi model Gemini. `docs/adr-websearch.md` mục Q5 đã chốt: chọn
-bằng lời gọi thật. Spike này làm đúng thế cho **cả ba** năng lực.
+**Vì sao đo bằng lời gọi thật:** cờ `supports_web_search` của CLIProxy không dùng được — có lúc
+báo *không* cho 11/11 model kể cả model tra cứu được, có lúc báo *có* cho mọi model Gemini (I-12).
 
-**Ba phép đo, đúng ba chức năng của `EX-15`:**
+Ba phép đo, đúng ba chức năng: `json` (cả ba chức năng), `ảnh` (quét danh thiếp), `web` (lập hồ
+sơ — không có `groundingMetadata` thì **trượt A5**).
 
-| Phép đo | Chức năng cần nó | Đạt nghĩa là |
-|---------|------------------|--------------|
-| `json`  | cả ba            | HTTP 200 + bóc được object JSON bằng đúng `services/llm_json.py` mà `ocr.py` dùng |
-| `ảnh`   | Quét danh thiếp  | nhận `inline_data` và đọc ra được chữ có thật trên tấm thẻ mẫu |
-| `web`   | Lập hồ sơ        | bật `googleSearch` và trả về `groundingMetadata.groundingChunks` — không có nguồn thì **trượt A5** |
+⚠️ Phép đo `ảnh` cố ý hỏi một chuỗi **có thật trên ảnh**, không hỏi "bạn có thấy ảnh không": model
+không nhận ảnh vẫn trả lời trơn tru câu hỏi thứ hai.
 
-⚠️ Phép đo `ảnh` cố ý hỏi một chuỗi **có thật trên ảnh**, không hỏi "bạn có thấy ảnh không".
-Model không nhận ảnh vẫn trả lời trơn tru câu hỏi thứ hai — đó là *âm tính giả* tự mình tạo ra.
+⚠️ Mỗi model tốn 3 lượt gọi thật — bật `--models` khi chỉ cần đo lại vài cái.
 
-⚠️ Mỗi model tốn 3 lượt gọi thật. Cả danh mục 11 model là ~33 lượt: bật `--models` khi chỉ cần đo
-lại một vài cái, đừng quét cả danh mục cho vui.
-
-⚠️ **Chạy trong container `api`**, không chạy từ máy thật: sai management key 5 lần là ban IP 30
-phút và host với container không chung IP (I-05, đo ở 12.1).
+⚠️ **Chạy trong container `api`**, không chạy từ máy thật: ban IP tính theo IP nguồn (I-05).
 """
 
 from __future__ import annotations
@@ -51,14 +40,11 @@ from app.services import llm
 from app.services.cliproxy_client import CliProxyClient, CliProxyError
 from app.services.llm_json import JsonExtractError, extract_json_object
 
-#: Ảnh dùng cho phép đo `ảnh`. Thẻ demo do T tạo ở 11.7 — nằm sẵn trong repo nên spike chạy được
-#: trên máy sạch, và `samples/cards/` thì tới nay vẫn rỗng (task 3.9 đã cắt).
+#: Ảnh dùng cho phép đo `ảnh` — thẻ demo nằm sẵn trong repo nên spike chạy được trên máy sạch.
 CARD_IMAGE = Path("samples/demo/en-01-clear.png")
 
-#: Chuỗi phải đọc được từ tấm thẻ trên (`en-01-clear.png`: NGUYEN DUC ANH · COTECCONS
-#: CONSTRUCTION JOINT STOCK COMPANY). Hỏi một chuỗi **có thật trên ảnh** là cách duy nhất phân
-#: biệt "model nhìn thấy ảnh" với "model đoán bừa cho xong" — và `coteccons` thì không đoán ra
-#: được từ một prompt không có ảnh.
+#: Chuỗi phải đọc được từ tấm thẻ trên. Hỏi một chuỗi **có thật trên ảnh** là cách duy nhất phân
+#: biệt "model nhìn thấy ảnh" với "model đoán bừa cho xong".
 CARD_NEEDLE = "coteccons"
 
 JSON_PROMPT = 'Trả về đúng một object JSON, không thêm chữ nào: {"ok": true, "ten": "kiem tra"}'

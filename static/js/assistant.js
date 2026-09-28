@@ -1,17 +1,10 @@
 /**
  * Trợ lý AI — logic hỏi đáp của bong bóng chat.
  *
- * Chủ sở hữu: Q | Task: 14.4 (tách module), 14.5 (bong bóng), EX-10 (dọn sau khi gỡ trang riêng)
- * | xem Task.md
+ * Chủ sở hữu: Q | Task: 14.4, 14.5, EX-10
  *
- * Vì sao có file này: trước D14, 260 dòng JS nằm thẳng trong `templates/assistant.html` và bám
- * cứng vào `id` của trang (`$("thread")`, `$("send")`…). Bong bóng chat ở `14.5` cần đúng logic
- * đó trên **mọi trang** → giữ nguyên cách cũ là đẻ ra bản copy thứ hai của 260 dòng. Ở đây mọi
- * phần tử tìm theo `data-a=…` **bên trong `root`**, nên nhiều thể hiện sống chung một trang được.
- *
- * `EX-10` gỡ ba tuỳ chọn chỉ trang `/assistant` mới dùng (`compact`, `syncUrl`, `onSession`):
- * trang đã bị gỡ ở `EX-09`, giữ lại là để một nhánh mã không ai chạy qua nằm chờ hỏng trong im
- * lặng. Panel nổi luôn cuộn **trong lòng** khung hội thoại, không còn nhánh cuộn cả cửa sổ.
+ * Mọi phần tử tìm theo `data-a=…` **bên trong `root`**, nên nhiều thể hiện sống chung một trang
+ * được — đó là lý do logic này tách khỏi template thay vì bám cứng vào `id` của một trang.
  *
  * Hợp đồng với template (mọi thuộc tính đều nằm trong `root`):
  *   [data-a="form"]      <form> gửi câu hỏi            (bắt buộc)

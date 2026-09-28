@@ -1,16 +1,12 @@
-{# Macro dùng chung cho mọi template: icon từ sprite + dải thông báo. #}
-{# Chủ sở hữu: Q | Task: 14.2 (D14) | luật kèm theo ở docs/ui-kit.md mục 6–7 #}
-{#
-  Cách dùng:
-      {% from "_macros.html" import icon, banner %}
-      <button class="btn-primary">{{ icon("scan") }} Quét</button>
-      <button class="btn-icon" aria-label="Xoá danh thiếp">{{ icon("trash") }}</button>
-      {{ banner("warn", "Chưa kết nối AI. Mở Cài đặt để kết nối.", "/settings", "Kết nối") }}
+{# Macro dùng chung cho mọi template: icon từ sprite + dải thông báo.
+   Chủ sở hữu: Q | Task: 14.2 | luật kèm theo ở docs/ui-kit.md mục 6–7
 
-  Vì sao đường dẫn sprite viết thẳng `/static/...` mà không `url_for`: macro được `import` **không
-  kèm context**, nên trong thân macro không có `request` — `url_for` sẽ ném lỗi. `/static` là điểm
-  mount cố định khai trong `app/main.py`, đổi nó là đổi cả chục chỗ khác chứ không riêng file này.
-#}
+       {% from "_macros.html" import icon, banner %}
+       <button class="btn-primary">{{ icon("scan") }} Quét</button>
+       {{ banner("warn", "Chưa kết nối AI.", "/settings", "Kết nối") }}
+
+   Đường dẫn sprite viết thẳng `/static/…` chứ không `url_for`: macro được `import` **không kèm
+   context**, nên trong thân macro không có `request`. #}
 
 {#
   Icon trang trí, mặc định `aria-hidden="true"`.

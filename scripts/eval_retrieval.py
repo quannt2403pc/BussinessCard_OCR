@@ -1,29 +1,23 @@
-"""Đo chất lượng truy hồi RAG trên bộ 10 truy vấn mẫu (task 7.4).
+"""Đo chất lượng truy hồi RAG trên bộ 10 truy vấn mẫu.
 
-Chủ sở hữu: Q | Task: 7.4 | xem Task.md
+Chủ sở hữu: Q | Task: 7.4
 
-Chạy trong Docker, nơi `db` và `embedder` phân giải được:
+Chạy trong Docker, nơi `db` và `embedder` phân giải được::
 
     docker compose run --rm -e PYTHONPATH=/app api python scripts/eval_retrieval.py
 
-(`PYTHONPATH` là bắt buộc: `WORKDIR` của image là `/app` nhưng khi chạy một file trong
-`scripts/` thì Python đặt `sys.path[0]` thành `/app/scripts`, và gói `app` không nằm ở đó.
-Trên Git Bash phải thêm `MSYS_NO_PATHCONV=1`, nếu không `/app` bị dịch thành đường dẫn Windows.)
+(`PYTHONPATH` là bắt buộc: chạy một file trong `scripts/` thì `sys.path[0]` thành `/app/scripts`
+và gói `app` không nằm ở đó. Trên Git Bash phải thêm `MSYS_NO_PATHCONV=1`.)
 
-Ba thứ được đo, vì cả ba đều là con số mà `services/retriever.py` đang phải giả định:
+Ba thứ được đo, vì cả ba là con số mà `services/retriever.py` đang phải giả định:
 
-1. **Recall@k của từng nhánh và của bản trộn** — hybrid có thật sự hơn vector đơn không, hay
-   chỉ là phức tạp thêm. Đo riêng `vector`, `text`, `hybrid` trên cùng một bộ truy vấn.
-2. **Phân bố điểm tương đồng**: câu hỏi *có* câu trả lời trong KB cho điểm bao nhiêu, câu hỏi
-   *ngoài phạm vi* cho điểm bao nhiêu. Khoảng trống giữa hai phân bố chính là chỗ đặt
-   `MIN_SIMILARITY`. Đặt ngưỡng mà không có hai phân bố này thì chỉ là bịa một con số.
-3. **Kích thước chunk** — bao nhiêu nguồn thật sự bị cắt làm nhiều mảnh ở các mức trần khác
-   nhau. Task 7.4 đòi "tinh chỉnh chunk size", nhưng chỉnh mà không biết nó có chạm tới dữ liệu
-   thật hay không thì là chỉnh mù.
+1. **Recall@k của từng nhánh và của bản trộn** — hybrid có thật sự hơn vector đơn không.
+2. **Phân bố điểm tương đồng** của câu có đáp án trong KB so với câu ngoài phạm vi. Khoảng trống
+   giữa hai phân bố chính là chỗ đặt `MIN_SIMILARITY`; đặt ngưỡng mà không có nó là bịa một con số.
+3. **Kích thước chunk** — bao nhiêu nguồn thật sự bị cắt làm nhiều mảnh ở từng mức trần.
 
-**Không để lại gì trong DB**: toàn bộ chạy trong một transaction rồi rollback, đúng cách
-`tests/conftest.py` làm. Nhờ vậy chạy thẳng trên database đang dùng cũng an toàn, và mỗi lượt
-chạy đo trên đúng một bộ dữ liệu cố định thay vì "những gì tình cờ có trong DB".
+**Không để lại gì trong DB**: chạy trong một transaction rồi rollback, nên chạy thẳng trên
+database đang dùng cũng an toàn.
 """
 
 from __future__ import annotations
@@ -53,12 +47,9 @@ TOP_KS = (1, 3, 5)
 #: Các mức trần chunk đem so, quanh `kb.CHUNK_MAX_CHARS` hiện tại.
 CHUNK_SIZES = (400, 700, 1000)
 
-#: Định danh của bộ dữ liệu cố định, khai ở đây để **`scripts/seed.py` (9.2) dùng chung**.
-#:
-#: Script này rollback nên không cần biết đã seed lần nào chưa; `seed.py` thì commit, nên phải
-#: nhận ra được dữ liệu mẫu của lần chạy trước để không nạp chồng thành hai bản. Chép danh sách
-#: sang file kia là mở đường cho hai bên lệch nhau trong im lặng — `seed.py` có bước đối chiếu
-#: lại với dữ liệu thật vừa tạo và báo lỗi nếu lệch.
+#: Định danh của bộ dữ liệu cố định, khai ở đây để **`scripts/seed.py` dùng chung**: script này
+#: rollback nên không cần biết đã seed lần nào chưa, còn `seed.py` commit nên phải nhận ra dữ
+#: liệu mẫu của lần trước để không nạp chồng thành hai bản.
 SEED_COMPANY_NAMES: tuple[str, ...] = (
     "Công ty TNHH Logistics Đại Việt",
     "Công ty CP Sữa Mộc Châu",
@@ -83,8 +74,8 @@ class Query:
     note: str = ""
 
 
-# Mười truy vấn của task 7.4 + ba câu ngoài phạm vi KB. Ba câu cuối không phải để tính recall mà
-# để đo **cận trên của điểm không liên quan** — nửa còn thiếu khi chọn ngưỡng.
+# Mười truy vấn + ba câu ngoài phạm vi KB. Ba câu cuối không tính recall mà để đo **cận trên của
+# điểm không liên quan** — nửa còn thiếu khi chọn ngưỡng.
 QUERIES: tuple[Query, ...] = (
     Query("công ty nào làm về logistics?", "hồ sơ Đại Việt", "vector", "tiêu chí D7"),
     Query("công ty nào sản xuất sữa chua?", "hồ sơ Mộc Châu", "vector"),
@@ -106,9 +97,8 @@ QUERIES: tuple[Query, ...] = (
 class Corpus:
     """Dữ liệu mẫu đã ghi vào DB, kèm ánh xạ `source_id → nhãn` để chấm điểm."""
 
-    #: Không gian làm việc của bộ dữ liệu (`NEXT-05`, trước là `user_id` ở task 12.5). Mọi
-    #: lượt truy hồi phải đi kèm nó, nếu không câu tìm sẽ không thấy chính dữ liệu vừa seed và
-    #: mọi số đo recall thành 0.
+    #: Không gian làm việc của bộ dữ liệu. Mọi lượt truy hồi phải đi kèm nó, nếu không câu tìm
+    #: sẽ không thấy chính dữ liệu vừa seed và mọi số đo recall thành 0.
     workspace_id: uuid.UUID
     #: Người tạo — chỉ để ghi vào các bảng còn giữ cột ấy, không tham gia lọc.
     user_id: uuid.UUID
@@ -119,8 +109,8 @@ class Corpus:
 async def seed(db: AsyncSession, *, workspace_id: uuid.UUID, user_id: uuid.UUID) -> Corpus:
     """Dựng 4 danh thiếp + 3 hồ sơ doanh nghiệp, đủ 3 ngôn ngữ (Việt, Hàn, Nhật).
 
-    Toàn bộ bộ dữ liệu nằm trong **một** không gian làm việc (`NEXT-05`): nó là bộ chấm điểm A6
-    nên phải nằm trọn trong phạm vi mà trợ lý AI của đúng không gian đó nhìn thấy.
+    Toàn bộ nằm trong **một** không gian làm việc: nó là bộ chấm điểm A6 nên phải nằm trọn trong
+    phạm vi mà trợ lý AI của đúng không gian đó nhìn thấy.
     """
     corpus = Corpus(workspace_id=workspace_id, user_id=user_id)
 
@@ -258,8 +248,8 @@ async def evaluate(db: AsyncSession, corpus: Corpus) -> None:
     for leg, hybrid in legs.items():
         rows = []
         for query in QUERIES:
-            # `min_similarity=-1.0`: **cố ý tắt ngưỡng ở đây**. Đây là lượt chạy dùng để *chọn*
-            # ngưỡng, áp ngưỡng hiện tại vào thì số đo chỉ xác nhận lại chính nó.
+            # `min_similarity=-1.0`: **cố ý tắt ngưỡng**. Đây là lượt chạy dùng để *chọn* ngưỡng,
+            # áp ngưỡng hiện tại vào thì số đo chỉ xác nhận lại chính nó.
             hits = await retriever.search(
                 db,
                 query.text,
@@ -388,11 +378,9 @@ def _cut(text: str, limit: int) -> str:
 def _company(
     workspace_id: uuid.UUID, user_id: uuid.UUID, display_name: str, aliases: list[str]
 ) -> Company:
-    # `name_normalized` dùng **đúng hàm chuẩn hoá của T**, không phải một chuỗi hex ngẫu nhiên
-    # như bản đầu: `scripts/seed.py` (9.2) commit bộ dữ liệu này vào DB thật, mà khoá ngẫu nhiên
-    # thì lần sau người dùng xác nhận một danh thiếp của đúng công ty đó, `upsert_company()`
-    # không khớp được và tạo ra bản ghi công ty thứ hai. Khoá này không nằm trong nội dung chunk
-    # nên số đo truy hồi của 7.4 không đổi.
+    # `name_normalized` dùng **đúng hàm chuẩn hoá của T**, không phải chuỗi hex ngẫu nhiên:
+    # `scripts/seed.py` commit bộ dữ liệu này vào DB thật, mà khoá ngẫu nhiên thì lần sau
+    # `upsert_company()` không khớp được và tạo ra bản ghi công ty thứ hai.
     return Company(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -468,9 +456,7 @@ async def run() -> int:
                 expire_on_commit=False,
             )
             try:
-                # Một tài khoản + một không gian làm việc dùng thử: từ `NEXT-05` dữ liệu
-                # thuộc về không gian, mà mọi bảng ở đây đều đòi `workspace_id` NOT NULL. Cả ba
-                # đều bị rollback ở cuối nên không để lại gì trong DB thật.
+                # Một tài khoản + một không gian làm việc dùng thử; cả ba đều bị rollback ở cuối.
                 owner = User(
                     email=f"eval-{uuid.uuid4().hex[:8]}@bizcard.local",
                     password_hash="!khong-dang-nhap-duoc",

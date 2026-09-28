@@ -1,33 +1,23 @@
 """Kiểm lượt Việt hoá sau khi quét, chạy qua ĐÚNG API mà giao diện gọi, với model thật.
 
-Chủ sở hữu: Q | Task: EX-07 | xem Task.md
-
-Chạy:
+Chủ sở hữu: Q | Task: EX-07
 
     docker compose up -d
     .venv/Scripts/python -m scripts.check_translation
     .venv/Scripts/python -m scripts.check_translation --only th --keep
 
-Dùng lại phần dựng ảnh của `scripts/check_multilang_ocr.py` (task 9.3/10.8) thay vì chép lại:
-cùng lý do phải **chạy ở máy chứ không trong container** — image `api` là `python:3.12-slim`,
-không có phông CJK/Thái/Kirin nào, dựng ảnh trong đó thì mọi chữ ra một hàng ô vuông, và tệ hơn
-cả hỏng là *trông như* đang chạy.
+Dùng lại phần dựng ảnh của `scripts/check_multilang_ocr.py`, và cùng lý do phải **chạy ở máy chứ
+không trong container**: image `api` không có phông CJK/Thái/Kirin nào.
 
 Ba thứ được kiểm, đúng ba yêu cầu của EX:
 
-1. **Chức vụ và loại hình pháp nhân được DỊCH** — `営業部長` → *Trưởng phòng Kinh doanh*,
-   `株式会社` → *Công ty Cổ phần*. Phần này chấm tự động được vì có đáp án đúng.
-2. **Tên riêng được PHIÊN ÂM chứ không dịch nghĩa**, theo lối người Việt viết. Chấm tự động ở
-   mức kiểm được: bản Việt hoá phải là chữ Latin (hoặc chữ Việt), không còn sót chữ bản địa, và
-   bản gốc phải **còn nguyên** trong cột gốc. Cách phiên âm có đúng hay không thì in ra cho
-   người đọc — máy không chấm hộ được việc `李伟` nên là *Lý Vĩ* hay *Li Wei*.
-3. **Ngôn ngữ ngoài 5 thứ tiếng chính** — Thái, Nga, Đức. Đây là ca mà bản trước EX-05 không
-   làm nổi: `language_detected` bị ép vào 5 mã nên thẻ Thái phải khai man thành một thứ tiếng
-   khác, kéo theo mã vùng số điện thoại sai.
+1. **Chức vụ và loại hình pháp nhân được DỊCH** — có đáp án đúng nên chấm tự động được.
+2. **Tên riêng được PHIÊN ÂM chứ không dịch nghĩa.** Máy chỉ chấm được phần kiểm được: bản Việt
+   hoá phải là chữ Latin và bản gốc phải còn nguyên. `李伟` nên là *Lý Vĩ* hay *Li Wei* thì in ra
+   cho người đọc.
+3. **Ngôn ngữ ngoài 5 thứ tiếng chính** (Thái, Nga, Đức) — ca mà bản trước EX-05 không làm nổi.
 
-Script tự đăng ký (hoặc đăng nhập) một tài khoản riêng `ex-check@bizcard.local` — từ D12 mọi
-route đều đòi đăng nhập, và dùng tài khoản riêng thì thẻ dựng ra ở đây không trộn vào dữ liệu
-demo của ai.
+Script tự đăng ký một tài khoản riêng để thẻ dựng ra ở đây không trộn vào dữ liệu demo của ai.
 """
 
 from __future__ import annotations

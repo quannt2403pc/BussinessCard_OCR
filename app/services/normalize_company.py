@@ -93,11 +93,6 @@ def _accented_tokens(name: str) -> frozenset[str]:
     Trả về token *sau khi* bỏ dấu, vì đó là dạng mà `_strip_legal_forms()` đang cầm trên tay.
     `Phú Cơ` cho `{"phu", "co"}`, còn `Phu Co` cho tập rỗng — nhờ đó hậu tố ASCII `co` gỡ được ở
     cái sau mà không đụng tới cái trước.
-
-    Không chạy `_join_initials()`: token ghép từ các chữ cái rời (`A.B.C` → `abc`) sẽ không khớp
-    tập này, tức bị coi là *không dấu*. Chấp nhận được — chuỗi chữ cái rời ghép lại đúng bằng một
-    hình thức pháp lý là chuyện không xảy ra, và nhầm theo chiều này chỉ làm mất một lần gỡ hậu
-    tố chứ không gộp nhầm hai công ty.
     """
     text = unicodedata.normalize("NFKC", name).casefold()
     text = "".join(" " if unicodedata.category(char)[0] in "PS" else char for char in text)
@@ -148,11 +143,7 @@ def _token_forms(raw: Iterable[str]) -> tuple[tuple[tuple[str, ...], bool], ...]
     """Mỗi hình thức pháp lý kèm cờ **nguồn viết bằng ASCII** — cờ ấy bật lá chắn `I-21`.
 
     Chỉ dạng ASCII mới cần lá chắn: `co`, `ltd`, `group`… là chữ tiếng Anh, nên chữ gốc có dấu
-    nghĩa là nó **không phải** hình thức pháp lý. Ngược lại `công ty`, `cổ phần`, `tập đoàn` vốn
-    đã có dấu — bắt chúng phải không dấu thì không bao giờ gỡ được gì.
-
-    Dạng viết tắt tiếng Việt (`cty`, `tnhh`, `mtv`, `cp`) cũng là ASCII nên cũng mang cờ này, vô
-    hại: không có chữ tiếng Việt nào bỏ dấu ra đúng những chuỗi đó.
+    nghĩa là nó **không phải** hình thức pháp lý. Ngược lại `công ty`, `cổ phần` vốn đã có dấu.
     """
     forms = {(tuple(_normalize_text(form).split()), form.isascii()) for form in raw}
     return tuple(sorted(forms, key=lambda item: len(item[0]), reverse=True))
@@ -216,9 +207,7 @@ def normalize_label(text: str) -> str:
     """Khoá chuẩn hoá cho một nhãn tự do — nay chỉ còn `NEXT-04` dùng để so tên người.
 
     Khác `normalize_company_name()` ở đúng một chỗ: **không gỡ hình thức pháp lý**. Với tên công
-    ty thì "Co., Ltd" là nhiễu, nhưng với tên người thì mọi chữ đều mang nghĩa.
-
-    Ném `ValueError` khi nhãn không còn ký tự nào có nghĩa.
+    ty thì "Co., Ltd" là nhiễu, với tên người thì mọi chữ đều mang nghĩa.
     """
     key = _normalize_text(text)
     if not key:

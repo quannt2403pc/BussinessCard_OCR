@@ -1,19 +1,12 @@
 """Schema danh thiếp + kết quả OCR.
 
-Chủ sở hữu: Q | Task: 3.4 | xem Task.md
+Chủ sở hữu: Q | Task: 3.4
 
-`CardExtraction` là **cửa khẩu duy nhất** cho dữ liệu do model sinh ra: mọi thứ đi từ
-`services/ocr.py` vào DB đều phải qua đây. Vì nguồn dữ liệu là một model ngôn ngữ chứ không
-phải một API có hợp đồng, validator ở đây làm việc "dọn dẹp" nhiều hơn là "kiểm tra":
+`CardExtraction` là **cửa khẩu duy nhất** cho dữ liệu do model sinh ra. Vì nguồn là một model
+ngôn ngữ chứ không phải API có hợp đồng, validator ở đây dọn dẹp nhiều hơn là kiểm tra: kéo khoá
+alias về đúng tên, quy `"N/A"` / `"không có"` về `None`, ép `confidence` về float trong [0, 1].
 
-* model đổi tên khoá theo hứng (`name` thay `full_name`, `company` thay `company_name_raw`) —
-  `_ALIASES` kéo về đúng khoá thay vì để rớt trường;
-* model điền `"N/A"`, `"không có"`, `""` thay vì `null` — quy về `None`, nếu không DB sẽ đầy
-  những chuỗi rác mà mọi truy vấn đều phải lọc tay;
-* model trả `confidence` là chuỗi `"0.9"`, hoặc số 95 (thang 100) — quy về float trong [0, 1].
-
-Nguyên tắc: **dọn dẹp thì làm, vứt thì không.** Trường không hiểu được vẫn giữ nguyên chuỗi để
-người dùng sửa ở màn hình review; bản JSON gốc chưa đụng vào nằm ở `ocr_raw_json` (task 3.5).
+Nguyên tắc: **dọn dẹp thì làm, vứt thì không.** Bản JSON gốc chưa đụng vào nằm ở `ocr_raw_json`.
 """
 
 from __future__ import annotations
@@ -58,13 +51,9 @@ _EMPTY_MARKERS = frozenset(
     {"", "-", "--", "n/a", "na", "none", "null", "unknown", "không có", "khong co", "không rõ"}
 )
 
-#: Model hay trả tên ngôn ngữ bằng chữ thay vì mã ISO 639-1.
-#:
-#: Danh sách này **không phải danh sách ngôn ngữ được hỗ trợ** — từ EX-05 hệ thống nhận mọi mã
-#: ISO 639-1/639-3 model trả về, mã lạ đi thẳng vào DB đúng như model đọc. Đây chỉ là bảng gom
-#: những cách viết khác nhau của cùng một ngôn ngữ, để `services/normalize.py` tra được mã vùng
-#: số điện thoại và `services/kb.py` in được nhãn tiếng Việt. Thiếu một dòng ở đây không làm
-#: mất dữ liệu, chỉ làm mất phần suy mã vùng của đúng ngôn ngữ đó.
+#: Model hay trả tên ngôn ngữ bằng chữ thay vì mã ISO 639-1. **Không phải danh sách ngôn ngữ
+#: được hỗ trợ** — mã lạ vẫn đi thẳng vào DB; đây chỉ là bảng gom các cách viết của cùng một
+#: ngôn ngữ để tra mã vùng số điện thoại và in nhãn tiếng Việt.
 _LANGUAGE_ALIASES: dict[str, str] = {
     "english": "en",
     "vietnamese": "vi",
@@ -192,9 +181,8 @@ class CardExtraction(BaseModel):
         return self.model_dump(exclude={"is_business_card"})
 
 
-#: Cột người dùng được sửa tay ở màn hình review (task 4.2/5.1). `status` KHÔNG nằm ở đây —
-#: vòng đời bản ghi đổi qua `POST /{id}/confirm` (task 4.3), không qua PATCH. Để lẫn vào thì
-#: một lần PATCH lỡ tay có thể đẩy thẳng bản ghi sang `confirmed` mà bỏ qua bước gắn công ty.
+#: Cột người dùng được sửa tay ở màn hình review. `status` KHÔNG nằm ở đây — vòng đời bản ghi
+#: đổi qua `POST /{id}/confirm`, để lẫn vào thì một lần PATCH lỡ tay đẩy thẳng sang `confirmed`.
 EDITABLE_FIELDS: tuple[str, ...] = (
     "full_name",
     "job_title",
@@ -240,18 +228,16 @@ class CardOut(BaseModel):
     translation_meta: dict[str, Any] | None = None
     company_id: uuid.UUID | None = None
     notes: str | None = None
-    #: `None` được phép từ revision `0013` và `0014` giữ nguyên, nhưng không đường nào sinh
-    #: ra nó nữa — xem lý do ở `models/card.py`.
+    #: `None` được phép nhưng không đường nào sinh ra nữa — xem `models/card.py`.
     image_path: str | None = None
     uploaded_at: datetime
 
 
 class CardDetailOut(CardOut):
-    """Chi tiết một danh thiếp (task 4.2) — thêm bản JSON gốc và mốc thời gian.
+    """Chi tiết một danh thiếp — thêm bản JSON gốc và mốc thời gian.
 
-    `ocr_raw_json` cố ý chỉ có ở đây chứ không có trong danh sách: nó là nguyên văn model trả
-    về, kèm cả trường đã bị chuẩn hoá ghi đè, nên là thứ duy nhất đối chiếu được khi nghi OCR
-    sai. Nhét vào danh sách 50 bản ghi thì payload phình lên vô ích.
+    `ocr_raw_json` chỉ có ở đây chứ không có trong danh sách: nó là thứ duy nhất đối chiếu được
+    khi nghi OCR sai, mà nhét vào danh sách 50 bản ghi thì payload phình vô ích.
     """
 
     image_hash: str
@@ -271,12 +257,10 @@ class CardListOut(BaseModel):
 
 
 class CardUpdateIn(BaseModel):
-    """Body của `PATCH /api/cards/{id}` (task 4.2) — sửa tay sau khi review.
+    """Body của `PATCH /api/cards/{id}` — sửa tay sau khi review.
 
     Mọi trường đều tuỳ chọn và **phân biệt "không gửi" với "gửi null"**: không gửi thì giữ
-    nguyên, gửi `null` là chủ ý xoá trắng trường đó. Nếu gộp hai ca này làm một thì người dùng
-    không bao giờ xoá được một giá trị model đọc nhầm — mà đó chính là việc hay phải làm nhất ở
-    màn hình review.
+    nguyên, gửi `null` là chủ ý xoá trắng. Gộp hai ca lại thì không xoá được giá trị model đọc sai.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -291,9 +275,8 @@ class CardUpdateIn(BaseModel):
     website: str | None = None
     language_detected: str | None = None
     notes: str | None = None
-    # Bản Việt hoá cũng sửa tay được (EX-04): phiên âm là việc model có thể làm sai, và người
-    # cầm tấm thẻ trong tay là người biết tên mình đọc thế nào. Sửa tay thì `translation_meta`
-    # được đánh dấu `source="manual"` để lần *Dịch lại* sau không lặng lẽ ghi đè.
+    # Bản Việt hoá cũng sửa tay được. Sửa tay thì `translation_meta` được đánh dấu
+    # `source="manual"` để lần *Dịch lại* sau không lặng lẽ ghi đè.
     full_name_vi: str | None = None
     job_title_vi: str | None = None
     company_name_vi: str | None = None
@@ -305,14 +288,10 @@ class CardUpdateIn(BaseModel):
 
 
 class CardConfirmOut(BaseModel):
-    """Kết quả `POST /api/cards/{id}/confirm` (task 4.3).
+    """Kết quả `POST /api/cards/{id}/confirm`.
 
-    `company_matched=false` **không phải lỗi**: danh thiếp không đọc được tên công ty vẫn được
-    xác nhận bình thường, chỉ là không gắn được vào bảng `companies`. `detail` nói rõ vì sao để
-    UI hiện đúng lý do thay vì im lặng.
-
-    `kb_indexed=false` đọc y hệt như vậy (task 7.3): thẻ vẫn `confirmed`, chỉ là chưa vào được
-    Knowledge Base của trợ lý AI — vá lại bằng `POST /api/kb/reindex`.
+    `company_matched=false` và `kb_indexed=false` **không phải lỗi**: thẻ vẫn `confirmed`, chỉ là
+    chưa gắn được công ty / chưa vào được Knowledge Base. `detail` nói rõ lý do.
     """
 
     id: uuid.UUID
@@ -324,11 +303,10 @@ class CardConfirmOut(BaseModel):
 
 
 class CardUploadOut(BaseModel):
-    """Kết quả `POST /api/cards/upload` (task 3.1).
+    """Kết quả `POST /api/cards/upload`.
 
-    `duplicate=true` nghĩa là ảnh này đã được quét trước đó: trả về đúng bản ghi cũ, **không**
-    gọi lại model. Đây là kết quả hợp lệ chứ không phải lỗi — tiêu chí hoàn thành D3 yêu cầu
-    upload lại cùng một ảnh thì không sinh bản ghi trùng.
+    `duplicate=true` nghĩa là ảnh đã được quét trước đó: trả về bản ghi cũ, **không** gọi lại
+    model. Đây là kết quả hợp lệ chứ không phải lỗi.
     """
 
     card: CardOut
@@ -344,12 +322,10 @@ class CardUploadOut(BaseModel):
 
 
 class BatchUploadOut(BaseModel):
-    """Kết quả `POST /api/cards/batch-upload` (task 5.2) — trả **202**, việc quét chạy ở nền.
+    """Kết quả `POST /api/cards/batch-upload` — trả **202**, việc quét chạy ở nền.
 
-    Con số tách làm ba vì ba việc phải làm tiếp khác hẳn nhau: `queued` là phần sẽ có kết quả
-    nếu chờ, `duplicates` là phần đã có sẵn trong DB (mở `/cards` xem ngay), `rejected` là phần
-    người dùng phải xử lý bằng tay (chọn file khác, giảm dung lượng). Gộp thành một số "đã nhận
-    N ảnh" thì ai cũng phải mở danh sách ra đếm lại mới biết chuyện gì đã xảy ra.
+    Ba con số vì ba việc phải làm tiếp khác nhau: `queued` sẽ có kết quả nếu chờ, `duplicates`
+    đã có sẵn trong DB, `rejected` phải xử lý bằng tay.
     """
 
     job_id: uuid.UUID
@@ -381,11 +357,10 @@ class BatchItemOut(BaseModel):
 
 
 class BatchJobOut(BaseModel):
-    """Trạng thái một job batch — `GET /api/cards/batch-jobs/{job_id}` (task 5.2, UI poll ở 5.3).
+    """Trạng thái một job batch — `GET /api/cards/batch-jobs/{job_id}`.
 
-    `finished` là cờ riêng chứ không suy ra từ `done + failed == total`: trong lúc job vừa bị
-    huỷ sớm (chưa kết nối OAuth) hai con số đó cũng bằng nhau, mà UI thì cần phân biệt "xong
-    hẳn" với "đang chạy dở" để biết lúc nào ngừng poll.
+    `finished` là cờ riêng chứ không suy ra từ `done + failed == total`: job bị huỷ sớm cũng cho
+    hai con số bằng nhau, mà UI cần biết lúc nào ngừng poll.
     """
 
     job_id: uuid.UUID
@@ -402,9 +377,8 @@ class BatchJobOut(BaseModel):
 def _clean_scalar(value: Any) -> Any:
     """Chuẩn hoá một giá trị vô hướng do model trả về.
 
-    Xử lý luôn trường hợp model trả **mảng** cho trường đơn (`"phone": ["024…", "090…"]`) —
-    nối lại bằng dấu `/` để `normalize.split_phones()` tách đúng, thay vì lấy phần tử đầu và
-    im lặng làm mất số thứ hai.
+    Model trả **mảng** cho trường đơn (`"phone": ["024…", "090…"]`) thì nối lại bằng `/` để
+    `normalize.split_phones()` tách đúng, thay vì lấy phần tử đầu và làm mất số thứ hai.
     """
     if isinstance(value, (list, tuple)):
         cleaned = (_clean_scalar(item) for item in value)

@@ -1,18 +1,14 @@
 """Test cổng đăng nhập + tách dữ liệu ở phần của Q — tiêu chí **A8**, và phần A9 thuộc F1/F3.
 
-Chủ sở hữu: Q | Task: 12.4, 12.5 | xem Task.md
+Chủ sở hữu: Q | Task: 12.4, 12.5
 
-Ranh giới với `tests/test_isolation.py` (task 12.7 của **T**): file đó phủ **bảng ca đầy đủ** của
-A9 trên cả ba chức năng, gồm ca quan trọng nhất là trợ lý AI. File này chỉ giữ những khẳng định
-về **chính cơ chế Q dựng ở 12.4/12.5**, tức thứ sẽ vỡ nếu ai đó sửa `core/security.py` hay bỏ
-`user_id` khỏi một câu truy vấn của F1/F3:
+Ranh giới với `tests/test_isolation.py` (của T): file đó phủ **bảng ca đầy đủ** của A9 trên cả ba
+chức năng. File này chỉ giữ những khẳng định về **chính cơ chế `core/security.py`**:
 
-1. **Mặc định là ĐÓNG.** Không phải "các đường dẫn ta nhớ đã chặn", mà: *duyệt mọi route đã gắn
-   vào app, cái nào không nằm trong danh sách miễn thì phải chặn*. Route mới thêm mà quên bảo vệ
-   sẽ làm test này đỏ ngay — đó là toàn bộ giá trị của nó so với vài ca viết tay.
-2. **Chặn đúng kiểu theo loại client**: trình duyệt nhận `303` về `/auth/login?next=…`, API nhận
-   `401` JSON.
-3. **Tài nguyên của người khác trả `404`, không phải `403`** (Plan.md mục 4).
+1. **Mặc định là ĐÓNG** — duyệt mọi route đã gắn vào app, cái nào không nằm trong danh sách miễn
+   thì phải chặn. Route mới quên bảo vệ sẽ làm test này đỏ ngay.
+2. **Chặn đúng kiểu theo loại client**: trình duyệt nhận `303`, API nhận `401` JSON.
+3. **Tài nguyên của người khác trả `404`, không phải `403`**.
 """
 
 from __future__ import annotations
@@ -33,19 +29,16 @@ from tests.conftest import api_client, workspace_id_of
 
 HTML_HEADERS = {"accept": "text/html,application/xhtml+xml"}
 
-#: Route có tham số đường dẫn: điền một UUID bất kỳ để dựng được URL cụ thể. Giá trị không quan
-#: trọng — nếu cổng đăng nhập chạy đúng thì request không bao giờ đi tới chỗ đọc tham số.
+#: Route có tham số đường dẫn: điền một UUID bất kỳ để dựng được URL cụ thể.
 ANY_UUID = str(uuid.uuid4())
 
 
 def walk_routes(routes: object) -> list[object]:
     """Làm phẳng bảng route của app.
 
-    ⚠️ Không duyệt phẳng `app.routes` được: từ FastAPI 0.14x mỗi `include_router()` nằm trong một
-    `_IncludedRouter` (không có `.path`, cũng **không** có `.routes` — router thật ở
-    `.original_router`), nên `app.routes` chỉ có 15 phần tử mà đúng **2** là route của ứng dụng.
-    Bản đầu của test này đọc phẳng và “đạt” trên 1 route: xanh vì không kiểm gì cả, đúng loại
-    nguy hiểm nhất. Khẳng định `len(guarded) > 15` bên dưới là chốt chặn cho chính chuyện đó.
+    ⚠️ Không duyệt phẳng `app.routes` được: mỗi `include_router()` nằm trong một `_IncludedRouter`
+    (router thật ở `.original_router`), nên `app.routes` chỉ có 15 phần tử mà đúng **2** là route
+    của ứng dụng. Bản đầu của test này đọc phẳng và "đạt" trên 1 route — xanh vì không kiểm gì cả.
     """
     found: list[object] = []
     for route in routes or []:  # type: ignore[union-attr]
@@ -83,8 +76,8 @@ def all_guarded_urls() -> list[tuple[str, str]]:
 async def test_moi_route_khong_duoc_mien_deu_bi_chan(db_session) -> None:
     """Quét **toàn bộ** route của app: khách chưa đăng nhập không được vào bất kỳ đâu.
 
-    Đây là ca thay thế cho cả một danh sách viết tay, và nó là lý do `core/security.py` chặn bằng
-    middleware thay vì bằng `Depends` trên từng route: route mới quên bảo vệ thì dòng dưới đỏ.
+    Ca này thay cho cả một danh sách viết tay, và là lý do `core/security.py` chặn bằng middleware
+    thay vì bằng `Depends` trên từng route.
     """
     guarded = all_guarded_urls()
     assert len(guarded) > 15, "đọc sai danh sách route — không thể chỉ có vài route cần chặn"
@@ -112,8 +105,8 @@ async def test_trinh_duyet_bi_doi_huong_kem_next_giu_ca_query(db_session) -> Non
         response = await guest.get("/cards?status=confirmed&page=2", headers=HTML_HEADERS)
 
     assert response.status_code == 303
-    # `/` để nguyên cho dễ đọc trên thanh địa chỉ, còn `?` và `&` **phải** được mã hoá: không mã
-    # hoá thì `?next=/cards?status=confirmed` bị cắt ở dấu `?` thứ hai và bộ lọc biến mất.
+    # `?` và `&` **phải** được mã hoá: không mã hoá thì `?next=/cards?status=confirmed` bị cắt ở
+    # dấu `?` thứ hai và bộ lọc biến mất.
     assert response.headers["location"] == "/auth/login?next=/cards%3Fstatus%3Dconfirmed%26page%3D2"
 
 
@@ -210,10 +203,10 @@ async def test_the_cua_nguoi_khac_tra_404_khong_phai_403(
 async def test_upload_trung_anh_chi_tinh_trong_pham_vi_mot_khong_gian(
     db_session, user_a, workspace_a, user_b, workspace_b
 ) -> None:
-    """Tổ chức khác upload đúng tấm ảnh này thì **được**, và không biết bên kia đã có (`NEXT-05`).
+    """Tổ chức khác upload đúng tấm ảnh này thì **được**, và không biết bên kia đã có.
 
-    Đổi từ *một người* sang *một không gian* là đúng nửa còn lại của A9′: hai người **cùng** một
-    không gian quét trùng một tấm thẻ thì phải bị chặn — ca đó nằm ở `test_isolation.py`.
+    Nửa còn lại — hai người **cùng** một không gian quét trùng một thẻ thì phải bị chặn — nằm ở
+    `test_isolation.py`.
     """
     from app.repositories import card as card_repo
 
@@ -231,8 +224,8 @@ async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_khong_gian_khac(
 ) -> None:
     """Đường rò khó thấy nhất của A9′: chunk của tổ chức B lọt vào ngữ cảnh trợ lý AI của A.
 
-    Ca "A hỏi trợ lý về công ty chỉ B có" đầy đủ (gồm cả câu trả lời của model) nằm ở
-    `tests/test_isolation.py` — task 12.7 của T. Ở đây chặn tại tầng truy hồi, nơi rò bắt đầu.
+    Ca đầy đủ (gồm cả câu trả lời của model) nằm ở `tests/test_isolation.py`. Ở đây chặn tại tầng
+    truy hồi, nơi rò bắt đầu.
     """
     from app.services import retriever
 
@@ -258,14 +251,11 @@ async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_khong_gian_khac(
 async def test_swagger_tat_han_khi_khong_phai_may_dev(db_session, user_a: User, path: str) -> None:
     """Ba đường Swagger phải **không tồn tại** khi `DEBUG=false`, không chỉ bị chặn.
 
-    Trước I-43 chúng nằm sau cổng đăng nhập và thế là đủ — hồi hệ thống còn chạy localhost. Từ
-    D13 nó chạy trên `ocrximi.io.vn`, nơi **ai đăng ký một tài khoản cũng là "đã đăng nhập"**,
-    nên cổng ấy không còn là ranh giới đáng tin. Kiểm bằng client **đã đăng nhập** chính vì lý
-    do đó: chưa đăng nhập thì middleware trả 303 và ta không phân biệt được "đã tắt" với "chỉ
-    đang bị chặn".
+    Trên `ocrximi.io.vn` thì ai đăng ký một tài khoản cũng là "đã đăng nhập", nên cổng đăng nhập
+    không còn là ranh giới đáng tin. Kiểm bằng client **đã đăng nhập** chính vì lý do đó.
 
-    `/openapi.json` nằm trong danh sách cùng hai cái kia, và nó mới là cái đáng giấu nhất: tắt
-    mỗi `/docs` thì giao diện đọc biến mất còn **toàn bộ lược đồ API vẫn tải về được**.
+    `/openapi.json` mới là cái đáng giấu nhất: tắt mỗi `/docs` thì giao diện đọc biến mất còn
+    **toàn bộ lược đồ API vẫn tải về được**.
     """
     async with api_client(db_session, user_a) as client:
         response = await client.get(path, headers=HTML_HEADERS)

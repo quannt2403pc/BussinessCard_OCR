@@ -1,33 +1,23 @@
 """Chặn truy cập ở tầng app: chưa đăng nhập thì không vào được gì ngoài `/auth/*` + `/health`.
 
-Chủ sở hữu: Q | Task: 12.4 | xem Task.md — tiêu chí **A8** (Plan.md mục 8)
+Chủ sở hữu: Q | Task: 12.4 — tiêu chí **A8**
 
-**Mặc định là ĐÓNG, và đó là toàn bộ lý do file này tồn tại.** Cách hiển nhiên hơn — gắn
-`Depends(current_user)` vào từng route — lại mặc định MỞ: route mới viết mà quên khai dependency
-thì nó công khai, không ai thấy gì bất thường, và lỗi chỉ lộ ra khi có người thử. Ở đây một
-middleware chặn **mọi** đường dẫn không nằm trong danh sách miễn, nên quên khai dependency chỉ
-làm route thiếu đối tượng `User` (lỗi lập trình, thấy ngay lần chạy đầu) chứ không mở cửa dữ liệu.
+**Mặc định là ĐÓNG, và đó là toàn bộ lý do file này tồn tại.** Gắn `Depends(current_user)` vào
+từng route lại mặc định MỞ: route mới mà quên khai dependency thì nó công khai và không ai thấy
+gì bất thường. Ở đây quên khai dependency chỉ làm route thiếu đối tượng `User` — lỗi lập trình,
+thấy ngay lần chạy đầu.
 
 Hai lớp, hai việc khác nhau:
 
 1. `RequireLoginMiddleware` — **cổng vào**. Chưa đăng nhập: request HTML nhận `303` về
-   `/auth/login?next=…`, request API nhận `401` JSON (Plan.md mục 4). Đăng nhập rồi thì nó đặt
-   một *ảnh chụp* thông tin người dùng vào `request.state` để `base.html` in được tên và nút
-   Đăng xuất mà không route nào phải truyền thêm biến (xem `template_context`).
-2. `current_user` — **dependency lấy đối tượng `User`** cho route nào cần `user.id` để lọc dữ
-   liệu (task 12.5). Nó chỉ ném `401`, không bao giờ `303`: lúc nó chạy thì middleware đã lọc
-   xong, nên một request thiếu quyền tới được đây là chuyện bất thường của nội bộ, không phải
-   người dùng cần được đưa tới trang đăng nhập.
+   `/auth/login?next=…`, request API nhận `401` JSON. Đăng nhập rồi thì đặt một *ảnh chụp* thông
+   tin người dùng vào `request.state`.
+2. `current_user` — **dependency lấy đối tượng `User`**. Chỉ ném `401`, không bao giờ `303`.
 
-Giá phải trả, nói thẳng: một request đã đăng nhập tốn **hai** câu truy vấn `users` — một ở
-middleware (kiểm tài khoản còn sống, mật khẩu chưa đổi) và một ở dependency (lấy `User` gắn vào
-đúng session của request). Đều là tra theo khoá chính, cỡ vài chục micro giây. Cách tránh là
-chuyển object ORM từ middleware sang route, nhưng object đó thuộc một session đã đóng — hết hạn
-lúc nào là hỏng lúc ấy, đúng loại lỗi `MissingGreenlet` đã mất công truy ở 7.3. Không đáng.
+Giá phải trả: một request đã đăng nhập tốn **hai** câu tra `users` theo khoá chính. Chuyển object
+ORM từ middleware sang route thì nó thuộc một session đã đóng — đúng loại lỗi `MissingGreenlet`.
 
-⚠️ **`/docs`, `/openapi.json`, `/redoc` cũng bị chặn** — chúng không nằm trong danh sách miễn của
-A8. Muốn xem Swagger thì đăng nhập trước; nav trong `base.html` chỉ hiện với người đã đăng nhập
-nên không có liên kết cụt nào.
+⚠️ **`/docs`, `/openapi.json`, `/redoc` cũng bị chặn** — chúng không nằm trong danh sách miễn.
 """
 
 from __future__ import annotations
@@ -52,17 +42,13 @@ from app.services import auth
 
 logger = logging.getLogger(__name__)
 
-#: Đường dẫn vào được khi **chưa** đăng nhập. Đúng danh sách của tiêu chí A8, không thêm gì:
-#: `/health` (CD dùng làm smoke test ở 13.8), `/auth/*` (form đăng nhập/đăng ký), `/static/*`
-#: (CSS của chính trang đăng nhập).
-#:
-#: ⚠️ `/account` **không** nằm ở đây dù `routers/auth.py` khai nó: nó là trang dữ liệu của một
-#: người cụ thể, không phải cửa vào.
+#: Đường dẫn vào được khi **chưa** đăng nhập — đúng danh sách của tiêu chí A8, không thêm gì.
+#: ⚠️ `/account` **không** nằm ở đây: nó là trang dữ liệu của một người, không phải cửa vào.
 EXEMPT_PATHS: frozenset[str] = frozenset({"/health"})
 EXEMPT_PREFIXES: tuple[str, ...] = ("/auth/", "/static/")
 
 #: Khoá trong `request.state` giữ ảnh chụp người dùng. Dùng `scope["state"]` chứ không ContextVar
-#: vì cùng lý do đã ghi ở `core/errors.py`: handler lỗi chạy ngoài phạm vi ContextVar.
+#: vì handler lỗi chạy ngoài phạm vi ContextVar.
 STATE_KEY = "auth_user"
 
 UNAUTHENTICATED_DETAIL = "Chưa đăng nhập. Gọi POST /auth/login để lấy cookie phiên."
@@ -72,8 +58,8 @@ UNAUTHENTICATED_DETAIL = "Chưa đăng nhập. Gọi POST /auth/login để lấ
 class AuthUser:
     """Ảnh chụp **bất biến** của người đang đăng nhập, dùng để hiển thị.
 
-    Cố ý không phải object ORM: nó đi kèm request qua nhiều tầng (template, handler lỗi) và một
-    object ORM rời session sẽ hết hạn ở một chỗ không ai ngờ. Ở đây chỉ có ba chuỗi đã đọc sẵn.
+    Cố ý không phải object ORM: nó đi kèm request qua nhiều tầng và một object ORM rời session sẽ
+    hết hạn ở một chỗ không ai ngờ.
     """
 
     id: uuid.UUID
@@ -101,9 +87,7 @@ def auth_user(request: Request) -> AuthUser | None:
 def template_context(request: Request) -> dict[str, Any]:
     """Context processor của Jinja: đưa `current_user` vào **mọi** template.
 
-    Nhờ nó `base.html` in được tên + nút Đăng xuất mà không một route HTML nào phải truyền thêm
-    biến — kể cả trang lỗi (`error.html`) và các trang của T. Route quên truyền biến thì nav mất
-    nút Đăng xuất một cách im lặng; một chỗ khai duy nhất thì không có gì để quên.
+    Nhờ nó `base.html` in được tên + nút Đăng xuất mà không route HTML nào phải truyền thêm biến.
     """
     return {"current_user": auth_user(request)}
 
@@ -111,11 +95,11 @@ def template_context(request: Request) -> dict[str, Any]:
 class RequireLoginMiddleware(BaseHTTPMiddleware):
     """Cổng vào: mọi đường dẫn không được miễn đều phải có phiên đăng nhập hợp lệ.
 
-    Tự mở session DB riêng (`SessionLocal`) chứ không dùng dependency `get_db`: middleware chạy
-    **trước** khi FastAPI giải dependency, nên ở đây chưa có session nào tồn tại.
+    Tự mở session DB riêng chứ không dùng `get_db`: middleware chạy **trước** khi FastAPI giải
+    dependency.
 
-    Không `raise HTTPException` mà trả response thẳng: ngoại lệ ném từ middleware **không** đi qua
-    exception handler của `core/errors.py` (handler chỉ bọc phần router), nên nó sẽ thành 500.
+    Không `raise HTTPException` mà trả response thẳng: ngoại lệ ném từ middleware **không** đi
+    qua exception handler của `core/errors.py` nên nó sẽ thành 500.
     """
 
     async def dispatch(
@@ -142,17 +126,16 @@ class RequireLoginMiddleware(BaseHTTPMiddleware):
 async def current_user(request: Request, db: Annotated[AsyncSession, Depends(get_db)]) -> User:
     """Dependency: `User` của người đang đăng nhập, gắn vào session của chính request này.
 
-    Đường nhanh dùng lại ảnh chụp của middleware (một lần tra khoá chính). Đường chậm — không có
-    middleware — tự đọc cookie: nhờ vậy test dựng một app rỗng chỉ gắn một router (lối làm của
-    `tests/test_auth.py`) vẫn xác thực đúng thay vì được miễn oan.
+    Đường nhanh dùng lại ảnh chụp của middleware. Đường chậm — không có middleware — tự đọc
+    cookie, nhờ vậy test dựng một app rỗng chỉ gắn một router vẫn xác thực đúng.
     """
     snapshot = auth_user(request)
     if snapshot is not None:
         user = await user_repo.get_by_id(db, snapshot.id)
         if user is not None and user.is_active:
             return user
-        # Tài khoản bị xoá/khoá ngay giữa request: hiếm, nhưng để lọt là người vừa bị khoá vẫn
-        # ghi được dữ liệu cho tới khi họ tự đóng tab.
+        # Tài khoản bị xoá/khoá ngay giữa request: để lọt là người vừa bị khoá vẫn ghi được dữ
+        # liệu cho tới khi họ tự đóng tab.
         logger.info("Phiên trỏ tới tài khoản không còn dùng được: %s", snapshot.id)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, UNAUTHENTICATED_DETAIL)
 
@@ -170,12 +153,10 @@ def wants_html(request: Request) -> bool:
     """Trả trang HTML hay JSON cho request này.
 
     Hai điều kiện **cùng lúc**, cố ý chặt: đường dẫn không phải `/api/...` *và* client nhận HTML.
-    Chỉ xét `Accept` thì `fetch()` của chính UI ta (gửi `Accept: */*`) nhận về HTML và
-    `response.json()` vỡ tại chỗ; chỉ xét đường dẫn thì `curl /cards/abc` nhận cả trang Tailwind.
+    Chỉ xét `Accept` thì `fetch()` của chính UI ta nhận về HTML và `response.json()` vỡ tại chỗ;
+    chỉ xét đường dẫn thì `curl /cards/abc` nhận cả trang Tailwind.
 
-    Nằm ở đây thay vì `core/errors.py` vì từ 12.4 có **hai** chỗ cần đúng một quyết định này:
-    trang lỗi (errors.py) và cổng đăng nhập (middleware trên). Hai bản sao lệch nhau thì một
-    trong hai sẽ trả sai kiểu nội dung cho đúng cùng một loại client.
+    Nằm ở đây vì có **hai** chỗ cần đúng một quyết định này: trang lỗi và cổng đăng nhập.
     """
     if request.url.path.startswith("/api/"):
         return False
@@ -193,8 +174,7 @@ def _unauthenticated(request: Request) -> Response:
     if request.url.query:
         target = f"{target}?{request.url.query}"
     # `quote` cả dấu `?`/`&` của query: không mã hoá thì `?next=/cards?q=a` bị cắt ở dấu `?` thứ
-    # hai và người dùng bị đưa về `/cards` trắng sau khi đăng nhập. `safe_next()` của T kiểm lại
-    # giá trị này lúc chuyển hướng về, nên vòng đi–về không mở được open redirect.
+    # hai. `safe_next()` kiểm lại giá trị này lúc chuyển hướng về nên không mở được open redirect.
     return RedirectResponse(
         f"/auth/login?next={quote(target, safe='/')}", status_code=status.HTTP_303_SEE_OTHER
     )

@@ -1,19 +1,15 @@
 """Nút OAuth CLIProxy: connect / status / disconnect / test.
 
-Chủ sở hữu: Q | Task: 2.4 | xem Task.md
+Chủ sở hữu: Q | Task: 2.4
 
-Router này khai **đường dẫn đầy đủ** (không đặt `prefix`) vì nó phục vụ cả API
-(`/api/integration/*`) lẫn trang HTML `/settings` — gom vào một file để không phải đụng
-`app/main.py` (quy ước số 4).
+Router khai **đường dẫn đầy đủ** (không đặt `prefix`) vì nó phục vụ cả API lẫn trang `/settings`.
 
-Hai điều dễ làm sai, đã ghi thành ràng buộc trong mã bên dưới:
+Hai điều dễ làm sai:
 
 1. **Badge đọc từ `auth-files`.** `get-auth-status` không có `state` trả `{"status":"ok"}` kể cả
-   khi chưa đăng nhập bao giờ → badge xanh vĩnh viễn (I-02). `oauth_status` chỉ dùng cho
-   endpoint poll, và `CliProxyClient.oauth_status()` bắt buộc có `state`.
-2. **CLIProxy chết ≠ đã ngắt kết nối.** Token nằm trong volume `cliproxy_auths`, container chết
-   không làm mất token. Lúc đó `/status` trả `reachable=false` kèm giá trị cache lần cuối, chứ
-   không được vẽ badge "Chưa kết nối" (docker-compose cố ý cho `api` lên mà không chờ cliproxy).
+   khi chưa đăng nhập bao giờ → badge xanh vĩnh viễn (I-02).
+2. **CLIProxy chết ≠ đã ngắt kết nối.** Token nằm trong volume `cliproxy_auths`. Lúc đó `/status`
+   trả `reachable=false` kèm cache lần cuối, không được vẽ badge "Chưa kết nối".
 """
 
 from __future__ import annotations
@@ -104,11 +100,10 @@ class OAuthStatusOut(BaseModel):
 
 
 class OAuthCallbackIn(BaseModel):
-    """Thứ người dùng dán vào sau khi đồng ý ở Google (13.7).
+    """Thứ người dùng dán vào sau khi đồng ý ở Google.
 
-    `pasted` cố ý **dễ tính**: nhận cả URL đầy đủ lẫn mỗi đoạn `code`. Bước này là chỗ duy
-    nhất trong hệ thống bắt người dùng làm việc của máy, nên mọi cách chép hợp lý đều phải
-    chạy — kén chọn ở đây chỉ đổi lấy một lượt đăng nhập hỏng.
+    `pasted` cố ý **dễ tính**: nhận cả URL đầy đủ lẫn mỗi đoạn `code`. Kén chọn ở đây chỉ đổi lấy
+    một lượt đăng nhập hỏng.
     """
 
     state: str = Field(min_length=1, description="`state` của phiên UI đang chờ")
@@ -127,8 +122,7 @@ class DisconnectOut(BaseModel):
 class ConnectionTestOut(BaseModel):
     """Kết quả nút "Kiểm tra kết nối".
 
-    Gọi hỏng **không** trả 5xx: với trang cài đặt thì "gọi thử thất bại" là một kết quả hợp lệ
-    cần hiển thị, không phải sự cố của API này.
+    Gọi hỏng **không** trả 5xx: "gọi thử thất bại" là một kết quả hợp lệ cần hiển thị.
     """
 
     ok: bool
@@ -143,10 +137,10 @@ class ConnectionTestOut(BaseModel):
 
 @router.get("/settings", response_class=HTMLResponse, tags=["ui"])
 async def settings_page(request: Request) -> HTMLResponse:
-    """Trang Cài đặt — badge trạng thái + nút OAuth (task 2.5).
+    """Trang Cài đặt — badge trạng thái + nút OAuth.
 
-    Trang render ngay, không chờ CLIProxy: badge do JavaScript gọi `/api/integration/status`
-    điền vào. Nhờ vậy cliproxy chết thì trang vẫn mở được và hiện đúng lý do.
+    Trang render ngay, không chờ CLIProxy: badge do JavaScript gọi `/api/integration/status` điền
+    vào, nên cliproxy chết thì trang vẫn mở được và hiện đúng lý do.
     """
     return templates.TemplateResponse(
         request,
@@ -170,8 +164,8 @@ async def get_status(
 ) -> IntegrationStatusOut:
     """Trạng thái kết nối OAuth. **Nguồn sự thật: `GET /v0/management/auth-files`** (I-02).
 
-    Từ 13.1 chỉ tính credential **của chính người đang đăng nhập** (`users.cliproxy_auth_file`):
-    badge của A không còn xanh nhờ kết nối của B (I-28).
+    Chỉ tính credential **của chính người đang đăng nhập**: badge của A không xanh nhờ kết nối
+    của B.
     """
     provider = settings.cliproxy_auth_provider
     cached = await db.get(IntegrationStatus, (user.id, provider))
@@ -181,7 +175,7 @@ async def get_status(
             files = user_credentials.own_files(await proxy.auth_files(), user)
             models = await _safe_model_ids(proxy)
     except (CliProxyUnavailableError, CliProxyAuthError, CliProxyDisabledError) as exc:
-        # Ba lỗi này đều là "không hỏi được CLIProxy" chứ không phải "người dùng chưa kết nối".
+        # Ba lỗi này đều là "không hỏi được CLIProxy", không phải "người dùng chưa kết nối".
         logger.warning("Không đọc được trạng thái CLIProxy: %s", exc)
         return IntegrationStatusOut(
             provider=provider,
@@ -205,11 +199,8 @@ async def get_status(
     detail = None
     if files and not usable:
         # Có credential nhưng CLIProxy đánh dấu hỏng — badge phải đỏ, kèm lý do.
-        #
-        # I-42: câu cũ là *"Hãy kết nối lại"*, và đó là ngõ cụt. Đo thật 2026-09-28: Google
-        # chặn tài khoản với `403 VALIDATION_REQUIRED — "Verify your account to continue."`,
-        # kèm sẵn link xác minh trong `status_message`. Đăng nhập lại mười lần cũng ra đúng
-        # tài khoản chưa xác minh ấy; thứ người dùng cần là **đường link kia**.
+        # I-42: Google chặn bằng `403 VALIDATION_REQUIRED` kèm sẵn link xác minh. Đăng nhập lại
+        # mười lần cũng ra đúng tài khoản chưa xác minh ấy; thứ người dùng cần là đường link kia.
         block = next((b for f in files if (b := f.provider_block) is not None), None)
         if block is not None:
             viec_can_lam = (
@@ -239,8 +230,8 @@ async def get_status(
 async def connect(user: CurrentUser) -> ConnectOut:
     """Mở phiên OAuth, trả URL cho UI mở tab mới + `state` để poll.
 
-    Backend giữ management key; UI chỉ nhận `url` và `state` (Plan.md mục 2.5 bước 2).
-    Chụp danh sách credential trước khi mở phiên để lúc xong biết file nào vừa sinh (13.1).
+    Backend giữ management key; UI chỉ nhận `url` và `state`. Chụp danh sách credential trước khi
+    mở phiên để lúc xong biết file nào vừa sinh.
     """
     try:
         async with CliProxyClient() as proxy:
@@ -263,8 +254,7 @@ async def oauth_status(
     """Poll một phiên OAuth **đang chạy** — chỉ dùng trong lúc chờ người dùng đồng ý.
 
     `state` là tham số bắt buộc, cố ý: thiếu nó thì CLIProxy trả "ok" kể cả khi chưa đăng nhập
-    bao giờ (I-02). Xong (`status=ok`) thì credential vừa sinh được gắn vào người đang đăng
-    nhập kèm tiền tố riêng (13.1, ADR 12.1), rồi UI gọi lại `/status` để vẽ badge.
+    bao giờ (I-02).
     """
     if not user_credentials.owns_session(state, user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
@@ -273,9 +263,8 @@ async def oauth_status(
             result = await proxy.oauth_status(state)
             if result.is_done:
                 await user_credentials.claim(db, user, proxy, state)
-                # Danh mục model chỉ đọc được sau khi có credential (I-12). Vừa kết nối
-                # xong mà vẫn dùng bản nhớ cũ thì ô chọn model của EX-15 trống thêm 5 phút
-                # nữa, đúng lúc người dùng đang ở trang đó và chờ nó đầy lên.
+                # Danh mục model chỉ đọc được sau khi có credential (I-12); giữ bản nhớ cũ thì ô
+                # chọn model trống thêm 5 phút nữa.
                 model_catalog.forget_catalogue()
     except user_credentials.CredentialTakenError as exc:
         return OAuthStatusOut(
@@ -305,28 +294,20 @@ async def submit_oauth_callback(
 ) -> OAuthStatusOut:
     """Nhận hộ cái URL callback mà trình duyệt không tự gửi được — lối kết nối trên tên miền thật.
 
-    Task 13.7, gỡ **I-29**. Trên `localhost` đường này không cần tới: CLIProxy dựng forwarder ở
-    cổng 51121 ngay trên máy người dùng nên callback tự về. Trên `ocrximi.io.vn` thì
-    `http://localhost:51121` là máy của **người dùng**, chứ không phải máy chủ — chi tiết và lý
-    do phương án "mở 51121 qua Caddy" không dùng được: `CliProxyClient.submit_oauth_callback`.
-
-    Xong lời gọi này thì phiên chuyển sang trạng thái xong; hàm cũng gắn luôn credential vào
-    người đang đăng nhập (13.1) thay vì bắt UI chờ nhịp poll kế tiếp.
+    Trên `localhost` đường này không cần tới (CLIProxy dựng forwarder ở cổng 51121 ngay trên máy
+    người dùng). Trên `ocrximi.io.vn` thì `http://localhost:51121` là máy của **người dùng**, chứ
+    không phải máy chủ — xem `CliProxyClient.submit_oauth_callback`.
     """
     pasted = payload.pasted.strip()
 
-    # `state` lấy từ **chính URL vừa dán**, không phải từ phiên UI đang chờ. Nghe ngược đời
-    # nhưng đây mới đúng: bấm nút Kết nối hai lần là có hai phiên, và lượt người dùng thật sự
-    # đăng nhập xong là lượt nằm trong URL họ cầm về — không nhất thiết là lượt mới nhất.
-    # Bản trước bắt hai giá trị phải trùng nhau và từ chối thẳng, tức phạt người dùng vì một
-    # cú bấm thừa. Luật tách người dùng **không hề bị nới**: `owns_session()` ngay dưới vẫn
-    # đòi phiên đó phải do chính người đang đăng nhập mở ra.
+    # `state` lấy từ **chính URL vừa dán**, không phải từ phiên UI đang chờ: bấm nút Kết nối hai
+    # lần là có hai phiên, và lượt đăng nhập xong là lượt nằm trong URL người dùng cầm về.
+    # `owns_session()` ngay dưới vẫn đòi phiên đó do chính người đang đăng nhập mở ra.
     state = _state_in_url(pasted) or payload.state
     if not user_credentials.owns_session(state, user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
-    # Có `code=` (hoặc có phần truy vấn) thì coi là URL; còn lại coi là người dùng chỉ chép
-    # được mỗi đoạn mã.
+    # Có `code=` (hoặc có phần truy vấn) thì coi là URL; còn lại coi là chỉ chép được mã.
     looks_like_url = "code=" in pasted or "?" in pasted
     sent = {"redirect_url": pasted} if looks_like_url else {"code": pasted, "state": state}
 
@@ -336,9 +317,8 @@ async def submit_oauth_callback(
             result = await proxy.oauth_status(state)
             if result.is_done:
                 await user_credentials.claim(db, user, proxy, state)
-                # Danh mục model chỉ đọc được sau khi có credential (I-12). Vừa kết nối
-                # xong mà vẫn dùng bản nhớ cũ thì ô chọn model của EX-15 trống thêm 5 phút
-                # nữa, đúng lúc người dùng đang ở trang đó và chờ nó đầy lên.
+                # Danh mục model chỉ đọc được sau khi có credential (I-12); giữ bản nhớ cũ thì ô
+                # chọn model trống thêm 5 phút nữa.
                 model_catalog.forget_catalogue()
     except CliProxyCallbackError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
@@ -388,8 +368,7 @@ async def disconnect(
 ) -> DisconnectOut:
     """Ngắt kết nối: xoá **đúng một** credential của người đang đăng nhập rồi hạ cờ cache.
 
-    Trước 13.1 hàm này xoá mọi credential của provider — một người bấm là cắt kết nối AI của
-    tất cả mọi người (I-28).
+    Xoá mọi credential của provider thì một người bấm là cắt kết nối AI của tất cả mọi người.
     """
     provider = settings.cliproxy_auth_provider
     try:
@@ -407,15 +386,13 @@ async def disconnect(
 
 @router.post("/api/integration/test", response_model=ConnectionTestOut, tags=["integration"])
 async def test_connection(user: CurrentUser) -> ConnectionTestOut:
-    """Gọi thử một prompt ngắn tới model đang cấu hình — tiêu chí hoàn thành D2.
+    """Gọi thử một prompt ngắn tới model đang cấu hình.
 
-    Đây là phép thử **đầu–cuối thật**: đi qua CLIProxy, dùng credential OAuth thật, đúng model
-    trong `LLM_MODEL`. Badge xanh mà nút này đỏ nghĩa là token còn nhưng model sai tên (I-03)
-    hoặc tài khoản hết quota.
+    Phép thử **đầu–cuối thật**: qua CLIProxy, credential OAuth thật, đúng model trong `LLM_MODEL`.
+    Badge xanh mà nút này đỏ nghĩa là token còn nhưng model sai tên hoặc tài khoản hết quota.
 
-    **Cố ý thử model mặc định, không thử model người dùng đã chọn cho từng chức năng** (`EX-15`):
-    xem `user_credentials.default_model_for()` — nút này chẩn đoán *kết nối*, và kết quả của nó
-    phải có đúng một nghĩa.
+    **Cố ý thử model mặc định, không thử model người dùng chọn cho từng chức năng**: nút này chẩn
+    đoán *kết nối*, kết quả của nó phải có đúng một nghĩa.
     """
     started = time.perf_counter()
     try:
@@ -440,9 +417,8 @@ async def test_connection(user: CurrentUser) -> ConnectionTestOut:
 # --------------------------------------------------------------------------- model/chức năng
 
 
-#: Vì sao danh sách của mỗi chức năng dài ngắn khác nhau. Chữ hiện thẳng trên `/settings`: người
-#: dùng thấy ô *Lập hồ sơ* chỉ có 7 model trong khi ô *Trợ lý AI* có 12 thì câu hỏi đầu tiên của
-#: họ là "sao thiếu?", và câu trả lời phải nằm ngay đó chứ không nằm trong một file ADR.
+#: Vì sao danh sách của mỗi chức năng dài ngắn khác nhau. Chữ hiện thẳng trên `/settings`: câu
+#: trả lời phải nằm ngay đó chứ không nằm trong một file ADR.
 FEATURE_HINTS: dict[str, str] = {
     "ocr": "Dùng chung cho bước Việt hoá sau khi quét. Chỉ hiện model đọc được ảnh.",
     "enrich": "Chỉ hiện model tra cứu Internet được — không có nguồn thì hồ sơ trống.",
@@ -465,8 +441,7 @@ async def _model_prefs(db: AsyncSession, user_id: uuid.UUID) -> ModelPrefsOut:
                 label=model_catalog.FEATURE_LABELS[feature],
                 hint=FEATURE_HINTS[feature],
                 selected=selected,
-                # Danh mục rỗng = không hỏi được CLIProxy, **không** phải "model đã bị gỡ". Báo
-                # đỏ lúc đó là vu oan cho lựa chọn của người dùng vì ta đang mất mạng.
+                # Danh mục rỗng = không hỏi được CLIProxy, **không** phải "model đã bị gỡ".
                 selected_available=not selected or not available or selected in available,
                 available=available,
             )
@@ -492,15 +467,14 @@ async def put_model_prefs(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: CurrentUser,
 ) -> ModelPrefsOut:
-    """Đổi model cho một hoặc vài chức năng. Trường không gửi thì giữ nguyên, gửi `null` là về mặc định.
+    """Đổi model cho một hoặc vài chức năng. Không gửi thì giữ nguyên, gửi `null` là về mặc định.
 
-    **Từ chối model không đủ năng lực cho chức năng đó**, thay vì nhận rồi để hỏng sau. Cả hai
-    đường hỏng đều im lặng (ADR mục 1): model không đọc ảnh vẫn trả JSON — chỉ toàn `"none"`; model
-    không tra cứu được vẫn trả lời — chỉ không có nguồn nào. Chỗ duy nhất báo được cho người dùng
-    bằng thứ họ hiểu là ngay lúc họ bấm lưu.
+    **Từ chối model không đủ năng lực cho chức năng đó** thay vì nhận rồi để hỏng sau: cả hai
+    đường hỏng đều im lặng — model không đọc ảnh vẫn trả JSON (toàn `"none"`), model không tra
+    cứu được vẫn trả lời (chỉ không có nguồn nào).
 
-    Không hỏi được danh mục thì trả **503, không lưu**: không có gì để đối chiếu thì lưu gì cũng
-    là lưu mò, mà thứ lưu mò ở đây sẽ âm thầm làm hỏng mọi lượt quét sau đó.
+    Không hỏi được danh mục thì trả **503, không lưu**: lưu mò ở đây sẽ âm thầm làm hỏng mọi lượt
+    quét sau đó.
     """
     choices: dict[str, str | None] = payload.model_dump(exclude_unset=True)
     if not choices:
@@ -555,8 +529,7 @@ async def _save_cache(
 ) -> IntegrationStatus:
     """Ghi cache trạng thái để badge hiện ngay khi tải trang, không phải chờ CLIProxy.
 
-    Khoá chính là `(user_id, provider)` từ revision `0005`, nên `db.get()` phải nhận **tuple** —
-    truyền một mình `provider` như trước 12.5 thì SQLAlchemy báo thiếu thành phần khoá.
+    Khoá chính là `(user_id, provider)` nên `db.get()` phải nhận **tuple**.
     """
     row = await db.get(IntegrationStatus, (user_id, provider))
     if row is None:
@@ -578,8 +551,7 @@ def _elapsed_ms(started: float) -> int:
 def _state_in_url(raw: str) -> str | None:
     """`state` nằm trong URL người dùng dán, hoặc `None` nếu không bóc ra được.
 
-    `None` **không** phải lỗi ở đây: cứ để CLIProxy phán xét, nó mới là chỗ giữ phiên. Hàm này
-    chỉ bắt sớm trường hợp dán nhầm URL của lượt kết nối khác.
+    `None` **không** phải lỗi: cứ để CLIProxy phán xét, nó mới là chỗ giữ phiên.
     """
     try:
         query = urlsplit(raw.strip()).query

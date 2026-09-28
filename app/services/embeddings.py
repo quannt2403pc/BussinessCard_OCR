@@ -1,25 +1,20 @@
 """Client HTTP gọi service `embedder` — sinh vector cho Knowledge Base (F3).
 
-Chủ sở hữu: Q | Task: 6.4 | xem Task.md
+Chủ sở hữu: Q | Task: 6.4
 
-Vì sao là HTTP chứ không nạp model thẳng trong `api`: CLIProxy **không có** endpoint embedding
-(đã kiểm chứng mã nguồn — Plan.md mục 2.6), còn nhét `torch` vào image `api` thì mỗi lần rebuild
-kéo thêm ~2.5GB. Hợp đồng `POST /embed` đã chốt ở Plan.md mục 2.6, service do T dựng (task 3.10).
+Là HTTP chứ không nạp model thẳng trong `api` vì CLIProxy **không có** endpoint embedding, còn
+nhét `torch` vào image `api` thì mỗi lần rebuild kéo thêm ~2.5GB.
 
-**Tiền tố `passage:` / `query:` do CHÍNH service embedder gắn**, dựa vào trường `kind` trong
-body (`embedder/main.py::with_prefix`). File này chỉ truyền `kind` cho đúng và **tuyệt đối không
-tự thêm tiền tố** — thêm lần nữa thành `passage: passage: …`, chất lượng truy hồi tụt mà không
-có lỗi nào báo ra. Đây đúng là loại hỏng âm thầm mà Plan.md mục 2.6 cảnh báo.
+**Tiền tố `passage:` / `query:` do CHÍNH service embedder gắn** dựa vào trường `kind`. File này
+chỉ truyền `kind` cho đúng và **tuyệt đối không tự thêm tiền tố** — thêm lần nữa thành
+`passage: passage: …`, chất lượng truy hồi tụt mà không có lỗi nào báo ra.
 
-Ba quy tắc còn lại, cùng lý do với `cliproxy_client.py`:
+Ba quy tắc còn lại:
 
-- **Chỉ retry lỗi mạng và 429/5xx.** 4xx là ta gửi sai (chuỗi rỗng, quá 64 phần tử) — thử lại
-  vẫn sai y như vậy, chỉ tốn thời gian của người đang ngồi chờ.
-- **Kiểm số chiều trả về.** Cột `kb_chunks.embedding` là `vector(384)` cố định; embedder chạy
-  model khác chiều thì Postgres từ chối lúc `INSERT` với thông báo rất khó lần ra. Bắt ngay tại
-  đây, kèm câu chỉ rõ phải làm gì.
-- **Không gọi trong lúc đang mở transaction DB.** Một batch trên CPU mất vài giây; giữ
-  transaction suốt thời gian đó là bài học đã trả giá ở task 5.4.
+- **Chỉ retry lỗi mạng và 429/5xx** — 4xx là ta gửi sai, thử lại vẫn sai y như vậy.
+- **Kiểm số chiều trả về** — cột là `vector(384)` cố định; lệch chiều thì Postgres từ chối lúc
+  `INSERT` với thông báo rất khó lần ra.
+- **Không gọi trong lúc đang mở transaction DB** — một batch trên CPU mất vài giây.
 """
 
 from __future__ import annotations
@@ -37,17 +32,14 @@ logger = logging.getLogger(__name__)
 
 Kind = Literal["passage", "query"]
 
-#: Sinh vector trên CPU: một batch 32 đoạn mất cỡ vài giây, lần gọi đầu sau khi container lên
-#: còn cộng thêm thời gian nạp model. 60s là rộng rãi mà vẫn không treo request vô hạn.
+#: Sinh vector trên CPU: một batch 32 đoạn mất cỡ vài giây, lần gọi đầu còn cộng thời gian nạp model.
 EMBED_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
 
 #: `/health` chỉ đọc biến trong tiến trình — chậm hơn 10s nghĩa là service đang hỏng.
 HEALTH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
-#: Số đoạn tối đa gửi trong MỘT request. Trần cứng của embedder là 64
-#: (`embedder/main.py::MAX_TEXTS`) — gửi quá là 422, không phải lỗi tạm thời.
-#: Để 32 cho có biên: batch to hơn không nhanh hơn đáng kể (bên kia vẫn chia nhỏ 16/lượt)
-#: mà lại dễ chạm timeout hơn.
+#: Số đoạn tối đa gửi trong MỘT request. Trần cứng của embedder là 64 — gửi quá là 422, không
+#: phải lỗi tạm thời. Để 32 cho có biên.
 MAX_BATCH = 32
 
 #: Chỉ những mã này mới đáng thử lại. 4xx cố ý không có mặt.
@@ -64,17 +56,15 @@ class EmbeddingError(RuntimeError):
 class EmbedderUnavailableError(EmbeddingError):
     """Không gọi được `embedder`: lỗi mạng, timeout, hoặc 5xx sau khi hết lượt thử.
 
-    Thường gặp nhất khi container chưa lên — lần build đầu kéo torch + nhúng model mất vài
-    phút. Thông báo phải nói được điều đó, vì nhìn từ UI thì nó chỉ là "reindex hỏng".
+    Thường gặp nhất khi container chưa lên — nhìn từ UI thì nó chỉ là "reindex hỏng".
     """
 
 
 class EmbeddingDimError(EmbeddingError):
     """Vector trả về không đúng `EMBEDDING_DIM`.
 
-    Là lỗi cấu hình/triển khai, không phải lỗi dữ liệu: image `embedder` đang chạy model khác
-    với model mà cột `vector(n)` được tạo theo. Sửa bằng cách đổi lại `EMBEDDING_MODEL` hoặc
-    nhờ Q sinh revision đổi kiểu cột (quy ước số 5) — xem Plan.md mục 2.6.
+    Lỗi cấu hình chứ không phải lỗi dữ liệu: image `embedder` đang chạy model khác với model mà
+    cột `vector(n)` được tạo theo.
     """
 
 
@@ -118,7 +108,7 @@ async def embed_passages(
 
 
 async def embed_query(text: str, *, client: httpx.AsyncClient | None = None) -> list[float]:
-    """Vector cho **câu hỏi của người dùng** (`kind="query"`) — dùng ở task 7.1.
+    """Vector cho **câu hỏi của người dùng** (`kind="query"`).
 
     Tách hàm riêng thay vì bắt chỗ gọi tự nhớ `kind`: nhầm `passage` cho câu hỏi không gây lỗi
     nào, chỉ làm kết quả tìm kiếm tệ đi một cách khó truy ra.
@@ -130,8 +120,8 @@ async def embed_query(text: str, *, client: httpx.AsyncClient | None = None) -> 
 async def health(*, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     """`GET /health` của embedder: `{"status","model","dim","max_seq_length"}`.
 
-    Dùng để báo lỗi sớm và rõ (endpoint reindex ở task 6.4 gọi trước khi làm gì khác) thay vì
-    để người dùng chờ hết một lượt embed mới biết service chưa sẵn sàng.
+    Dùng để báo lỗi sớm và rõ thay vì để người dùng chờ hết một lượt embed mới biết service chưa
+    sẵn sàng.
     """
     owns_client = client is None
     http = client or httpx.AsyncClient(base_url=base_url(), timeout=HEALTH_TIMEOUT)
@@ -153,9 +143,7 @@ async def health(*, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
 def base_url() -> str:
     """URL gốc của service embedder, đã bỏ dấu `/` thừa.
 
-    Công khai có chủ đích: `routers/kb.py` dựng sẵn một `AsyncClient` dùng chung cho cả lượt
-    reindex nên cần URL này. Để dưới dấu `_` rồi bắt module khác chép lại chuỗi cấu hình đúng
-    là cái bẫy đã ghi ở I-17.
+    Công khai có chủ đích: `routers/kb.py` dựng sẵn một `AsyncClient` dùng chung nên cần URL này.
     """
     return settings.embedder_url.rstrip("/")
 
@@ -163,9 +151,7 @@ def base_url() -> str:
 def _reject_blank(texts: Sequence[str]) -> None:
     """Chặn chuỗi rỗng trước khi gửi.
 
-    Embedder trả 422 cho chuỗi rỗng (`embedder/main.py::reject_blank_texts`). Bắt ở đây thì
-    thông báo nói được chỉ số phần tử hỏng — đọc 422 của FastAPI để suy ra chỗ đó tốn thời gian
-    hơn nhiều, mà lỗi này gần như luôn do khâu chunk ở `services/kb.py` sinh ra đoạn trắng.
+    Embedder trả 422 cho chuỗi rỗng; bắt ở đây thì thông báo nói được chỉ số phần tử hỏng.
     """
     for index, text in enumerate(texts):
         if not text or not text.strip():
@@ -222,9 +208,8 @@ async def _request_json(
 def _read_vectors(payload: dict[str, Any], *, expected: int) -> list[list[float]]:
     """Đọc `{"vectors":[…],"dim":n}` và kiểm cả số lượng lẫn số chiều.
 
-    Kiểm số lượng vì vector lệch chỉ số so với đoạn văn là hỏng câm: KB vẫn đầy dữ liệu, chỉ
-    có điều mỗi đoạn mang vector của đoạn khác, và không có cách nào phát hiện ra ngoài việc
-    thấy trợ lý trả lời sai lung tung.
+    Kiểm số lượng vì vector lệch chỉ số so với đoạn văn là hỏng câm: KB vẫn đầy dữ liệu, chỉ có
+    điều mỗi đoạn mang vector của đoạn khác.
     """
     vectors = payload.get("vectors")
     if not isinstance(vectors, list) or len(vectors) != expected:

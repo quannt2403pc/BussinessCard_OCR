@@ -1,30 +1,19 @@
 """F1 — upload, danh sách, chi tiết, sửa, xoá, confirm danh thiếp.
 
-Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 12.5 | xem Task.md
+Chủ sở hữu: Q | Task: 3.1, 4.1–4.5, 5.1–5.3, 12.5
 
-Router khai **đường dẫn đầy đủ** thay vì đặt `prefix="/api/cards"`, theo đúng tiền lệ
-`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn ba trang HTML
-(`/cards`, `/cards/upload`, `/cards/{id}`) cộng một chuyển hướng cũ (`/cards/batch`, gộp ở I-38).
-Gom vào một router để không phải đụng `app/main.py` (quy ước số 4).
+Router khai **đường dẫn đầy đủ** thay vì `prefix=`: file này phục vụ cả API (`/api/cards/*`) lẫn
+ba trang HTML. Gom vào một router để không phải đụng `app/main.py`.
 
-⚠️ **Thứ tự khai báo route HTML là một phần của thiết kế**: `/cards/upload` và `/cards/batch` phải
-đứng trước `/cards/{card_id}`, nếu không hai chữ `upload`/`batch` sẽ rơi vào route chi tiết và
-chết ở bước parse UUID.
+⚠️ **Thứ tự khai báo route HTML là một phần của thiết kế**: `/cards/upload` và `/cards/batch`
+phải đứng trước `/cards/{card_id}`, nếu không chúng rơi vào route chi tiết và chết ở bước parse UUID.
 
-Một lượt upload đi qua đúng bốn bước, theo thứ tự:
+Một lượt upload: đọc có giới hạn (cắt ngay lúc đọc, không đọc hết rồi mới đo) → chống trùng bằng
+SHA-256 của **file gốc** (nén JPEG không tất định nên băm bản đã nén là sai) → tiền xử lý + lưu
+volume → OCR + lưu DB.
 
-1. **Đọc có giới hạn** — cắt ở `MAX_UPLOAD_MB` ngay lúc đọc, không đọc hết rồi mới đo. Đọc hết
-   một file 2GB vào RAM để sau đó trả 413 là tự mở cửa cho việc treo container.
-2. **Chống trùng** — SHA-256 của **file gốc người dùng gửi**, không phải ảnh sau khi nén: nén
-   JPEG không tất định giữa các phiên bản Pillow, băm bản đã nén thì cùng một ảnh vẫn có thể ra
-   hai hash khác nhau sau khi nâng thư viện.
-3. **Tiền xử lý + lưu volume** (task 3.2).
-4. **OCR + lưu DB** (task 3.4, 3.5).
-
-Quyết định đáng chú ý: **OCR hỏng không làm hỏng lượt upload.** Chưa bấm OAuth, CLIProxy chết,
-model trả JSON rác — ảnh vẫn được lưu, bản ghi vẫn được tạo ở trạng thái `pending` kèm lý do
-trong `ocr_error`, và người dùng quét lại sau. Trả 5xx rồi vứt ảnh đi là bắt người dùng chụp
-lại chồng danh thiếp chỉ vì token hết hạn.
+**OCR hỏng không làm hỏng lượt upload**: ảnh vẫn được lưu, bản ghi vẫn tạo ở trạng thái `pending`
+kèm lý do trong `ocr_error`, quét lại sau.
 """
 
 from __future__ import annotations
@@ -87,13 +76,11 @@ DEFAULT_PAGE_SIZE = 20
 #: Bộ lọc trạng thái hợp lệ của ô select trên `templates/cards/list.html`.
 STATUS_CHOICES: tuple[str, ...] = tuple(s.value for s in CardStatus)
 
-#: Trần số ảnh một lượt batch (task 5.2). Không phải giới hạn kỹ thuật mà là giới hạn về sự
-#: kiên nhẫn: 50 ảnh × ~4s / 2 luồng đã là hơn 1 phút rưỡi ngồi nhìn thanh tiến trình.
+#: Trần số ảnh một lượt batch — giới hạn về sự kiên nhẫn, không phải giới hạn kỹ thuật.
 MAX_BATCH_FILES = 50
 
-#: Điểm `confidence` dưới mức này thì `templates/cards/detail.html` tô vàng (task 5.1). 0.75 đo
-#: từ kết quả thật ở task 3.4: chữ rõ model chấm 0.9–1.0, chỗ mờ tụt hẳn xuống 0.5–0.7 — đặt
-#: ngưỡng ở giữa thì vàng nghĩa là "đáng kiểm", không phải "vàng cả thẻ nên thôi kệ".
+#: Điểm `confidence` dưới mức này thì màn hình review tô vàng. 0.75 đo từ kết quả thật: chữ rõ
+#: model chấm 0.9–1.0, chỗ mờ tụt xuống 0.5–0.7.
 LOW_CONFIDENCE = 0.75
 
 
@@ -102,11 +89,10 @@ LOW_CONFIDENCE = 0.75
 
 @router.get("/cards", response_class=HTMLResponse, tags=["ui"])
 async def cards_page(request: Request) -> HTMLResponse:
-    """Màn hình danh sách danh thiếp (task 4.4).
+    """Màn hình danh sách danh thiếp.
 
-    Trang render rỗng rồi để JavaScript gọi `GET /api/cards` đổ dữ liệu vào — cùng lối với
-    `/settings` (task 2.5): tìm kiếm và lọc phải chạy được mà không tải lại trang, và DB chết
-    thì trang vẫn mở được để hiện đúng lý do.
+    Trang render rỗng rồi để JavaScript gọi `GET /api/cards` đổ dữ liệu vào: tìm kiếm và lọc phải
+    chạy được mà không tải lại trang.
     """
     return templates.TemplateResponse(
         request,
@@ -121,11 +107,10 @@ async def cards_page(request: Request) -> HTMLResponse:
 
 @router.get("/cards/upload", response_class=HTMLResponse, tags=["ui"])
 async def cards_upload_page(request: Request) -> HTMLResponse:
-    """Màn hình quét danh thiếp — **một ảnh hay ba mươi ảnh đều vào đây** (task 4.5, 5.3, I-38).
+    """Màn hình quét danh thiếp — **một ảnh hay ba mươi ảnh đều vào đây**.
 
-    Gộp từ hai màn hình cũ. Chúng chỉ khác nhau ở số ảnh người dùng định chọn, mà đó là thứ họ
-    chưa biết cho tới khi mở hộp chọn file ra — bắt chọn trước là bắt trả lời một câu hỏi của hệ
-    thống chứ không phải của họ.
+    Gộp từ hai màn hình cũ: chúng chỉ khác nhau ở số ảnh, mà đó là thứ người dùng chưa biết cho
+    tới khi mở hộp chọn file ra.
     """
     return templates.TemplateResponse(
         request,
@@ -141,28 +126,22 @@ async def cards_upload_page(request: Request) -> HTMLResponse:
 
 @router.get("/cards/batch", tags=["ui"])
 async def cards_batch_page() -> RedirectResponse:
-    """`/cards/batch` gộp vào `/cards/upload` — chuyển hướng **301** (I-38).
+    """`/cards/batch` gộp vào `/cards/upload` — chuyển hướng **301**.
 
-    **Phải khai trước `/cards/{card_id}`.** Starlette so đường dẫn theo thứ tự khai báo, đặt sau
-    thì `/cards/batch` rơi vào route chi tiết, `batch` không parse được thành UUID và người dùng
-    nhận 422 thay vì trang này.
-
-    301 chứ không xoá thẳng, cùng lý do với `/dashboard` (14.6) và `/assistant` (EX-09): đường
-    dẫn này nằm trong `docs/user-guide.md`, `docs/demo-runbook.md` và trong trang đánh dấu của
-    hai người đã dùng nó suốt ba ngày. Xoá là 404 ngay giữa buổi demo.
+    **Phải khai trước `/cards/{card_id}`**, nếu không `batch` rơi vào route chi tiết và không
+    parse được thành UUID. 301 chứ không xoá thẳng vì đường dẫn này nằm trong tài liệu và trong
+    trang đánh dấu của người đã dùng nó.
     """
     return RedirectResponse("/cards/upload", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @router.get("/cards/{card_id}", response_class=HTMLResponse, tags=["ui"])
 async def card_detail_page(request: Request, card_id: uuid.UUID) -> HTMLResponse:
-    """Màn hình review một danh thiếp: ảnh trái, form phải (task 5.1).
+    """Màn hình review một danh thiếp: ảnh trái, form phải.
 
     Route **không** đọc DB, chỉ truyền `card_id` xuống template rồi để JavaScript gọi
-    `GET /api/cards/{id}` — cùng lối với `/cards` (task 4.4) và `/settings` (task 2.5). Lý do
-    không phải là lười: sau mỗi lần Lưu, server chuẩn hoá lại SĐT/email và trả bản đã chuẩn hoá
-    về, trang phải vẽ lại từ đúng payload đó. Render sẵn từ Jinja thì trang có hai nguồn sự
-    thật — bản lúc mở trang và bản sau khi lưu — và chúng sẽ lệch nhau ngay lần sửa đầu tiên.
+    `GET /api/cards/{id}`. Sau mỗi lần Lưu, server trả bản đã chuẩn hoá và trang vẽ lại từ đúng
+    payload đó; render sẵn từ Jinja thì trang có hai nguồn sự thật.
     """
     return templates.TemplateResponse(
         request,
@@ -194,8 +173,8 @@ async def upload_card(
 ) -> CardUploadOut:
     """Nhận 1 ảnh → tiền xử lý → gọi Gemini Vision → lưu `business_cards`.
 
-    Trả **201** cho ảnh mới, **200** khi ảnh đã được quét trước đó (`duplicate=true`, trả lại
-    đúng bản ghi cũ và không gọi lại model — tiêu chí hoàn thành D3).
+    Trả **201** cho ảnh mới, **200** khi ảnh đã được quét trước đó (`duplicate=true`, trả lại bản
+    ghi cũ và không gọi lại model).
     """
     started = time.perf_counter()
     raw = await _read_limited(file)
@@ -247,7 +226,7 @@ async def upload_card(
             notes=notes,
         )
     except card_repo.DuplicateImageError:
-        # Hai lượt upload cùng một ảnh chạy song song; lượt kia đã ghi xong (task 5.2).
+        # Hai lượt upload cùng một ảnh chạy song song; lượt kia đã ghi xong.
         raced = await card_repo.get_by_hash(db, image_hash, workspace_id=workspace.id)
         if raced is None:  # không xảy ra trên PostgreSQL, nhưng đừng trả None cho client
             raise
@@ -290,16 +269,12 @@ async def batch_upload_cards(
     workspace: WriterWorkspace,
     files: Annotated[list[UploadFile], File(description="Nhiều ảnh danh thiếp")],
 ) -> BatchUploadOut:
-    """Nhận nhiều ảnh → lưu hết ngay → trả `job_id`, việc quét chạy nền (task 5.2).
+    """Nhận nhiều ảnh → lưu hết ngay → trả `job_id`, việc quét chạy nền.
 
-    Ranh giới giữa "làm ngay" và "làm sau" đặt ở chỗ **mất thì có lấy lại được không**: file
-    người dùng vừa chọn chỉ tồn tại trong request này, nên đọc–băm–nén–ghi volume–tạo bản ghi
-    `pending` đều làm ngay tại đây. Gọi vision mới đẩy ra nền, vì đó là phần mất 3–5 giây/ảnh và
-    là phần duy nhất chạm rate limit. Chi tiết hàng đợi: `app/services/card_batch.py`.
+    Ranh giới "làm ngay" / "làm sau" đặt ở chỗ **mất thì có lấy lại được không**: file người dùng
+    vừa chọn chỉ tồn tại trong request này. Gọi vision mới đẩy ra nền — xem `services/card_batch.py`.
 
-    **Một ảnh hỏng không làm hỏng cả lượt.** Ảnh quá dung lượng hay không phải file ảnh chỉ làm
-    hỏng đúng dòng của nó và lý do nằm ngay trong `items[]`; trả 4xx cho cả request là bắt người
-    dùng chọn lại 29 ảnh còn lại chỉ vì một file lỡ tay.
+    **Một ảnh hỏng không làm hỏng cả lượt**: lý do nằm ngay trong `items[]`.
     """
     if not files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Chưa chọn ảnh nào.")
@@ -342,20 +317,17 @@ async def batch_upload_cards(
 async def get_batch_job(
     job_id: uuid.UUID, user: CurrentUser, workspace: CurrentWorkspace
 ) -> BatchJobOut:
-    """Tiến trình một lượt batch — `templates/cards/upload.html` poll endpoint này (task 5.3).
+    """Tiến trình một lượt batch — `templates/cards/upload.html` poll endpoint này.
 
-    Job của **không gian khác** trả 404 y như job không tồn tại (task 12.5, đổi khoá ở
-    `NEXT-05`): phân biệt hai ca đó là tự xác nhận "có một lượt quét mang id này, chỉ không phải
-    của bạn". Đối chiếu theo không gian chứ không theo người bấm nút: từ `NEXT-05` danh thiếp
-    quét ra thuộc về tổ chức, nên đồng nghiệp phải theo dõi được tiến trình của chính lô ấy.
+    Job của **không gian khác** trả 404 y như job không tồn tại. Đối chiếu theo không gian chứ
+    không theo người bấm nút: đồng nghiệp phải theo dõi được tiến trình của chính lô ấy.
     """
     job = card_batch.get_job(job_id)
     if job is not None and job.workspace_id != workspace.id:
         job = None
     if job is None:
-        # Nói thẳng job sống trong bộ nhớ: 404 trơ ở đây đọc như "ID sai", trong khi nguyên nhân
-        # thật thường là container vừa restart (`--reload` nạp lại khi sửa code) — hai việc phải
-        # làm tiếp hoàn toàn khác nhau.
+        # Nói thẳng job sống trong bộ nhớ: 404 trơ đọc như "ID sai", trong khi nguyên nhân thật
+        # thường là container vừa restart.
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             detail=(
@@ -383,10 +355,9 @@ async def list_cards(
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=card_repo.MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
 ) -> CardListOut:
-    """Danh sách danh thiếp, có phân trang / tìm kiếm / lọc (task 4.1).
+    """Danh sách danh thiếp, có phân trang / tìm kiếm / lọc.
 
-    Trạng thái lạ trả **400** chứ không trả danh sách rỗng: rỗng đọc như "chưa có danh thiếp
-    nào", người dùng sẽ đi tìm lỗi ở chỗ upload trong khi thực ra chỉ gõ sai bộ lọc.
+    Trạng thái lạ trả **400** chứ không trả danh sách rỗng: rỗng đọc như "chưa có danh thiếp nào".
     """
     if card_status is not None and card_status not in STATUS_CHOICES:
         raise HTTPException(
@@ -409,8 +380,8 @@ async def list_cards(
         total=total,
         page=page,
         size=size,
-        # Trang cuối tính từ tổng, không từ `len(items)`: trang rỗng ở cuối vẫn phải biết còn
-        # bao nhiêu trang để nút "về trang trước" của UI không dẫn vào hư không.
+        # Trang cuối tính từ tổng, không từ `len(items)`: trang rỗng ở cuối vẫn phải biết còn bao
+        # nhiêu trang.
         pages=max(1, -(-total // size)),
     )
 
@@ -434,17 +405,13 @@ async def get_card_image(
     user: CurrentUser,
     workspace: CurrentWorkspace,
 ) -> FileResponse:
-    """Ảnh đã tiền xử lý của một danh thiếp — UI dùng làm thumbnail (4.4) và ảnh gốc (5.1).
+    """Ảnh đã tiền xử lý của một danh thiếp — UI dùng làm thumbnail và ảnh gốc.
 
-    Ảnh nằm trong volume `uploads`, **không** nằm dưới `/static`: mount cả thư mục upload ra
-    static là công khai toàn bộ danh thiếp cho bất kỳ ai đoán được tên file (tên file là hash,
-    nhưng hash nằm sẵn trong mọi response `CardDetail`). Đi qua endpoint này thì về sau thêm
-    kiểm tra quyền chỉ phải sửa một chỗ.
+    Ảnh nằm trong volume `uploads`, **không** dưới `/static`: mount cả thư mục upload ra static là
+    công khai toàn bộ danh thiếp cho bất kỳ ai đoán được tên file.
     """
     card = await _get_or_404(db, card_id, workspace_id=workspace.id)
-    # `image_path` cho phép `NULL` từ revision `0013`, và `0014` giữ nguyên dù `NEXT-08` đã
-    # bị cắt — xem lý do ở `models/card.py`. Nói thẳng ra thay vì để `_resolve_image(None)`
-    # nổ kiểu.
+    # `image_path` cho phép `NULL` — nói thẳng ra thay vì để `_resolve_image(None)` nổ kiểu.
     if card.image_path is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -467,14 +434,12 @@ async def update_card(
     user: CurrentUser,
     workspace: WriterWorkspace,
 ) -> CardDetailOut:
-    """Sửa tay các trường sau khi review (task 4.2).
+    """Sửa tay các trường sau khi review.
 
-    Giá trị người dùng gõ vẫn đi qua `services/normalize.py` — gõ `0912 345 678` thì lưu
-    `+84912345678`, đúng như lúc quét. Không chuẩn hoá ở đây thì DB có hai kiểu số khác nhau tuỳ
-    theo trường đó do model đọc hay do người sửa, và mọi thứ so khớp về sau đều vấp.
+    Giá trị người dùng gõ vẫn đi qua `services/normalize.py`, đúng như lúc quét — không chuẩn hoá
+    thì DB có hai kiểu số tuỳ theo trường đó do model đọc hay do người sửa.
 
-    **Cố ý không đụng `status`.** Sửa nội dung không phải là xác nhận — chuyển sang `confirmed`
-    là việc của `POST /{id}/confirm` (task 4.3), nơi mới có bước gắn công ty.
+    **Cố ý không đụng `status`**: chuyển sang `confirmed` là việc của `POST /{id}/confirm`.
     """
     card = await _get_or_404(db, card_id, workspace_id=workspace.id)
 
@@ -485,9 +450,8 @@ async def update_card(
     edited = sorted(changes)
     language = changes.get("language_detected", card.language_detected)
 
-    # `notes` không nằm trong `OCR_COLUMNS` (danh sách trắng của repository) nên phải gán tay.
-    # Gán TRƯỚC khi gọi `update_fields` để cả hai thay đổi đi chung một commit — tách ra thì một
-    # lần PATCH có thể ghi được nửa này mà hỏng nửa kia.
+    # `notes` không nằm trong danh sách trắng của repository nên phải gán tay. Gán TRƯỚC khi gọi
+    # `update_fields` để cả hai thay đổi đi chung một commit.
     if "notes" in changes:
         notes = changes.pop("notes")
         card.notes = normalize.squash_spaces(notes) if notes is not None else None
@@ -496,10 +460,8 @@ async def update_card(
     fields.update(_translation_meta_after_edit(card, changes))
     card = await card_repo.update_fields(db, card, fields)
 
-    # Thẻ **đã xác nhận** thì nó đang nằm trong KB, và KB vừa lệch với DB. Index lại ngay ở đây
-    # thay vì chờ ai đó bấm `POST /api/kb/reindex`: sửa sai một số điện thoại rồi vẫn nghe trợ
-    # lý đọc số cũ là lỗi không ai nghĩ tới việc đi tìm. Thẻ chưa xác nhận thì bỏ qua — nó chưa
-    # bao giờ vào KB (`INDEXABLE_CARD_STATUSES`), và luồng review bấm Lưu liên tục.
+    # Thẻ **đã xác nhận** thì nó đang nằm trong KB, và KB vừa lệch với DB — index lại ngay thay
+    # vì chờ ai bấm `POST /api/kb/reindex`. Thẻ chưa xác nhận chưa bao giờ vào KB.
     if card.status == CardStatus.CONFIRMED:
         await _sync_kb(db, card)
 
@@ -514,14 +476,12 @@ async def translate_card(
     user: CurrentUser,
     workspace: WriterWorkspace,
 ) -> CardDetailOut:
-    """Việt hoá lại danh thiếp — nút *Dịch lại* ở màn hình review (task EX-04).
+    """Việt hoá lại danh thiếp — nút *Dịch lại* ở màn hình review.
 
-    Chạy trên **giá trị đang nằm trong DB**, tức là đã gồm cả những chỗ người dùng vừa sửa tay.
-    Đó là toàn bộ lý do có endpoint này: sửa `full_name` từ `田中 太朗` thành `田中 太郎` mà bản
-    phiên âm vẫn là bản dịch của chữ cũ thì tệ hơn là không có bản phiên âm nào.
+    Chạy trên **giá trị đang nằm trong DB**, tức gồm cả những chỗ người dùng vừa sửa tay.
 
-    Khác với lượt Việt hoá tự động sau khi quét, ở đây lỗi **được báo ra** (503/502): người dùng
-    vừa bấm nút và đang đợi, im lặng nuốt lỗi thì nút trông như hỏng.
+    Khác lượt Việt hoá tự động sau khi quét, ở đây lỗi **được báo ra** (503/502): người dùng vừa
+    bấm nút và đang đợi.
     """
     card = await _get_or_404(db, card_id, workspace_id=workspace.id)
     source = {name: getattr(card, name, None) for name in translate.prompts.TRANSLATABLE_FIELDS}
@@ -540,8 +500,7 @@ async def translate_card(
 
     card = await card_repo.update_fields(db, card, translation.columns())
 
-    # Thẻ đã xác nhận thì đang nằm trong KB, mà `services/kb.py` có in bản Việt hoá vào chunk
-    # (EX-06) — cùng lý lẽ với nhánh tương tự ở `update_card()`.
+    # Thẻ đã xác nhận thì đang nằm trong KB, mà chunk có in cả bản Việt hoá.
     if card.status == CardStatus.CONFIRMED:
         await _sync_kb(db, card)
 
@@ -556,18 +515,16 @@ async def delete_card(
     user: CurrentUser,
     workspace: WriterWorkspace,
 ) -> Response:
-    """Xoá một danh thiếp và file ảnh của nó (task 4.2).
+    """Xoá một danh thiếp và file ảnh của nó.
 
-    Xoá hàng trước, xoá file sau. Ngược lại thì transaction hỏng sẽ để lại một bản ghi trỏ vào
-    file đã mất — hỏng theo kiểu im lặng, chỉ lộ ra khi có người mở đúng bản ghi đó. Xoá file
-    hỏng thì chỉ ghi log: file thừa nằm lại trong volume không làm hỏng gì.
+    Xoá hàng trước, xoá file sau: ngược lại thì transaction hỏng sẽ để lại bản ghi trỏ vào file
+    đã mất. Xoá file hỏng thì chỉ ghi log — file thừa trong volume không làm hỏng gì.
     """
     card = await _get_or_404(db, card_id, workspace_id=workspace.id)
     image_path = card.image_path
 
-    # Gỡ khỏi KB **trong cùng transaction** với việc xoá hàng (`delete_for_source` không commit,
-    # `delete_card` commit cả hai). Bỏ bước này thì chunk mồ côi ở lại và trợ lý vẫn trích dẫn
-    # một danh thiếp đã xoá — dữ liệu người dùng tưởng đã xoá mà vẫn trả lời ra được.
+    # Gỡ khỏi KB **trong cùng transaction** với việc xoá hàng. Bỏ bước này thì chunk mồ côi ở lại
+    # và trợ lý vẫn trích dẫn một danh thiếp đã xoá.
     await kb_repo.delete_for_source(
         db, workspace_id=workspace.id, source_type=KBSourceType.CARD, source_id=card.id
     )
@@ -592,16 +549,13 @@ async def confirm_card(
     user: CurrentUser,
     workspace: WriterWorkspace,
 ) -> CardConfirmOut:
-    """Người dùng duyệt xong → `confirmed` + gắn `company_id` (task 4.3).
+    """Người dùng duyệt xong → `confirmed` + gắn `company_id`.
 
     **Không kích hoạt enrich.** Hồ sơ doanh nghiệp chỉ sinh khi người dùng tích chọn công ty rồi
-    bấm nút ở màn hình Doanh nghiệp (Plan.md mục 2.2, Luồng 2). Xác nhận danh thiếp chỉ tạo ra
-    một bản ghi *tên công ty*, chưa phải hồ sơ.
+    bấm nút ở màn hình Doanh nghiệp (Luồng 2). Đây mới chỉ tạo bản ghi *tên công ty*.
 
-    Gắn công ty **không chặn xác nhận**: danh thiếp không đọc được tên công ty, hoặc
-    `company_matching.upsert_company()` (task 3.8 của T) chưa có, thì bản ghi vẫn về `confirmed`
-    và `detail` nói rõ vì sao chưa gắn. Chặn lại sẽ khiến toàn bộ luồng F1 đứng chờ một task của
-    người khác.
+    Gắn công ty **không chặn xác nhận**: không đọc được tên công ty thì bản ghi vẫn về
+    `confirmed` và `detail` nói rõ vì sao chưa gắn.
     """
     card = await _get_or_404(db, card_id, workspace_id=workspace.id)
 
@@ -618,8 +572,8 @@ async def confirm_card(
             raw_name,
             workspace_id=workspace.id,
             user_id=user.id,
-            # `I-36`: bản Việt hoá đã có sẵn trên thẻ từ `EX-02`, chép thẳng sang công ty thay
-            # vì để danh sách `/companies` hiện chữ Hàn/Trung/Ả Rập.
+            # Bản Việt hoá đã có sẵn trên thẻ, chép thẳng sang công ty thay vì để danh sách
+            # `/companies` hiện chữ Hàn/Trung/Ả Rập.
             display_name_vi=card.company_name_vi,
             email=card.email,
             website=card.website,
@@ -630,7 +584,7 @@ async def confirm_card(
     await db.commit()
     await db.refresh(card)
 
-    # Task 7.3 — xác nhận xong là vào Knowledge Base ngay (Luồng 1, Plan.md mục 2.2 bước 7–8).
+    # Xác nhận xong là vào Knowledge Base ngay (Luồng 1).
     indexed, kb_detail = await _sync_kb(db, card)
     detail = " ".join(part for part in (detail, kb_detail) if part) or None
 
@@ -654,20 +608,17 @@ async def _stage(
     """Một file trong lượt batch: đọc → băm → chống trùng → nén → ghi volume → bản ghi `pending`.
 
     Trả về `BatchItem` **ở mọi nhánh**, kể cả nhánh hỏng: hàng đợi cần một dòng cho mỗi file
-    người dùng đã chọn, nếu không thì file bị loại sẽ biến mất khỏi giao diện và người dùng ngồi
-    đếm "mình chọn 12 ảnh sao chỉ thấy 11".
+    người dùng đã chọn, nếu không thì file bị loại biến mất khỏi giao diện.
 
-    Đây là phần **đồng bộ** của batch nên nó chặn event loop trong lúc chạy: Pillow nén một ảnh
-    mất khoảng 100ms, 50 ảnh là ~5 giây. Chấp nhận được vì trong 5 giây đó client duy nhất đang
-    chờ chính là request này — trang `/cards/upload` chỉ bắt đầu poll sau khi nhận được 202.
+    Phần **đồng bộ** của batch nên nó chặn event loop (~100ms/ảnh). Chấp nhận được vì client duy
+    nhất đang chờ chính là request này.
     """
     filename = (upload.filename or "").strip() or "(không có tên file)"
 
     try:
         raw = await _read_limited(upload)
     except HTTPException as exc:
-        # Bắt lại chính lỗi mình vừa ném ra thay vì chép lại luật giới hạn dung lượng lần thứ
-        # hai: upload 1 ảnh trả 4xx là đúng, còn ở đây cùng một luật phải thành một dòng lỗi.
+        # Bắt lại chính lỗi mình vừa ném thay vì chép lại luật giới hạn dung lượng lần thứ hai.
         return card_batch.BatchItem(
             filename=filename, status=card_batch.ItemStatus.ERROR, error=str(exc.detail)
         )
@@ -719,9 +670,7 @@ async def _stage(
         )
 
     # `user_id` phải đi kèm, không chỉ `workspace_id`: lượt quét ở nền dùng credential OAuth và
-    # model của **chính người bấm nút** (13.2 + NEXT-05), mà lúc đó request đã trả 202 xong nên
-    # không còn cookie phiên nào để hỏi lại. Thiếu nó thì `_scan()` chết ở bước chọn model và cả
-    # lô hỏng — đúng lỗi I-39.
+    # model của **chính người bấm nút**, mà request đã trả 202 nên không còn cookie để hỏi lại.
     return card_batch.BatchItem(
         filename=filename,
         workspace_id=workspace_id,
@@ -736,8 +685,7 @@ def _job_out(job: card_batch.BatchJob) -> BatchJobOut:
     """`BatchJob` (dataclass trong bộ nhớ) → payload JSON.
 
     Ánh xạ tay chứ không `model_validate(from_attributes=True)`: `BatchItem.image_path` là đường
-    dẫn nội bộ của container, tự động hoá bước này là tự mở đường cho nó rò ra API vào một ngày
-    nào đó mà không ai để ý.
+    dẫn nội bộ của container, tự động hoá là mở đường cho nó rò ra API.
     """
     return BatchJobOut(
         job_id=job.id,
@@ -765,11 +713,10 @@ def _job_out(job: card_batch.BatchJob) -> BatchJobOut:
 async def _get_or_404(
     db: AsyncSession, card_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> BusinessCard:
-    """Danh thiếp của **người đang đăng nhập**, hoặc 404.
+    """Danh thiếp của không gian đang mở, hoặc 404.
 
-    Thẻ của người khác và thẻ không tồn tại trả **cùng một** 404 với **cùng một câu**
-    (task 12.5, Plan.md mục 4): khác nhau ở đâu — mã, câu chữ, hay thời gian phản hồi —
-    là còn một kênh để dò xem id nào có thật.
+    Thẻ của người khác và thẻ không tồn tại trả **cùng một** 404 với **cùng một câu** — khác nhau
+    ở mã, câu chữ hay thời gian phản hồi đều là một kênh để dò xem id nào có thật.
     """
     card = await card_repo.get(db, card_id, workspace_id=workspace_id)
     if card is None:
@@ -780,9 +727,8 @@ async def _get_or_404(
 def _normalize_edits(changes: dict[str, Any], *, language: str | None) -> dict[str, Any]:
     """Chuẩn hoá đúng những trường người dùng vừa sửa, **từng trường một**.
 
-    Cố ý không gọi `normalize_card_fields()` như lúc quét: hàm đó xử lý `phone` và `phone_alt`
-    như một cặp và luôn ghi lại cả hai, nên PATCH chỉ gửi `phone` sẽ xoá mất `phone_alt` đang có.
-    Ở màn hình review, người dùng sửa ô nào thì chỉ ô đó được đổi.
+    Không gọi `normalize_card_fields()`: hàm đó xử lý `phone`/`phone_alt` như một cặp và luôn ghi
+    lại cả hai, nên PATCH chỉ gửi `phone` sẽ xoá mất `phone_alt` đang có.
     """
     region = normalize.region_for_language(language)
     out: dict[str, Any] = {}
@@ -807,16 +753,11 @@ def _normalize_edits(changes: dict[str, Any], *, language: str | None) -> dict[s
 def _translation_meta_after_edit(card: BusinessCard, changes: dict[str, Any]) -> dict[str, Any]:
     """`translation_meta` mới sau một lượt sửa tay. Rỗng nghĩa là không đụng tới cột đó.
 
-    Hai ca, và chúng loại trừ nhau:
+    Hai ca loại trừ nhau: sửa thẳng ô Việt hoá → `source="manual"`; sửa trường gốc → `stale=True`
+    để giao diện mời bấm *Dịch lại*.
 
-    * người dùng **sửa thẳng một ô Việt hoá** → `source="manual"`, hết lỗi thời. Bản của người
-      cầm tấm thẻ trong tay luôn thắng bản của model;
-    * người dùng **sửa trường gốc** (tên, chức vụ, công ty, địa chỉ) → bản dịch cũ nay nói về
-      chữ khác, đánh dấu `stale=True` để giao diện mời bấm *Dịch lại*.
-
-    Cố ý **không tự gọi model ở đây**: màn hình review bấm Lưu liên tục, mỗi lần Lưu kéo theo
-    một lời gọi LLM là biến thao tác sửa một chữ thành ba giây chờ. Dựng dict mới chứ không sửa
-    tại chỗ — JSONB không được SQLAlchemy theo dõi thay đổi bên trong, sửa tại chỗ là ghi hụt.
+    Cố ý **không tự gọi model ở đây** — màn hình review bấm Lưu liên tục. Dựng dict mới chứ không
+    sửa tại chỗ: JSONB không được SQLAlchemy theo dõi thay đổi bên trong.
     """
     edited_vi = [name for name in changes if name.endswith("_vi")]
     edited_source = [name for name in changes if name in translate.prompts.TRANSLATABLE_FIELDS]
@@ -834,23 +775,15 @@ def _translation_meta_after_edit(card: BusinessCard, changes: dict[str, Any]) ->
 
 
 async def _sync_kb(db: AsyncSession, card: BusinessCard) -> tuple[bool, str | None]:
-    """Đưa một danh thiếp vào Knowledge Base (task 7.3). Trả `(đã index?, lý do nếu không)`.
+    """Đưa một danh thiếp vào Knowledge Base. Trả `(đã index?, lý do nếu không)`.
 
-    **Không bao giờ làm hỏng thao tác gọi nó**, cùng lý lẽ với `_upsert_company()`: xác nhận danh
-    thiếp là việc của F1 và phải xong được kể cả khi F3 đang hỏng. Service `embedder` chưa lên
-    (máy vừa `docker compose up`, model còn đang nạp) là chuyện thường ngày; để nó chặn nút Xác
-    nhận thì cả luồng nhập liệu đứng vì một thứ chỉ phục vụ trợ lý AI. Bù lại luôn có
-    `POST /api/kb/reindex` để vá sau, nên mất một lượt index không mất dữ liệu.
+    **Không bao giờ làm hỏng thao tác gọi nó**: xác nhận thẻ là việc của F1 và phải xong được kể
+    cả khi `embedder` chưa lên. Vá sau bằng `POST /api/kb/reindex`.
 
-    **Chạy đồng bộ, không đẩy sang `BackgroundTasks`.** Một danh thiếp là 1–2 chunk, nhúng mất
-    vài chục mili giây trên CPU — rẻ hơn hẳn lời gọi OCR mà chính người dùng này vừa chờ. Đổi lại
-    thì `kb_indexed` trong response là sự thật đã xảy ra, không phải lời hứa.
+    Chạy đồng bộ (1–2 chunk, vài chục ms) nên `kb_indexed` trong response là sự thật đã xảy ra.
 
-    ⚠️ **`rollback()` rồi phải `refresh()` ngay.** `Session.rollback()` làm **mọi** object ORM
-    hết hạn, không phụ thuộc `expire_on_commit` — chỗ gọi đọc `card.…` sau đó là một lượt nạp
-    lại đồng bộ giữa hàm async, tức `MissingGreenlet` và HTTP 500. Đúng cái mà hàm này sinh ra
-    để tránh: embedder chết mà vẫn làm hỏng nút Xác nhận. Bắt được khi viết test 7.3; cùng họ
-    với lỗi đã ghi ở `routers/kb.py::_reindex_cards`.
+    ⚠️ **`rollback()` rồi phải `refresh()` ngay.** `rollback()` làm mọi object ORM hết hạn, nên
+    đọc `card.…` sau đó là một lượt nạp lại đồng bộ giữa hàm async → `MissingGreenlet` + HTTP 500.
     """
     card_id = card.id  # đọc trước: từ đây trở đi `card` có thể hết hạn bất cứ lúc nào
     try:
@@ -875,11 +808,7 @@ async def _sync_kb(db: AsyncSession, card: BusinessCard) -> tuple[bool, str | No
 
 
 async def _rollback_and_refresh(db: AsyncSession, card: BusinessCard) -> None:
-    """Huỷ phần ghi dở của KB rồi nạp lại `card` để chỗ gọi dùng tiếp được.
-
-    Bản thân bản ghi danh thiếp đã commit từ trước, nên `refresh()` chỉ là một câu `SELECT` trên
-    đường lỗi. Rẻ hơn nhiều so với việc để chỗ gọi cầm một object hết hạn.
-    """
+    """Huỷ phần ghi dở của KB rồi nạp lại `card` để chỗ gọi dùng tiếp được."""
     await db.rollback()
     await db.refresh(card)
 
@@ -894,20 +823,14 @@ async def _upsert_company(
     email: str | None = None,
     website: str | None = None,
 ) -> tuple[uuid.UUID | None, str | None]:
-    """Gọi `company_matching.upsert_company()` của T — chữ ký chốt ở họp D2 (`docs/api.md` mục 8).
+    """Gọi `company_matching.upsert_company()` của T.
 
-    **`email` và `website` là bắt buộc phải truyền, không phải tuỳ chọn cho đẹp** (I-18). Quy tắc
-    gộp công ty của task 3.8 đọc tên miền từ hai trường này và nó cắt theo **cả hai chiều**:
-    chung tên miền thì nới ngưỡng so mờ xuống 80, còn **khác tên miền thì không bao giờ gộp**.
-    Gọi thiếu hai tham số này — như bản đầu của 4.3 — thì `extract_domains(None, None)` trả rỗng,
-    và toàn bộ luồng xác nhận trên UI chỉ còn so tên: "Công ty TNHH Phú Cơ" gặp "Công ty TNHH
-    Phú" là gộp (I-21), trong khi hai công ty khác hẳn nhau nhưng trùng tên miền lại không gộp
-    được. Nói cách khác lưới an toàn của T có tồn tại mà chưa bao giờ được bật từ giao diện.
+    **`email` và `website` bắt buộc phải truyền** (I-18): quy tắc gộp công ty đọc tên miền từ hai
+    trường này theo cả hai chiều — chung tên miền thì nới ngưỡng so mờ, khác tên miền thì không
+    bao giờ gộp. Gọi thiếu thì luồng xác nhận chỉ còn so tên và gộp nhầm (I-21).
 
-    Import **trong hàm** chứ không ở đầu file: `services/company_matching.py` còn là stub cho tới
-    khi T làm xong task 3.8, import ở module level sẽ không sao (module tồn tại), nhưng gọi hàm
-    chưa có thì `AttributeError` ném ra giữa request. Kiểm bằng `getattr` để phân biệt rõ "T
-    chưa làm" với "gọi được nhưng hỏng", và để câu thông báo nói đúng việc cần làm.
+    Import **trong hàm** và kiểm bằng `getattr` để phân biệt "hàm chưa có" với "gọi được nhưng
+    hỏng".
     """
     from app.services import company_matching
 
@@ -938,9 +861,8 @@ async def _upsert_company(
 def _resolve_image(image_path: str) -> Path | None:
     """Đường dẫn tuyệt đối của ảnh trong volume, hoặc `None` nếu không còn.
 
-    DB lưu đường dẫn **tương đối** (xem `_store`). Ghép xong phải kiểm lại nó thật sự nằm trong
-    `UPLOAD_DIR`: giá trị hiện tại do chính `_store` sinh ra nên an toàn, nhưng một bản ghi cũ
-    hoặc dữ liệu seed chứa `../` sẽ biến endpoint ảnh thành đường đọc trộm file của container.
+    DB lưu đường dẫn **tương đối**. Ghép xong phải kiểm lại nó nằm trong `UPLOAD_DIR`: một bản
+    ghi cũ chứa `../` sẽ biến endpoint ảnh thành đường đọc trộm file của container.
     """
     root = settings.upload_dir.resolve()
     try:
@@ -975,12 +897,8 @@ async def _read_limited(file: UploadFile) -> bytes:
 def _store(data: bytes, image_hash: str) -> str:
     """Ghi ảnh đã xử lý vào volume `uploads`, trả **đường dẫn tương đối** để lưu DB.
 
-    Tương đối chứ không tuyệt đối: `UPLOAD_DIR` là biến môi trường (`/data/uploads` trong
-    Docker, thư mục khác khi chạy ngoài container) — lưu đường dẫn tuyệt đối thì đổi mount là
-    toàn bộ bản ghi cũ trỏ vào hư không.
-
-    Tên file lấy theo hash nên ghi lại đúng ảnh đó là ghi đè chính nó, không sinh file mồ côi.
-    Chia thư mục con 2 ký tự đầu để một thư mục không chứa hàng chục nghìn file.
+    Tương đối chứ không tuyệt đối: `UPLOAD_DIR` là biến môi trường, lưu tuyệt đối thì đổi mount
+    là mọi bản ghi cũ trỏ vào hư không. Tên file lấy theo hash; chia thư mục con 2 ký tự đầu.
     """
     relative = Path(image_hash[:2]) / f"{image_hash}.jpg"
     target = settings.upload_dir / relative

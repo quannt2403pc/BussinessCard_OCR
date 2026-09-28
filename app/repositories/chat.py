@@ -1,23 +1,14 @@
 """Repository `chat_sessions` / `chat_messages` — lưu hội thoại với trợ lý AI (F3).
 
-Chủ sở hữu: Q | Task: 8.3, 12.5 | xem Task.md
+Chủ sở hữu: Q | Task: 8.3, 12.5
 
-Bảng đã có sẵn từ revision khởi tạo `0001` (task 1.6) nên task này **không cần Alembic revision
-mới** — đúng như quy ước số 5 dự tính khi khai đủ bảng ngay từ D1.
+Lớp mỏng, cùng lối với `repositories/card.py`. Ba điểm đáng nêu:
 
-Lớp mỏng, cùng lối với `repositories/card.py`: router lo HTTP, file này lo câu SQL. Hai điểm
-đáng nêu:
-
-1. **Không hàm nào commit.** Một lượt hỏi ghi *hai* dòng (câu hỏi và câu trả lời) và chúng chỉ
-   có nghĩa khi đi cùng nhau: commit riêng câu hỏi rồi model hỏng giữa chừng thì lịch sử còn lại
-   một câu hỏi không bao giờ được trả lời, và lượt sau sẽ nhét nó vào prompt như bối cảnh thật.
-   `routers/chat.py` commit đúng một lần ở cuối.
-
-2. **Lịch sử đọc theo thứ tự thời gian tăng dần, nhưng chỉ lấy N lượt gần nhất.** Muốn "N lượt
-   *cuối*" thì phải `ORDER BY created_at DESC LIMIT N` rồi đảo lại trong Python — sắp tăng dần
-   rồi `LIMIT` sẽ cho N lượt **đầu tiên** của hội thoại, tức càng chat lâu prompt càng chỉ nhớ
-   phần mở đầu. Lỗi này không báo gì cả, chỉ làm trợ lý ngày một lú.
-
+1. **Không hàm nào commit.** Một lượt hỏi ghi *hai* dòng và chúng chỉ có nghĩa khi đi cùng nhau:
+   commit riêng câu hỏi rồi model hỏng giữa chừng thì lượt sau nhét một câu hỏi chưa từng được
+   trả lời vào prompt như bối cảnh thật.
+2. **Lịch sử đọc theo thứ tự tăng dần, nhưng chỉ lấy N lượt gần nhất** — sắp tăng dần rồi `LIMIT`
+   sẽ cho N lượt **đầu tiên** của hội thoại, tức càng chat lâu prompt càng chỉ nhớ phần mở đầu.
 3. **`created_at` một mình KHÔNG sắp được hai lượt của cùng một lượt hỏi** — xem `_CHRONOLOGICAL`.
 """
 
@@ -32,23 +23,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat import ChatMessage, ChatRole, ChatSession
 
-#: Trần độ dài tiêu đề phiên, sinh từ câu hỏi đầu tiên. Cột `title` là `String(255)`; cắt ở 120
-#: để tiêu đề còn vừa một dòng trên danh sách phiên.
+#: Trần độ dài tiêu đề phiên, sinh từ câu hỏi đầu tiên; cắt ở 120 để vừa một dòng.
 TITLE_CHARS = 120
 
 #: Khoá phụ tách hai lượt có **cùng** `created_at`: câu hỏi trước, câu trả lời sau.
 #:
-#: ⚠️ Lỗi này bắt được bằng test, và nó là loại hỏng im lặng đúng nghĩa. `chat_messages.created_at`
-#: mặc định `now()`, mà `now()` của Postgres là **thời điểm bắt đầu transaction**, không phải thời
-#: điểm chạy câu lệnh. Một lượt hỏi ghi hai dòng trong cùng một transaction nên hai dòng có dấu
-#: thời gian **bằng nhau tuyệt đối**, không phải xấp xỉ. Lúc đó `ORDER BY created_at` để Postgres
-#: tự quyết thứ tự, và `id` cũng không cứu được vì UUIDv4 là ngẫu nhiên — không mang thông tin
-#: thời gian nào. Hậu quả: `GET /api/chat/{id}` trả câu trả lời đứng **trước** câu hỏi của chính
-#: nó, và phần lịch sử nhét vào prompt cũng đảo ngược theo.
+#: ⚠️ `now()` của Postgres là **thời điểm bắt đầu transaction**, nên hai dòng ghi trong cùng một
+#: transaction có dấu thời gian bằng nhau tuyệt đối; `id` cũng không cứu được vì UUIDv4 là ngẫu
+#: nhiên. Hậu quả nếu thiếu khoá này: câu trả lời đứng **trước** câu hỏi của chính nó.
 #:
-#: Sắp theo vai trò là lời giải đúng với cách ứng dụng ghi: mỗi transaction ghi đúng **một cặp**
-#: hỏi–đáp (xem `routers/chat.py`). Ghi hai lượt cùng vai trò trong một transaction thì khoá này
-#: hết tác dụng — lúc đó phải thêm cột thứ tự, tức là một Alembic revision.
+#: Sắp theo vai trò đúng với cách ứng dụng ghi — mỗi transaction ghi đúng **một cặp** hỏi–đáp.
+#: Ghi hai lượt cùng vai trò trong một transaction thì phải thêm cột thứ tự.
 _ROLE_ORDER = case((ChatMessage.role == ChatRole.USER.value, 0), else_=1)
 
 #: Thứ tự thời gian đầy đủ, dùng chung cho cả hai hàm đọc.
@@ -63,8 +48,8 @@ async def create_session(
     title: str | None = None,
 ) -> ChatSession:
     """Mở một phiên hỏi–đáp mới. Chưa commit — xem ghi chú 1 ở đầu file."""
-    # `user_id` là **người mở phiên**, không phải khoá lọc (task NEXT-05): trong một không gian
-    # nhiều người, lịch sử hỏi đáp phải biết ai đã hỏi.
+    # `user_id` là **người mở phiên**, không phải khoá lọc: trong một không gian nhiều người,
+    # lịch sử hỏi đáp phải biết ai đã hỏi.
     session = ChatSession(workspace_id=workspace_id, user_id=user_id, title=_title(title))
     db.add(session)
     await db.flush()
@@ -74,11 +59,10 @@ async def create_session(
 async def get_session(
     db: AsyncSession, session_id: uuid.UUID, *, workspace_id: uuid.UUID
 ) -> ChatSession | None:
-    """Một phiên **của đúng người này**, hoặc `None` (task 12.5).
+    """Một phiên **của đúng không gian này**, hoặc `None`.
 
-    Không `db.get()` nữa: tra khoá chính không nhận thêm điều kiện, mà nhớ so `session.workspace_id`
-    ở từng chỗ gọi là việc sẽ có người quên. Phiên của người khác trả `None` → router trả **404**,
-    giống hệt khi id không tồn tại: không có cách nào dò xem một `session_id` có thật hay không.
+    Không `db.get()`: tra khoá chính không nhận thêm điều kiện, mà nhớ so `session.workspace_id`
+    ở từng chỗ gọi là việc sẽ có người quên. Phiên của người khác trả `None` → router trả **404**.
     """
     result = await db.execute(
         select(ChatSession).where(
@@ -99,8 +83,7 @@ async def add_message(
     """Ghi một lượt vào hội thoại. Chưa commit.
 
     `citations` chỉ có ở lượt của trợ lý; lượt người dùng để `None` chứ không `[]` — `NULL` nói
-    "không áp dụng", mảng rỗng nói "đã trả lời mà không có nguồn nào", và hai thứ đó khác nhau
-    khi đọc lại lịch sử để tìm xem lượt nào bị trượt trích dẫn.
+    "không áp dụng", mảng rỗng nói "đã trả lời mà không có nguồn nào".
     """
     message = ChatMessage(
         session_id=session_id,
@@ -128,11 +111,10 @@ async def recent_messages(
     workspace_id: uuid.UUID,
     limit: int,
 ) -> Sequence[ChatMessage]:
-    """`limit` lượt **gần nhất**, trả về theo thứ tự cũ → mới để nhét vào prompt (task 8.3).
+    """`limit` lượt **gần nhất**, trả về theo thứ tự cũ → mới để nhét vào prompt.
 
-    Lấy ngược rồi đảo lại — xem ghi chú 2 ở đầu file về lý do không `LIMIT` trên thứ tự tăng dần.
-    Thứ tự ngược phải đảo **cả khoá phụ vai trò** (`_ROLE_ORDER`), nếu không lượt cuối cùng của
-    hội thoại bị cắt nhầm đầu này rồi ghép lại sai đầu kia — xem ghi chú 3.
+    Lấy ngược rồi đảo lại — xem ghi chú 2 ở đầu file. Thứ tự ngược phải đảo **cả khoá phụ vai
+    trò**, nếu không lượt cuối bị cắt nhầm đầu này rồi ghép lại sai đầu kia.
     """
     rows = await db.execute(
         _owned_messages(session_id, workspace_id)
@@ -143,12 +125,11 @@ async def recent_messages(
 
 
 def _owned_messages(session_id: uuid.UUID, workspace_id: uuid.UUID) -> Select[tuple[ChatMessage]]:
-    """Các lượt của một phiên, **kèm điều kiện phiên đó thuộc về `workspace_id`** (task 12.5).
+    """Các lượt của một phiên, **kèm điều kiện phiên đó thuộc về `workspace_id`**.
 
-    `chat_messages` không có cột `workspace_id` (xem `models/chat.py`) nên chủ sở hữu phải lấy qua
-    `JOIN` tới phiên. Router vốn đã kiểm quyền bằng `get_session()` trước khi gọi hai hàm đọc ở
-    đây, nhưng điều kiện này vẫn nằm trong SQL: một đường gọi mới quên bước kiểm kia sẽ nhận về
-    danh sách rỗng, chứ không đọc được hội thoại của người khác.
+    `chat_messages` không có cột `workspace_id` nên chủ sở hữu phải lấy qua `JOIN` tới phiên. Một
+    đường gọi mới quên bước kiểm quyền sẽ nhận về danh sách rỗng, chứ không đọc được hội thoại
+    của người khác.
     """
     return (
         select(ChatMessage)

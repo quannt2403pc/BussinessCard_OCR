@@ -1,12 +1,10 @@
 """Nhật ký, hạn lưu trữ và xoá theo yêu cầu của chủ thể dữ liệu.
 
-Chủ sở hữu: T | Task: NEXT-07 | xem Task.md
+Chủ sở hữu: T | Task: NEXT-07
 
-**Xoá ở đây là xoá thật, khác hẳn `merged_into_id` của `NEXT-04`.** Ở đó máy chỉ *đoán* hai thẻ
-là một người nên gộp mềm mới đúng; ở đây chủ thể dữ liệu **yêu cầu** xoá, và quyền đó không
-được phục vụ bằng một cờ ẩn. Xoá cả hàng, ảnh, ghi chú và chunk Knowledge Base.
-
-**Mọi hàm bắt buộc `workspace_id`** — cùng lối đã chốt ở 12.6.
+**Xoá ở đây là xoá thật, khác hẳn gộp mềm của `NEXT-04`**: ở đó máy chỉ *đoán* hai thẻ là một
+người, còn ở đây chủ thể dữ liệu **yêu cầu** xoá và quyền đó không được phục vụ bằng một cờ ẩn.
+Xoá cả hàng, ảnh, ghi chú và chunk Knowledge Base.
 """
 
 import logging
@@ -43,7 +41,6 @@ async def log(
     detail: dict[str, Any],
     record_count: int,
 ) -> PrivacyLog:
-    # `workspace_id` là **người thao tác**, `workspace_id` là **nơi bị động tới** (task NEXT-05).
     # Nhật ký bảo vệ dữ liệu cá nhân phải trả lời được cả "ai" lẫn "ở đâu".
     entry = PrivacyLog(
         workspace_id=workspace_id,
@@ -75,10 +72,8 @@ async def recent_logs(
 def subject_filter(term: str) -> Any:
     """Khớp một chủ thể dữ liệu theo email hoặc số điện thoại **đã chuẩn hoá**.
 
-    So thẳng giá trị trong cột, không so mờ: đây là câu quyết định **xoá vĩnh viễn** dữ liệu
-    của ai đó. Khớp mờ ở chỗ này nghĩa là một cú bấm có thể xoá nhầm người thứ hai, và không
-    có đường nào lấy lại. Ai muốn tìm theo tên thì dùng ô tìm kiếm của `/cards` rồi xoá từng
-    thẻ — chậm hơn, nhưng nhìn thấy mình đang xoá gì.
+    So thẳng giá trị trong cột, không so mờ: đây là câu quyết định **xoá vĩnh viễn** dữ liệu của
+    ai đó, và khớp mờ nghĩa là một cú bấm có thể xoá nhầm người thứ hai.
     """
     return or_(
         BusinessCard.email == term,
@@ -104,13 +99,10 @@ async def erase_cards(
     """Xoá hẳn một loạt danh thiếp. Trả về đường dẫn ảnh để router xoá file.
 
     Gỡ chunk Knowledge Base **trong cùng transaction**: bỏ bước này thì trợ lý AI vẫn trích dẫn
-    một người đã yêu cầu xoá dữ liệu — đúng thứ mà cả tính năng này sinh ra để tránh. Cùng lỗi
-    mà `4.2` của Q đã chặn khi xoá một thẻ.
+    một người đã yêu cầu xoá dữ liệu.
 
-    `contact_notes` đi theo khoá ngoại `CASCADE`, không phải xoá tay. Thẻ nào đang bị gộp vào
-    (`NEXT-04`) cũng đi theo, vì `merged_into_id` là `SET NULL` chứ không `CASCADE` — nên bản
-    trùng của một người đã yêu cầu xoá phải nằm trong danh sách ngay từ đầu, và nó nằm thật:
-    `find_subject_cards()` không lọc `merged_into_id`.
+    `contact_notes` đi theo khoá ngoại `CASCADE`. Thẻ đang bị gộp vào cũng phải nằm trong danh
+    sách ngay từ đầu, và nó nằm thật — `find_subject_cards()` không lọc `merged_into_id`.
     """
     if not cards:
         return []
@@ -145,8 +137,8 @@ async def expired_cards(
 ) -> Sequence[BusinessCard]:
     """Danh thiếp quét trước mốc `now - days`.
 
-    Tính theo `uploaded_at` chứ không `updated_at`: hạn lưu trữ đếm từ lúc **thu thập** dữ liệu
-    của người ta, và một lần sửa chính tả không làm cái đồng hồ ấy chạy lại từ đầu.
+    Tính theo `uploaded_at` chứ không `updated_at`: hạn lưu trữ đếm từ lúc **thu thập**, và một
+    lần sửa chính tả không làm cái đồng hồ ấy chạy lại từ đầu.
     """
     rows = await db.scalars(
         select(BusinessCard)

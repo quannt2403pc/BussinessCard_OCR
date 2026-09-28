@@ -1,26 +1,19 @@
 """Fixture dùng chung: DB Postgres thật (trong transaction rollback) + mock CLIProxy/embedder.
 
-Chủ sở hữu: Q | Task: 6.1, 12.8 (người dùng + client đã đăng nhập) | xem Task.md
+Chủ sở hữu: Q | Task: 6.1, 12.8
 
-Ba nguyên tắc, mỗi cái đổi lấy một loại lỗi đã gặp thật trong dự án:
+Ba nguyên tắc, mỗi cái đổi lấy một loại lỗi đã gặp thật:
 
-1. **DB thật, không SQLite.** Nửa số thứ dự án dùng không tồn tại trong SQLite: `vector(384)`,
-   `JSONB`, `ARRAY(TEXT)`, index một phần của `enrich_job_items`. Test trên SQLite là test một
-   hệ khác với hệ chạy thật.
-2. **Mỗi test một transaction, cuối test rollback.** Session gắn vào một connection đang mở
-   transaction (`join_transaction_mode="create_savepoint"`), nên `commit()` trong mã ứng dụng
-   vẫn chạy đúng đường của nó mà DB sau test vẫn sạch — không test nào nhìn thấy rác của test
-   khác.
-3. **Không có DB thì SKIP, không FAIL.** Máy chưa bật Docker vẫn phải chạy được phần test
-   thuần (parse JSON, chunk, chuẩn hoá). Fail ở đó chỉ dạy người ta thói quen bỏ qua màu đỏ.
+1. **DB thật, không SQLite** — `vector(384)`, `JSONB`, `ARRAY(TEXT)`, index một phần đều không
+   tồn tại trong SQLite; test trên đó là test một hệ khác với hệ chạy thật.
+2. **Mỗi test một transaction, cuối test rollback** — `commit()` trong mã ứng dụng vẫn chạy đúng
+   đường của nó mà DB sau test vẫn sạch.
+3. **Không có DB thì SKIP, không FAIL** — máy chưa bật Docker vẫn chạy được phần test thuần.
 
-Chạy phần cần DB ở máy (container `db` đã publish cổng 5432):
-
-    TEST_DATABASE_URL=postgresql+psycopg://bizcard:change-me@localhost:5432/bizcard_test pytest
-
-Tạo sẵn database test một lần:
+Chạy phần cần DB ở máy (container `db` đã publish cổng 5432)::
 
     docker compose exec db createdb -U bizcard bizcard_test
+    TEST_DATABASE_URL=postgresql+psycopg://bizcard:change-me@localhost:5432/bizcard_test pytest
 """
 
 from __future__ import annotations
@@ -55,10 +48,8 @@ from app.models.user import User
 from app.models.workspace import Role, Workspace, WorkspaceMember
 from app.services import auth
 
-# Windows: Python 3.12 mặc định dùng `ProactorEventLoop`, mà psycopg v3 ở chế độ async **không
-# chạy được trên loop đó** (`InterfaceError: Psycopg cannot use the 'ProactorEventLoop'`). Ứng
-# dụng thật chạy trong container Linux nên không gặp, nhưng pytest ở máy Windows thì gặp ngay —
-# đặt policy trước khi pytest-asyncio tạo loop là cách sửa gọn nhất, và không ảnh hưởng CI.
+# Windows: `ProactorEventLoop` mặc định của Python 3.12 **không chạy được** với psycopg v3 async.
+# Ứng dụng thật chạy trong container Linux nên không gặp; pytest ở máy Windows thì gặp ngay.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -79,13 +70,11 @@ TEST_PASSWORD = "matkhau123"
 def candidate_database_urls() -> list[str]:
     """Các URL sẽ thử, theo thứ tự ưu tiên.
 
-    `TEST_DATABASE_URL` thắng tất cả. Không có thì suy từ `DATABASE_URL`: đổi tên database
-    thành `<tên>_test` — **không bao giờ chạy test trên DB đang dùng thật**, vì `create_all()`
-    và dữ liệu test sẽ nằm chung chỗ với danh thiếp đã quét.
+    `TEST_DATABASE_URL` thắng tất cả. Không có thì suy từ `DATABASE_URL` và đổi tên database
+    thành `<tên>_test` — **không bao giờ chạy test trên DB đang dùng thật**.
 
-    Thêm biến thể `localhost` khi host là `db`: bên trong mạng Docker thì `db` phân giải được,
-    chạy pytest ở máy thì không — mà container `db` có publish cổng 5432 ra ngoài nên cùng một
-    DB đó vẫn tới được qua `localhost`.
+    Thêm biến thể `localhost` khi host là `db`: chạy pytest ở máy thì `db` không phân giải được,
+    mà container `db` có publish cổng 5432 ra ngoài.
     """
     explicit = os.environ.get("TEST_DATABASE_URL", "").strip()
     if explicit:
@@ -132,18 +121,12 @@ def database_url() -> str:
 def db_schema(database_url: str) -> str:
     """Dựng extension `vector` + toàn bộ bảng một lần cho cả phiên test. Trả về URL đã sẵn sàng.
 
-    Dùng engine **đồng bộ** cho phần DDL này có lý do thực dụng: fixture phạm vi `session` mà
-    lại `async` thì nó chạy trên một event loop khác với loop của từng test, và mọi connection
-    mở trong đó sẽ nổ "attached to a different loop". Phần async chỉ nằm ở `db_session`
-    (phạm vi từng test).
+    Engine **đồng bộ** cho phần DDL: fixture phạm vi `session` mà `async` thì nó chạy trên một
+    event loop khác với loop của từng test, và mọi connection mở trong đó sẽ nổ "attached to a
+    different loop".
 
-    `TRUNCATE` một lần ở đầu phiên: mỗi test vốn đã tự rollback, nhưng một lượt chạy bị ngắt
-    giữa chừng (hoặc một script thử tay) có thể để lại dữ liệu đã commit, và test nào đếm số
-    bản ghi sẽ đỏ vì lý do chẳng liên quan gì tới nó. Chỉ chạy trên database **test** —
-    `candidate_database_urls()` không bao giờ trỏ vào DB đang dùng thật.
-
-    Không `drop_all()` ở cuối: lượt chạy sau lại phải dựng lại từ đầu (gồm cả index `ivfflat`)
-    mà chẳng được gì.
+    `TRUNCATE` một lần ở đầu phiên vì một lượt chạy bị ngắt giữa chừng có thể để lại dữ liệu đã
+    commit. Không `drop_all()` ở cuối: lượt sau lại phải dựng lại cả index `ivfflat`.
     """
     engine = create_engine(database_url, poolclass=NullPool)
     try:
@@ -161,9 +144,8 @@ def db_schema(database_url: str) -> str:
 async def db_session(db_schema: str) -> AsyncIterator[AsyncSession]:
     """Session cho một test, **luôn rollback** khi test kết thúc.
 
-    `join_transaction_mode="create_savepoint"`: mã ứng dụng gọi `commit()` thoải mái (repository
-    của cả Q lẫn T đều commit), nó chỉ giải phóng savepoint bên trong transaction ngoài — thứ
-    mà fixture này rollback ngay sau đó.
+    `join_transaction_mode="create_savepoint"`: mã ứng dụng gọi `commit()` thoải mái, nó chỉ giải
+    phóng savepoint bên trong transaction ngoài — thứ mà fixture này rollback ngay sau đó.
     """
     engine = create_async_engine(db_schema, poolclass=NullPool)
     try:
@@ -191,9 +173,8 @@ async def db_session(db_schema: str) -> AsyncIterator[AsyncSession]:
 def test_password_hash() -> str:
     """Băm Argon2 của `TEST_PASSWORD`, tính **một lần cho cả phiên test**.
 
-    Argon2 cố ý chậm (~50ms/lượt). Băm lại ở mỗi test cần `user_a` + `user_b` là cộng thêm cả
-    chục giây vào một bộ 400 test mà không kiểm thêm được gì: bản thân việc băm đã có
-    `tests/test_auth.py` của T lo. Ở đây mật khẩu chỉ cần **thật** đủ để đăng nhập được.
+    Argon2 cố ý chậm (~50ms/lượt); băm lại ở mỗi test là cộng cả chục giây vào bộ test mà không
+    kiểm thêm được gì.
     """
     return auth.hash_password(TEST_PASSWORD)
 
@@ -210,16 +191,14 @@ async def make_user(
 ) -> User:
     """Một người dùng thật trong DB, mật khẩu là `TEST_PASSWORD`.
 
-    `user_id` để chỉ định trước id: các file test đã có sẵn một hằng chủ sở hữu dùng chung cho
-    những object ORM được dựng ở tầng module (`OWNER_ID`), mà khoá ngoại `user_id` đòi hàng
-    `users` đó **tồn tại thật** — nên phải tạo được đúng id ấy chứ không nhận một id ngẫu nhiên.
+    `user_id` để chỉ định trước id: nhiều file test khai sẵn một hằng chủ sở hữu ở tầng module,
+    mà khoá ngoại đòi hàng `users` đó **tồn tại thật**.
 
-    `connected` (task 13.2): mặc định người dùng đã có credential CLIProxy riêng, vì từ 13.2 mọi
-    lời gọi LLM đi bằng tên model có tiền tố của đúng người đó.
+    `connected`: mặc định người dùng đã có credential CLIProxy riêng, vì mọi lời gọi LLM đi bằng
+    tên model có tiền tố của đúng người đó.
 
-    **Từ `NEXT-05` mỗi người dùng mới đi kèm một không gian làm việc riêng**, đúng như revision
-    `0015` làm với dữ liệu đang có: người dùng không thuộc không gian nào thì mọi endpoint trả
-    `409`, và gần như mọi test sẽ đỏ vì một lý do chẳng liên quan gì tới nó.
+    **Mỗi người dùng mới đi kèm một không gian làm việc riêng** — không thuộc không gian nào thì
+    mọi endpoint trả `409` và gần như mọi test sẽ đỏ vì một lý do chẳng liên quan.
     """
     user = User(
         id=user_id or uuid.uuid4(),
@@ -233,9 +212,8 @@ async def make_user(
     if workspace_id is None:
         await make_workspace(db, display_name or email, owner=user)
     elif await db.get(Workspace, workspace_id) is None:
-        # Nhiều file test khai sẵn một hằng id ở tầng module rồi dựng object ORM quanh nó
-        # (`OWNER_ID`, `WORKSPACE_ID`). Tạo hộ không gian ấy nếu chưa có, để mỗi file chỉ phải
-        # thêm đúng một tham số thay vì dựng tay cả không gian lẫn tư cách thành viên.
+        # Nhiều file test khai sẵn một hằng id ở tầng module rồi dựng object ORM quanh nó. Tạo hộ
+        # không gian ấy nếu chưa có, để mỗi file chỉ phải thêm đúng một tham số.
         await make_workspace(db, display_name or email, owner=user, workspace_id=workspace_id)
     else:
         await join_workspace(db, workspace_id, user, role=role)
@@ -274,8 +252,8 @@ async def workspace_id_of(db: AsyncSession, user: User) -> uuid.UUID:
 async def active_workspace_of(db: AsyncSession, user: User) -> ActiveWorkspace:
     """`ActiveWorkspace` thật của một người dùng, cho test gọi thẳng hàm router.
 
-    Đi qua `workspace.resolve()` chứ không tự dựng dataclass: vai trò trong đó là vai trò thật
-    đọc từ bảng thành viên, nên test gọi trực tiếp không vô tình chạy với quyền mà DB không cho.
+    Đi qua `workspace.resolve()` chứ không tự dựng dataclass, để test không vô tình chạy với
+    quyền mà DB không cho.
     """
     await db.refresh(user)
     active = await workspace_dep.resolve(db, user)
@@ -316,8 +294,8 @@ async def active_a(db_session: AsyncSession, user_a: User) -> ActiveWorkspace:
 async def teammate(db_session: AsyncSession, user_a: User) -> User:
     """Người thứ hai **trong cùng không gian với A**, vai trò `member`.
 
-    Đây là thứ A9 cũ không có và A9′ bắt buộc phải có: luật mới sai được theo **cả hai** chiều,
-    nên phải kiểm cả *cách nhau* lẫn *cùng nhau*.
+    Luật tách dữ liệu theo không gian sai được theo **cả hai** chiều, nên phải kiểm cả *cách
+    nhau* lẫn *cùng nhau*.
     """
     return await make_user(
         db_session,
@@ -343,11 +321,9 @@ async def viewer(db_session: AsyncSession, user_a: User) -> User:
 class _SessionHandle:
     """`async with` trả về đúng session của test và **không đóng** nó.
 
-    `core/security.RequireLoginMiddleware` tự mở session bằng `SessionLocal()` vì nó chạy trước
-    khi FastAPI giải dependency — nên `dependency_overrides[get_db]` không với tới được nó. Để
-    nguyên thì middleware đọc DB qua một connection khác, không thấy hàng `users` đang nằm trong
-    transaction chưa commit của test, và **mọi** request trong test đều bị đá về `/auth/login`.
-    Lớp này là chỗ để `app_client` trỏ `SessionLocal` của middleware vào đúng session ấy.
+    `RequireLoginMiddleware` tự mở session bằng `SessionLocal()` vì nó chạy trước khi FastAPI giải
+    dependency, nên `dependency_overrides[get_db]` không với tới. Để nguyên thì middleware không
+    thấy hàng `users` đang nằm trong transaction chưa commit và **mọi** request bị đá về đăng nhập.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -366,15 +342,13 @@ async def api_client(
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Client gọi **app thật** với tư cách `user` (`None` = khách chưa đăng nhập).
 
-    Dùng `app.main.app` chứ không dựng một `FastAPI()` rỗng: phần đáng kiểm nhất của 12.4 nằm ở
-    dây nối — middleware chặn, thứ tự middleware, context processor của template — mà app rỗng
-    thì không có gì trong số đó.
+    Dùng `app.main.app` chứ không dựng một `FastAPI()` rỗng: phần đáng kiểm nhất nằm ở dây nối —
+    middleware chặn, thứ tự middleware, context processor — mà app rỗng thì không có gì trong đó.
 
-    Cookie ký bằng đúng `services/auth.sign_session()` của T, không dựng tay: phiên phải hết hiệu
-    lực khi người dùng đổi mật khẩu, và chỉ hàm đó biết dấu vân tay ấy tính thế nào.
+    Cookie ký bằng đúng `services/auth.sign_session()`, không dựng tay: phiên phải hết hiệu lực
+    khi người dùng đổi mật khẩu.
 
-    `follow_redirects=False`: bị chặn thì test phải **thấy** đúng cái `303`, chứ không lặng lẽ đi
-    theo nó rồi khẳng định về nội dung trang đăng nhập.
+    `follow_redirects=False`: bị chặn thì test phải **thấy** đúng cái `303`.
     """
     from app.core import security
     from app.main import app
@@ -405,8 +379,7 @@ async def app_client(
 ) -> AsyncIterator[Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]]:
     """Fixture gói `api_client` lại: `async with app_client(user_a) as http: …`.
 
-    Có cả hai dạng là cố ý: fixture cho test viết mới (12.7 của T), còn hàm `api_client` cho các
-    helper module-level đã tồn tại từ D8 (`tests/test_rag_chat.py`) khỏi phải đổi cấu trúc.
+    Có cả hai dạng là cố ý: fixture cho test viết mới, hàm `api_client` cho helper module-level.
     """
 
     def factory(user: User | None = None) -> AbstractAsyncContextManager[httpx.AsyncClient]:
@@ -422,9 +395,8 @@ async def app_client(
 class CliProxyStub:
     """Điều khiển CLIProxy giả lập trong một test.
 
-    Mock ở tầng **HTTP** chứ không monkeypatch `services/llm.py`: lỗi hay gặp nhất với CLIProxy
-    không phải ở chỗ ta gọi sai hàm, mà ở hình dạng response (bọc ```json — I-15, báo lỗi bằng
-    HTTP 200 — I-02). Chỉ mock HTTP mới kiểm được những thứ đó.
+    Mock ở tầng **HTTP** chứ không monkeypatch `services/llm.py`: lỗi hay gặp nhất không phải ở
+    chỗ ta gọi sai hàm mà ở hình dạng response (bọc ```json — I-15; báo lỗi bằng HTTP 200 — I-02).
     """
 
     router: respx.MockRouter
@@ -434,8 +406,7 @@ class CliProxyStub:
     def reply(self, *texts: str) -> None:
         """Model trả lần lượt từng chuỗi cho từng lời gọi `generateContent`.
 
-        Truyền nhiều chuỗi để dựng kịch bản thử lại: `stub.reply("xin chào", "{…}")` nghĩa là
-        lượt đầu hỏng, lượt sau mới ra JSON.
+        Truyền nhiều chuỗi để dựng kịch bản thử lại.
         """
         self.router.post(path__regex=GENERATE_PATTERN).mock(
             side_effect=[httpx.Response(200, json=gemini_payload(text)) for text in texts]
@@ -456,11 +427,8 @@ class CliProxyStub:
     def auth_files(self, *names: str, cooldowns: Sequence[dict[str, Any]] = ()) -> None:
         """`GET /v0/management/auth-files` — nguồn sự thật của badge kết nối (I-02).
 
-        Ghi vào `files` chứ **không** đăng ký thêm route: fixture đã cắm sẵn một route đọc danh
-        sách này mỗi lần được gọi. Đăng ký hai lần thì respx giữ route **đầu tiên**, nên test
-        nào gọi `auth_files()` sau khi đã có route sẽ lặng lẽ không có tác dụng gì.
-
-        `cooldowns` dựng ca I-42: credential lành lặn nhưng Google từ chối một model vì gói cước.
+        Ghi vào `files` chứ **không** đăng ký thêm route: respx giữ route **đầu tiên**, nên đăng
+        ký lần hai sẽ lặng lẽ không có tác dụng gì.
         """
         self.files[:] = [
             {
@@ -492,11 +460,8 @@ def gemini_payload(text: str) -> dict[str, Any]:
 def cliproxy() -> Iterator[CliProxyStub]:
     """CLIProxy giả lập tại đúng `CLIPROXY_BASE_URL` mà `services/llm.py` sẽ gọi.
 
-    `auth-files` được cắm sẵn ngay từ đầu, trả về `stub.files` mỗi lần được hỏi. Từ I-42 nó nằm
-    trên **đường lỗi**: gặp `503 auth_unavailable`, `llm._explain_no_credential()` hỏi lại
-    `auth-files` để biết credential có bị nhà cung cấp chặn không — đó là chỗ duy nhất đọc được
-    lý do thật. Không cắm sẵn thì mọi test dựng cảnh 503 đều đỏ vì một route chưa mock, chứ
-    không phải vì điều nó muốn kiểm.
+    `auth-files` cắm sẵn ngay từ đầu vì nó nằm trên **đường lỗi**: gặp `503 auth_unavailable`,
+    `llm._explain_no_credential()` hỏi lại nó để biết credential có bị nhà cung cấp chặn không.
     """
     with respx.mock(base_url=settings.cliproxy_base_url, assert_all_called=False) as router:
         stub = CliProxyStub(router)
@@ -513,9 +478,8 @@ def cliproxy() -> Iterator[CliProxyStub]:
 class EmbedderStub:
     """Service `embedder` giả lập (hợp đồng ở Plan.md mục 2.6).
 
-    Vector sinh theo hàm băm của chính đoạn văn: cùng một đoạn luôn ra cùng một vector, hai
-    đoạn khác nhau ra vector khác nhau. Đủ để kiểm "đúng thứ tự", "đúng số lượng", "ghi đúng
-    vào DB" mà không cần đụng tới `torch`.
+    Vector sinh theo hàm băm của chính đoạn văn: cùng một đoạn luôn ra cùng một vector. Đủ để
+    kiểm thứ tự / số lượng / ghi đúng vào DB mà không cần đụng tới `torch`.
     """
 
     router: respx.MockRouter

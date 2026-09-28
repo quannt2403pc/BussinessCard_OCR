@@ -2,15 +2,13 @@
 
 Chủ sở hữu: Q | Task: EX-16 | xem `docs/adr-model-per-feature.md`
 
-Vì sao có file này: từ `EX-14`, **tên model không còn là một hằng số** mà là kết quả của
-`lựa chọn của người dùng × bảng năng lực × danh mục thật lúc chạy`. Ba thứ đó sai lệch nhau theo
-những cách **không ném lỗi nào**:
+Tên model không còn là một hằng số mà là kết quả của `lựa chọn của người dùng × bảng năng lực ×
+danh mục thật lúc chạy`. Ba thứ đó sai lệch nhau theo những cách **không ném lỗi nào**:
 
-1. Chọn cho `enrich` một model không tra cứu được Internet → hồ sơ vẫn sinh, chỉ là **trống**
-   (mọi trường không nguồn bị `enrichment.py` bỏ) → trượt tiêu chí **A5** mà không ai thấy.
-2. Chọn cho `ocr` một model không đọc được ảnh → thẻ quét ra rỗng, `gpt-oss-120b-medium` thậm chí
-   trả `{"full_name": "none"}` (đo ở `EX-12`).
-3. Model đã lưu **biến mất khỏi danh mục** — danh mục tự đổi, đã đổi 11 → 12 trong 14 ngày.
+1. Chọn cho `enrich` một model không tra cứu Internet → hồ sơ vẫn sinh, chỉ là **trống** → trượt
+   tiêu chí **A5** mà không ai thấy.
+2. Chọn cho `ocr` một model không đọc được ảnh → thẻ quét ra rỗng.
+3. Model đã lưu **biến mất khỏi danh mục** — danh mục tự đổi.
 
 Và một đường rò của **A9**: lựa chọn của A không được rơi sang B.
 """
@@ -102,15 +100,14 @@ async def test_moi_chuc_nang_di_bang_model_cua_chinh_no(
 async def test_model_khong_du_nang_luc_thi_roi_ve_mac_dinh(
     db_session: AsyncSession, user_a: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR M5: rơi về mặc định **kèm cảnh báo**, không ném lỗi.
+    """Rơi về mặc định **kèm cảnh báo**, không ném lỗi.
 
-    Người dùng không làm gì sai — bảng năng lực có thể đổi sau một lượt đo mới, hoặc dòng này đã
-    nằm trong DB từ trước khi ai đó đo ra rằng model đó không đọc được ảnh. Ném lỗi ở đây là làm
-    hỏng lượt quét vì một chuyện của quá khứ.
+    Người dùng không làm gì sai — bảng năng lực có thể đổi sau một lượt đo mới. Ném lỗi ở đây là
+    làm hỏng lượt quét vì một chuyện của quá khứ.
     """
     _stub_catalogue(monkeypatch, CATALOGUE)
     # Ghi thẳng qua repository: API sẽ từ chối tổ hợp này, mà đúng cái ta cần dựng là trạng thái
-    # DB "đã lỡ có" — nó có thật, vì bảng năng lực và dữ liệu cũ không sinh ra cùng lúc.
+    # DB "đã lỡ có".
     await pref_repo.save(db_session, user_a.id, {"ocr": NO_VISION, "enrich": NO_WEB})
     await db_session.flush()
 
@@ -134,8 +131,8 @@ async def test_danh_muc_rong_thi_van_tin_lua_chon_cua_nguoi_dung(
 ) -> None:
     """Danh mục rỗng = **không hỏi được CLIProxy**, không phải "model đã bị gỡ".
 
-    Đổi model của người dùng vì ta đang mất mạng là một kiểu hỏng khác, âm thầm hơn hẳn: họ chọn
-    A, hệ thống lặng lẽ chạy B, và mọi thứ vẫn "hoạt động bình thường".
+    Đổi model của người dùng vì ta đang mất mạng là kiểu hỏng âm thầm hơn hẳn: họ chọn A, hệ
+    thống lặng lẽ chạy B, và mọi thứ vẫn "hoạt động bình thường".
     """
     await pref_repo.save(db_session, user_a.id, {"chat": GOOD})
     await db_session.flush()
@@ -325,15 +322,12 @@ async def test_loi_goi_that_di_dung_model_da_chon(
     cliproxy: CliProxyStub,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Phép kiểm cuối cùng: đường `/v1beta/models/<tiền tố>/<model đã chọn>:generateContent`.
+    """Phép kiểm cuối: đường `/v1beta/models/<tiền tố>/<model đã chọn>:generateContent`.
 
-    Hai nửa của tên model đến từ hai nơi và **cả hai đều phải đúng**: tiền tố nói lời gọi đi bằng
-    credential của ai (13.2), tên model nói model nào trả lời (`EX-14`). Test khẳng định cả tên
-    đầy đủ chứ không khẳng định riêng từng nửa — ghép sai thứ tự thì hai phép kiểm riêng vẫn xanh.
+    Hai nửa của tên model đến từ hai nơi và **cả hai đều phải đúng**. Test khẳng định cả tên đầy
+    đủ chứ không riêng từng nửa — ghép sai thứ tự thì hai phép kiểm riêng vẫn xanh.
 
-    Đi qua nút *Dịch lại* (`POST /api/cards/{id}/translate`) vì đó là lời gọi model **ngắn nhất**
-    chạm tới `model_for(..., "ocr")`: không cần ảnh thật, không cần KB, không cần embedder — ba
-    thứ chỉ làm test dài ra mà không kiểm thêm được gì về việc chọn model.
+    Đi qua nút *Dịch lại* vì đó là lời gọi model **ngắn nhất** chạm tới `model_for(..., "ocr")`.
     """
     _stub_catalogue(monkeypatch, CATALOGUE)
     erin = await make_user(db_session, "erin@example.com")
@@ -355,10 +349,10 @@ async def test_lua_chon_ocr_dung_chung_cho_buoc_viet_hoa(
     cliproxy: CliProxyStub,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """QĐ-5 / ADR M3: Việt hoá **không** có ô chọn riêng, nó đi theo ô *Quét danh thiếp*.
+    """Việt hoá **không** có ô chọn riêng, nó đi theo ô *Quét danh thiếp*.
 
-    Và `translation_meta.model` phải khai đúng model vừa gọi — trước `EX-14` chỗ đó đọc thẳng
-    `settings.llm_model`, tức sổ sách nói dối ngay khi hai thứ khác nhau (**I-34**).
+    Và `translation_meta.model` phải khai đúng model vừa gọi, không đọc thẳng `settings.llm_model`
+    (I-34).
     """
     _stub_catalogue(monkeypatch, CATALOGUE)
     gina = await make_user(db_session, "gina@example.com")
@@ -417,10 +411,9 @@ COOLDOWN: list[dict[str, object]] = [
 def test_cooldown_khong_lam_credential_thanh_hong() -> None:
     """Gốc của I-42: badge đọc `usable`, mà `usable` không nhìn `cooldowns`.
 
-    Giữ nguyên hành vi ấy **có chủ đích** — credential đang nghỉ vẫn lành lặn, model khác vẫn
-    gọi được. Nhưng phải có test ghim lại, vì cám dỗ "cho cooldown vào `usable` cho badge đỏ"
-    rất lớn, mà làm thế là đẩy người dùng đi đăng nhập lại để chữa một thứ đăng nhập lại không
-    đụng tới được.
+    Giữ nguyên hành vi ấy **có chủ đích**. Test ghim lại vì cám dỗ "cho cooldown vào `usable` cho
+    badge đỏ" rất lớn, mà làm thế là đẩy người dùng đi đăng nhập lại để chữa một thứ đăng nhập
+    lại không đụng tới được.
     """
     assert _auth_file("a.json", label="ai@gmail.com", cooldowns=COOLDOWN).usable is True
 
@@ -428,8 +421,7 @@ def test_cooldown_khong_lam_credential_thanh_hong() -> None:
 def test_cooldown_khop_ca_khi_ten_model_con_tien_to() -> None:
     """Lời gọi đi bằng `u<hex>/gemini-3-flash`, CLIProxy ghi cooldown theo `gemini-3-flash`.
 
-    Không cắt tiền tố thì không bao giờ khớp, và `llm._explain_no_credential()` sẽ bỏ sót đúng
-    cái lý do nó sinh ra để tìm.
+    Không cắt tiền tố thì không bao giờ khớp.
     """
     auth_file = _auth_file("a.json", label="ai@gmail.com", cooldowns=COOLDOWN)
 

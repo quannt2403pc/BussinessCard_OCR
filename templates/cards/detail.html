@@ -1,24 +1,12 @@
-{# Review OCR: ảnh gốc trái, form phải, tô vàng trường confidence thấp. #}
-{# Chủ sở hữu: Q | Task: 5.1 | xem Task.md #}
-{#
-  Dữ liệu do JavaScript gọi `GET /api/cards/{id}` (task 4.2) đổ vào, không render sẵn từ Jinja —
-  xem lý do trong docstring của `card_detail_page()` ở `app/routers/cards.py`: sau mỗi lần Lưu,
-  server trả về bản **đã chuẩn hoá** (`0912 345 678` → `+84912345678`) và trang phải vẽ lại từ
-  đúng payload đó, nếu không sẽ có hai nguồn sự thật lệch nhau.
+{# Review OCR: ảnh gốc trái, form phải, tô vàng trường confidence thấp.
+   Chủ sở hữu: Q | Task: 5.1
 
-  ⚠️ Mọi giá trị ở đây do model đọc từ ảnh người lạ đưa. Ghi vào DOM bằng `textContent` hoặc
-  `input.value`, tuyệt đối không `innerHTML`.
+   Dữ liệu do JavaScript gọi `GET /api/cards/{id}` đổ vào, không render sẵn từ Jinja: sau mỗi lần
+   Lưu, server trả bản **đã chuẩn hoá** và trang phải vẽ lại từ đúng payload đó, nếu không sẽ có
+   hai nguồn sự thật lệch nhau.
 
-  Ba điểm thiết kế đáng nói:
-
-  1. **Chỉ PATCH những ô đã sửa.** `CardUpdateIn` phân biệt "không gửi" với "gửi null", nên gửi
-     cả form sẽ ghi đè cả những trường người dùng không đụng tới — và ô trống sẽ xoá trắng dữ
-     liệu model đọc đúng.
-  2. **Ô rỗng gửi `null` chứ không gửi `""`.** Xoá một giá trị model đọc nhầm là việc hay làm
-     nhất ở màn hình này; gửi chuỗi rỗng thì DB đầy `''` mà mọi truy vấn về sau đều phải lọc tay.
-  3. **Bấm "Xác nhận" khi còn thay đổi chưa lưu thì lưu trước rồi mới xác nhận.** Ngược lại là
-     người dùng sửa một trường rồi xác nhận và thay đổi đó bốc hơi không một lời nào.
-#}
+   ⚠️ Mọi giá trị ở đây do model đọc từ ảnh người lạ đưa. Ghi vào DOM bằng `textContent` hoặc
+   `input.value`, tuyệt đối không `innerHTML`. #}
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
 
@@ -102,15 +90,13 @@
 
       <div class="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
         <button type="submit" id="btn-save" class="btn">{{ icon("check") }} Lưu</button>
-        {# Nút chính của màn hình này giữ màu emerald: "xác nhận" là màu **ngữ nghĩa**
-           (xong/đồng ý), đổi sang brand là mất nghĩa — xem docs/ui-kit.md mục 1. #}
+        {# Nút chính giữ màu emerald: "xác nhận" là màu **ngữ nghĩa** (xong/đồng ý). #}
         <button type="button" id="btn-confirm"
                 class="btn-primary bg-emerald-600 hover:bg-emerald-700 disabled:hover:bg-emerald-600">
           {{ icon("check-circle") }} Xác nhận
         </button>
         <span id="dirty" class="text-xs text-amber-700"></span>
-        {# Hành động xoá **luôn giữ chữ** (ui-kit mục 6 luật 3): icon thùng rác đứng một mình
-           là lời mời bấm nhầm. #}
+        {# Hành động xoá **luôn giữ chữ**: icon thùng rác đứng một mình là lời mời bấm nhầm. #}
         <button type="button" id="btn-delete" class="btn ml-auto border-rose-200 text-rose-700 hover:bg-rose-50">
           {{ icon("trash") }} Xoá danh thiếp
         </button>
@@ -118,13 +104,10 @@
     </form>
 
 
-    {# --- Theo dõi liên hệ (NEXT-01 của T — file của Q, Q review PR) ---
-
-       Nằm **ngoài** `<form>` ở trên và lưu bằng nút riêng, không gộp vào nút Lưu: form kia sửa
-       thứ model đọc từ ảnh, khối này ghi thứ người dùng làm *sau khi* đã có tấm thẻ. Gộp lại thì
-       mỗi lần đổi trạng thái quan hệ là một lần ghi đè cả mười trường OCR.
-
-       Ẩn cho tới khi `GET /api/contacts/{id}` trả về, để không loé lên một khối rỗng. #}
+    {# --- Theo dõi liên hệ ---
+       Nằm **ngoài** `<form>` ở trên và lưu bằng nút riêng: form kia sửa thứ model đọc từ ảnh, khối
+       này ghi thứ người dùng làm *sau khi* đã có tấm thẻ. Gộp lại thì mỗi lần đổi trạng thái quan
+       hệ là một lần ghi đè cả mười trường OCR. Ẩn cho tới khi API trả về. #}
     <div id="follow-up" class="mt-4 hidden rounded-lg border border-slate-200 bg-white p-5">
       <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Theo dõi liên hệ</h2>
 

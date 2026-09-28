@@ -1,24 +1,18 @@
 """So sánh multilingual-e5-small vs bge-m3, có/không tiền tố query:/passage:.
 
-Chủ sở hữu: T | Task: 2.6 | xem Task.md
+Chủ sở hữu: T | Task: 2.6
 
-CLIProxy không có endpoint embedding (Plan.md mục 2.6, xác nhận lại ở docs/cliproxy-notes.md
-mục 6), nên embedding do service `embedder` cục bộ đảm nhiệm. Script này chọn model cho service
-đó và đo bằng số thật thay vì tin vào bảng benchmark trên mạng.
-
-Chạy::
+CLIProxy không có endpoint embedding nên embedding do service `embedder` cục bộ đảm nhiệm; script
+này chọn model cho service đó bằng số thật thay vì tin bảng benchmark trên mạng.
 
     python scripts/spike_embedding.py                      # chỉ e5-small (mặc định)
     python scripts/spike_embedding.py --models e5 bge      # so cả hai
     python scripts/spike_embedding.py --json ket-qua.json  # xuất số liệu để dán vào ADR
 
-Tiêu chí đạt (Task.md 2.6): top-3 chứa đoạn đúng ở **≥ 8/10** truy vấn **và** < 200ms/đoạn
-trên CPU. Đạt → chốt e5-small; trượt → thử bge-m3; cả hai trượt → báo Q chuyển RAG sang
-`tsvector`.
+Tiêu chí đạt: top-3 chứa đoạn đúng ở **≥ 8/10** truy vấn **và** < 200ms/đoạn trên CPU.
 
-Bộ dữ liệu bên dưới cố tình có **nhiều công ty cùng ngành** (3 công ty logistics, 2 công ty
-phần mềm) để bài đo không quá dễ: model phải phân biệt được đúng công ty chứ không chỉ đúng
-chủ đề.
+Bộ dữ liệu cố tình có **nhiều công ty cùng ngành** để bài đo không quá dễ: model phải phân biệt
+được đúng công ty chứ không chỉ đúng chủ đề.
 """
 
 from __future__ import annotations
@@ -154,9 +148,8 @@ class Result:
     ms_model_load: float
     #: Cosine trung bình của đoạn ĐÚNG với truy vấn.
     mean_correct_score: float
-    #: Biên trung bình = điểm đoạn đúng − điểm đoạn SAI cao nhất. Biên càng lớn càng khó xếp
-    #: nhầm khi Knowledge Base phình to. Đây là chỉ số duy nhất đủ nhạy để thấy tác dụng của
-    #: tiền tố khi top-3 đã kịch trần 10/10 — xem docs/adr-embedding.md mục 4.
+    #: Biên trung bình = điểm đoạn đúng − điểm đoạn SAI cao nhất. Chỉ số duy nhất đủ nhạy để
+    #: thấy tác dụng của tiền tố khi top-3 đã kịch trần 10/10.
     mean_margin: float
 
     @property

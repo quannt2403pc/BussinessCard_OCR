@@ -1,23 +1,15 @@
 """Hậu xử lý sau khi quét: chuẩn hoá SĐT (E.164), email, khoảng trắng.
 
-Chủ sở hữu: Q | Task: 3.6 | xem Task.md
+Chủ sở hữu: Q | Task: 3.6
 
-Gọi ngay trong `services/ocr.py` sau khi parse JSON của model — đây là bước "tối ưu dữ liệu sau
-khi quét" thuộc F1 (Plan.md mục 5.2), không phải một endpoint riêng.
+Gọi ngay trong `services/ocr.py` sau khi parse JSON của model.
 
-**Nguyên tắc xuyên suốt file: không vứt dữ liệu.** Danh thiếp đi vào trạng thái `needs_review`,
-người dùng sẽ nhìn lại từng trường (rủi ro R3). Chuẩn hoá được thì trả bản chuẩn; không chuẩn
-hoá được thì trả **bản đã dọn sạch** chứ không trả `None` — giá trị gốc y nguyên vẫn nằm trong
-`ocr_raw_json` để đối chiếu.
+**Nguyên tắc xuyên suốt file: không vứt dữ liệu.** Chuẩn hoá được thì trả bản chuẩn; không thì
+trả **bản đã dọn sạch** chứ không trả `None` — giá trị gốc vẫn nằm trong `ocr_raw_json`.
 
-Vì sao dùng `phonenumbers` (bản port của libphonenumber) thay vì tự viết regex: danh thiếp của
-dự án có 5 ngôn ngữ Anh/Việt/Hàn/Nhật/Trung (Plan.md mục 1.3), mỗi nước một quy tắc mã vùng và
-số 0 đứng đầu. `+84 24 7300 7300`, `02-1234-5678`, `090-1234-5678` không có mẫu chung nào bắt
-được bằng regex mà không sai.
-
-Cập nhật EX-05 (2026-09-22): phạm vi ngôn ngữ mở ra **không giới hạn**, nên `REGION_BY_LANGUAGE`
-dài thêm. Chọn thư viện thay vì regex nay còn đáng giá hơn: quy tắc số của Thái Lan hay Ba Lan
-không phải thứ viết tay được, mà `phonenumbers` thì đã có sẵn cả 200+ nước.
+Dùng `phonenumbers` thay vì tự viết regex vì phạm vi ngôn ngữ là **không giới hạn**: mỗi nước một
+quy tắc mã vùng và số 0 đứng đầu, `+84 24 7300 7300` / `02-1234-5678` / `090-1234-5678` không có
+mẫu chung nào bắt được bằng regex mà không sai.
 """
 
 from __future__ import annotations
@@ -31,16 +23,12 @@ import phonenumbers
 
 logger = logging.getLogger(__name__)
 
-#: Vùng mặc định để đọc số viết theo kiểu nội địa (`0912…`) — suy từ `language_detected` mà
-#: prompt OCR trả về (task 3.3). Không đoán được vùng thì `phonenumbers` chỉ đọc được số đã có
-#: dấu `+`, phần còn lại giữ nguyên dạng đã dọn.
+#: Vùng mặc định để đọc số viết theo kiểu nội địa (`0912…`), suy từ `language_detected`.
 #:
-#: EX-05 mở rộng ra ngoài 5 ngôn ngữ chính. Chỉ điền những ngôn ngữ **gắn chặt với một nước**:
-#: tiếng Thái → Thái Lan, tiếng Ba Lan → Ba Lan. Ngôn ngữ nói ở nhiều nước (Anh, Tây Ban Nha,
-#: Ả Rập, Bồ Đào Nha, Pháp, Đức) cố ý để `None` — đoán bừa một nước còn tệ hơn không đoán: số
-#: `030-1234567` đọc theo `DE` ra một số Berlin, đọc theo `AT` ra một số không tồn tại, và cả
-#: hai đều được ghi vào DB trông như thật. Không có vùng thì `phonenumbers` chỉ đọc số có dấu
-#: `+`, phần còn lại giữ nguyên dạng đã dọn — mất phần chuẩn hoá, không mất dữ liệu.
+#: Chỉ điền những ngôn ngữ **gắn chặt với một nước**. Ngôn ngữ nói ở nhiều nước (Anh, Tây Ban Nha,
+#: Ả Rập, Bồ Đào Nha, Pháp, Đức) cố ý để `None`: `030-1234567` đọc theo `DE` ra một số Berlin,
+#: đọc theo `AT` ra một số không tồn tại, và cả hai đều được ghi vào DB trông như thật. Không có
+#: vùng thì `phonenumbers` chỉ đọc số có dấu `+` — mất phần chuẩn hoá, không mất dữ liệu.
 REGION_BY_LANGUAGE: dict[str, str | None] = {
     "vi": "VN",
     "ko": "KR",
@@ -96,8 +84,7 @@ _PHONE_KEEP_RE = re.compile(r"[^0-9+()\-.\sextEXT#]")
 #: Ngắn hơn mức này thì không phải số điện thoại mà là mảnh vụn (máy lẻ viết rời, năm, mã bưu điện).
 _MIN_PHONE_DIGITS = 7
 
-#: Kiểm email ở mức "trông giống email" — cố ý lỏng. Địa chỉ sai luật vẫn được giữ để người dùng
-#: sửa ở màn hình review; chặt tay ở đây chỉ làm mất dữ liệu.
+#: Kiểm email ở mức "trông giống email" — cố ý lỏng, để người dùng sửa ở màn hình review.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 #: `mailto:` phải cắt TRƯỚC nhãn, nếu không `mail` của nhãn ăn mất bốn chữ đầu và còn lại `to:`.
@@ -112,15 +99,13 @@ _TRAILING_JUNK = " \t\r\n.,;:·|<>()[]\"'"
 def squash_spaces(value: Any) -> str | None:
     """Gộp mọi loại khoảng trắng thành một dấu cách, cắt hai đầu. Rỗng ⇒ `None`.
 
-    Dùng cho mọi trường văn bản (tên, chức vụ, công ty, địa chỉ). Địa chỉ trên danh thiếp hay
-    xuống dòng giữa chừng; giữ nguyên xuống dòng thì so khớp tên công ty (task 3.8 của T) và
-    tìm kiếm (task 4.1) đều vấp.
+    Địa chỉ trên danh thiếp hay xuống dòng giữa chừng; giữ nguyên xuống dòng thì so khớp tên công
+    ty và tìm kiếm đều vấp.
     """
     if value is None:
         return None
     text = value if isinstance(value, str) else str(value)
-    # NBSP và khoảng trắng full-width lọt vào từ ảnh tiếng Nhật/Trung. `\s` của Python bắt được
-    # NBSP nhưng không bắt U+3000, nên đổi tay trước.
+    # `\s` của Python bắt được NBSP nhưng không bắt U+3000 (khoảng trắng full-width).
     text = text.replace("　", " ").replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text).strip()
     return text or None
@@ -157,8 +142,7 @@ def normalize_email(value: Any) -> str | None:
 def normalize_website(value: Any) -> str | None:
     """Thêm `https://` khi thiếu, bỏ khoảng trắng, hạ chữ thường phần scheme và tên miền.
 
-    Giữ nguyên hoa/thường của đường dẫn phía sau: `example.com/Partners` khác
-    `example.com/partners` trên máy chủ phân biệt hoa thường.
+    Giữ nguyên hoa/thường của đường dẫn phía sau — máy chủ có thể phân biệt hoa thường.
     """
     text = squash_spaces(value)
     if text is None:
@@ -190,13 +174,9 @@ def region_for_language(language: str | None) -> str | None:
 def split_phones(value: Any) -> list[str]:
     """Tách một ô chứa nhiều số thành danh sách, bỏ mảnh quá ngắn để có thể là số.
 
-    Mảnh dưới 7 chữ số thường là số máy lẻ viết rời ("… / 102") hoặc rác OCR — giữ lại sẽ sinh
-    ra một `phone_alt` vô nghĩa.
-
-    ⚠️ Xuống dòng phải đổi thành dấu tách **trước** khi gọi `squash_spaces()`. Phát hiện khi
-    viết test 4.10: `squash_spaces` gộp `\\n` thành khoảng trắng, nên tới lượt `_PHONE_SPLIT_RE`
-    thì không còn gì để tách — `"024 7300 7300\\n0912345678"` dính thành một chuỗi, `phone` lưu
-    một số vô nghĩa và số thứ hai mất hẳn. Danh thiếp in hai số trên hai dòng là chuyện thường.
+    ⚠️ Xuống dòng phải đổi thành dấu tách **trước** khi gọi `squash_spaces()`: hàm đó gộp `\n`
+    thành khoảng trắng, nên tới lượt `_PHONE_SPLIT_RE` thì không còn gì để tách và số thứ hai mất
+    hẳn. Danh thiếp in hai số trên hai dòng là chuyện thường.
     """
     raw = "" if value is None else (value if isinstance(value, str) else str(value))
     text = squash_spaces(raw.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " / "))
@@ -215,16 +195,11 @@ def split_phones(value: Any) -> list[str]:
 def normalize_phone(value: Any, *, region: str | None = None) -> str | None:
     """Về E.164 (`+84912345678`) khi đọc được; không đọc được thì trả bản đã dọn.
 
-    Ba cách đọc, theo đúng thứ tự:
+    Ba cách đọc, theo thứ tự: số nội địa của `region`; chuỗi không có `+` nhưng mở đầu bằng mã
+    nước thì thử lại với `+`; số quốc tế không kèm vùng.
 
-    1. số nội địa của `region` — bắt được `0912…`, `02-1234-5678`;
-    2. chuỗi không có `+` nhưng đã mở đầu bằng mã nước thì thử lại với `+` — bắt được
-       `84 24 7300 7300` và `(84) 24 …`, dạng rất hay gặp trên danh thiếp Việt;
-    3. số quốc tế không kèm vùng — bắt được mọi số đã có `+`.
-
-    Chỉ trả E.164 khi `is_valid_number()` đồng ý. Số "có thể đúng" nhưng không hợp lệ mà vẫn ép
-    về E.164 thì màn hình review hiện một số trông rất chuẩn nhưng gọi không được — lỗi âm thầm,
-    tệ hơn hẳn việc giữ đúng chữ người dùng nhìn thấy trên ảnh.
+    Chỉ trả E.164 khi `is_valid_number()` đồng ý — ép về E.164 một số "có thể đúng" thì màn hình
+    review hiện một số trông rất chuẩn nhưng gọi không được.
     """
     cleaned = _clean_phone_chunk(value)
     if not cleaned:
@@ -243,11 +218,10 @@ def normalize_phone(value: Any, *, region: str | None = None) -> str | None:
 
 
 def normalize_card_fields(fields: dict[str, Any], *, language: str | None = None) -> dict[str, Any]:
-    """Chuẩn hoá cả bộ trường của một danh thiếp — `ocr.py` gọi đúng hàm này (task 3.4).
+    """Chuẩn hoá cả bộ trường của một danh thiếp — `ocr.py` gọi đúng hàm này.
 
-    Trả về dict **mới**, không sửa tại chỗ: bản gốc còn phải ghi vào `ocr_raw_json` (task 3.5).
-    Số thứ hai tìm thấy trong ô `phone` sẽ lấp vào `phone_alt` nếu ô đó còn trống — danh thiếp
-    hay in "Tel / Mobile" trên cùng một dòng.
+    Trả về dict **mới**, không sửa tại chỗ: bản gốc còn phải ghi vào `ocr_raw_json`. Số thứ hai
+    tìm thấy trong ô `phone` lấp vào `phone_alt` nếu ô đó còn trống.
     """
     region = region_for_language(language)
     out = dict(fields)
@@ -275,8 +249,7 @@ def normalize_card_fields(fields: dict[str, Any], *, language: str | None = None
     out["phone"] = normalized[0] if normalized else None
     out["phone_alt"] = normalized[1] if len(normalized) > 1 else None
     if len(normalized) > 2:
-        # Hiếm, nhưng có danh thiếp in 3 số. DB chỉ có 2 cột (Plan.md mục 3); phần dư vẫn còn đủ
-        # trong `ocr_raw_json`, ghi log để biết mà nhìn lại chứ không âm thầm bỏ.
+        # Hiếm, nhưng có danh thiếp in 3 số. DB chỉ có 2 cột; phần dư còn đủ trong `ocr_raw_json`.
         logger.info("Danh thiếp có %d số điện thoại, chỉ lưu 2 số đầu", len(normalized))
 
     return out

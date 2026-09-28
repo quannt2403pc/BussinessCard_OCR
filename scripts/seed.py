@@ -1,76 +1,41 @@
 """Nạp dữ liệu mẫu cho demo rồi đánh chỉ mục vào Knowledge Base.
 
-Chủ sở hữu: Q | Task: 9.2 (bộ chấm A6) + 11.2 (bộ demo) + 12.8 (gắn người dùng) | xem Task.md
+Chủ sở hữu: Q | Task: 9.2, 11.2, 12.8
 
-Chạy trong Docker (cần `db` và `embedder` phân giải được):
+Chạy trong Docker (cần `db` và `embedder` phân giải được)::
 
     docker compose exec api python -m scripts.seed
-    docker compose exec api python -m scripts.seed --reset    # nạp lại từ đầu
+    docker compose exec api python -m scripts.seed --reset          # nạp lại từ đầu
+    docker compose exec api python -m scripts.seed --user a@b.com --password matkhau123
+    docker compose exec api python -m scripts.seed --capture-profiles
 
-**Từ D12 mọi dữ liệu đều thuộc về một tài khoản, nên script phải biết nạp cho AI (task 12.8).**
-Mặc định là `demo@bizcard.local` / `demo12345`: chưa có thì script **tạo** và in rõ hai dòng đăng
-nhập ra màn hình; có rồi thì nạp thêm vào đúng tài khoản đó và **không** đổi mật khẩu. Nạp cho
-tài khoản khác:
+(`-m` chứ không phải `python scripts/seed.py`: chạy thẳng một file thì `sys.path[0]` thành
+`/app/scripts`, mà gói `app` lẫn gói `scripts` đều không nằm ở đó.)
 
-    docker compose exec api python -m scripts.seed --user tung@example.com --password matkhau123
-
-Vì sao có mật khẩu mặc định *và* nó không phải lỗ hổng: bộ seed chỉ chạy bằng tay trên máy dev
-(`docker compose exec`), còn bản triển khai ở D13 dựng từ máy sạch và người dùng tự đăng ký —
-không lượt deploy nào gọi script này. Mật khẩu vẫn đi qua đúng luật của `schemas/user.py`, nên
-không có đường nào tạo được tài khoản yếu hơn mức mà form đăng ký cho phép.
+Dữ liệu thuộc về một tài khoản; mặc định `demo@bizcard.local`. Chưa có thì script **tạo** và in
+hai dòng đăng nhập ra màn hình; có rồi thì nạp thêm và **không** đổi mật khẩu.
 
 **Hai bộ dữ liệu, hai mục đích khác nhau — đừng lẫn.**
 
 | Lệnh | Nạp gì | Để làm gì |
 |------|--------|-----------|
-| `python -m scripts.seed` | 3 công ty + 4 danh thiếp *hư cấu* của `docs/qa-testset.md` | Chấm tiêu chí **A6**; runbook mục 2 bước 4 |
-| `python -m scripts.seed --demo` | 7 thẻ **thật** của `samples/demo/` ở **trạng thái cuối buổi demo** | Task **11.2**: lưới an toàn khi mạng/OAuth hỏng |
+| `seed` | 3 công ty + 4 danh thiếp *hư cấu* của `docs/qa-testset.md` | Chấm tiêu chí **A6** |
+| `seed --demo` | 7 thẻ **thật** của `samples/demo/` ở **trạng thái cuối buổi demo** | Lưới an toàn khi mạng/OAuth hỏng |
 
-Bộ `--demo` dựng lại đúng thứ người xem đáng lẽ thấy ở phút 9 của buổi demo — thẻ đã xác nhận,
-công ty đã gộp, hồ sơ đã có nguồn — mà **không gọi một lời nào tới model**. Mất mạng giữa buổi,
-tài khoản dính `429`, hay OAuth hết hạn thì vẫn còn đường đi tiếp: một lệnh là có lại toàn bộ
-màn hình để nói. Đây là lưới an toàn *thứ hai*, sau video dự phòng của task 11.4.
+Bộ `--demo` dựng lại đúng thứ người xem đáng lẽ thấy ở phút 9 — thẻ đã xác nhận, công ty đã gộp,
+hồ sơ đã có nguồn — mà **không gọi một lời nào tới model**. Hồ sơ lấy từ `scripts/demo_profiles.json`,
+là ảnh chụp kết quả enrich thật, không một dòng bịa (R4).
 
-⚠️ **Nạp `--demo` rồi thì không quét lại được đúng những tấm ảnh đó** — hệ thống chặn trùng ảnh
-theo `image_hash`, mà script này băm đúng cách `POST /api/cards/upload` băm. Muốn diễn lại phần
-quét trực tiếp thì dọn trước bằng `samples/demo/reset_demo.sql` (runbook mục 2 bước 5) hoặc
-`--reset --demo`. Nói cách khác: **chạy `--demo` khi đã quyết định bỏ phần quét trực tiếp**, đừng
-chạy nó trong lúc chuẩn bị cho một buổi demo chạy thật.
+⚠️ **Nạp `--demo` rồi thì không quét lại được đúng những tấm ảnh đó** (chặn trùng theo `image_hash`).
+Muốn diễn lại phần quét trực tiếp thì dọn trước bằng `samples/demo/reset_demo.sql` hoặc `--reset --demo`.
 
-Hồ sơ doanh nghiệp trong bộ `--demo` lấy từ `scripts/demo_profiles.json` — **ảnh chụp kết quả
-enrich thật**, mọi trường kèm `sources` do chính lượt chạy đó trả về, không một dòng bịa (rủi ro
-**R4**). Chụp lại sau khi enrich thật một lượt:
+Ba điều đáng nêu:
 
-    docker compose exec api python -m scripts.seed --capture-profiles
-
-(`-m` chứ không phải `python scripts/seed.py`: chạy thẳng một file thì Python đặt `sys.path[0]`
-thành `/app/scripts`, mà gói `app` lẫn gói `scripts` đều không nằm ở đó. `-m` chạy từ `/app` nên
-cả hai import được, khỏi phải nhớ `PYTHONPATH`.)
-
-**Vì sao task này tồn tại.** `docs/qa-testset.md` (8.7 của T) chấm điểm tiêu chí **A6** trên
-một bộ dữ liệu cố định — 4 danh thiếp + 3 hồ sơ, tiếng Việt/Hàn/Nhật. Bộ đó nằm trong
-`scripts/eval_retrieval.py::seed()`, nhưng script ấy **rollback** ở cuối để không để lại rác
-trong DB đang dùng. Hệ quả đo được ở D8: trợ lý chạy thật *không hề thấy* dữ liệu mà bộ câu hỏi
-nói tới, nên 10 câu tính điểm chưa bao giờ chấm được. Script này là mảnh còn thiếu: cùng bộ dữ
-liệu đó, nhưng **commit**.
-
-**Dùng lại `eval_retrieval.seed()` chứ không chép sang đây.** Hai bộ dữ liệu song song là kịch
-bản hỏng kinh điển: người ta sửa một bên, đo trên bên kia, rồi kết luận về một hệ thống không
-tồn tại. Recall đã đo ở 7.4 trên chính bộ này, nên câu nào trượt là biết ngay lỗi nằm ở truy hồi
-hay ở prompt.
-
-**Ba điều đáng nêu:**
-
-1. **Không nạp chồng.** Chạy hai lần mà không kiểm là DB có hai bản "Công ty CP Sữa Mộc Châu",
-   đúng kịch bản I-24 (bản ghi trùng chiếm hết top-k, ngữ cảnh hẹp lại) — lần này do chính ta
-   tự tạo ra. Mặc định: thấy dữ liệu mẫu cũ thì **dừng**, không ghi gì.
-2. **`--reset` xoá có mục tiêu, không `TRUNCATE`.** Chỉ xoá đúng 3 công ty và 4 danh thiếp của
-   bộ mẫu (nhận theo khoá nghiệp vụ), kèm chunk KB của chúng. Xoá sạch bảng thì mọi danh thiếp
-   người dùng đã quét thật trong lúc dev cũng bay theo — script tiện tay không được phép làm
-   điều đó.
-3. **`REINDEX` ở cuối, bắt buộc.** Index `ivfflat` học phân cụm từ dữ liệu *có sẵn lúc tạo
-   index*; revision `0003` chạy khi `kb_chunks` còn rỗng nên centroid vô nghĩa (I-22). Bỏ bước
-   này thì seed xong tìm kiếm vẫn gần như không ra gì, mà **không có lỗi nào báo**.
+1. **Không nạp chồng** — thấy dữ liệu mẫu cũ thì dừng, không ghi gì. Chạy hai lần mà không kiểm
+   là DB có hai bản cùng một công ty, đúng kịch bản I-24.
+2. **`--reset` xoá có mục tiêu, không `TRUNCATE`** — chỉ xoá đúng bộ mẫu, kèm chunk KB của chúng.
+3. **`REINDEX` ở cuối, bắt buộc** — index `ivfflat` học phân cụm từ dữ liệu có sẵn lúc tạo index,
+   bỏ bước này thì seed xong tìm kiếm vẫn gần như không ra gì mà **không có lỗi nào báo** (I-22).
 """
 
 from __future__ import annotations
@@ -104,13 +69,12 @@ from app.services import image as image_service
 from app.services.normalize_company import normalize_company_name
 from scripts.eval_retrieval import SEED_CARD_EMAILS, SEED_COMPANY_NAMES, seed
 
-#: Tài khoản nhận dữ liệu seed khi không truyền `--user`. Xem docstring đầu file về lý do có mật
-#: khẩu mặc định.
+#: Tài khoản nhận dữ liệu seed khi không truyền `--user`.
 DEFAULT_SEED_EMAIL = "demo@bizcard.local"
 DEFAULT_SEED_PASSWORD = "demo12345"
 
-#: Khoá nhận dạng công ty mẫu. Cùng hàm chuẩn hoá mà `upsert_company()` của T dùng, nên nhận ra
-#: được cả bản ghi do lượt seed trước tạo lẫn bản do người dùng xác nhận danh thiếp tạo ra.
+#: Khoá nhận dạng công ty mẫu. Cùng hàm chuẩn hoá mà `upsert_company()` dùng, nên nhận ra được
+#: cả bản ghi do lượt seed trước tạo lẫn bản do người dùng xác nhận danh thiếp tạo ra.
 SEED_COMPANY_KEYS: tuple[str, ...] = tuple(
     normalize_company_name(name) for name in SEED_COMPANY_NAMES
 )
@@ -120,21 +84,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEMO_DIR = REPO_ROOT / "samples" / "demo"
 DEMO_CARDS_JSON = DEMO_DIR / "cards.json"
 
-#: Ảnh chụp **kết quả enrich thật** của bộ demo, để máy không có mạng/OAuth vẫn dựng lại được
-#: trạng thái cuối buổi demo. File của Q (đi liền `seed.py`), sinh bằng `--capture-profiles`.
+#: Ảnh chụp **kết quả enrich thật** của bộ demo, sinh bằng `--capture-profiles`.
 DEMO_PROFILES_JSON = Path(__file__).resolve().parent / "demo_profiles.json"
 
 
 async def ensure_user(db: AsyncSession, email: str, password: str) -> User:
-    """Tài khoản nhận dữ liệu seed: có thì dùng lại, chưa có thì tạo (task 12.8).
+    """Tài khoản nhận dữ liệu seed: có thì dùng lại, chưa có thì tạo.
 
-    Đi qua `services/auth.register()` của T chứ không `INSERT` thẳng: mật khẩu phải được băm
-    Argon2 đúng cách và đi qua đúng bộ luật của `schemas/user.py`. Tự chèn một hàng `users` ở đây
-    là dựng ra một tài khoản mà form đăng nhập không mở được, và lỗi ấy chỉ lộ ra giữa buổi demo.
+    Đi qua `services/auth.register()` chứ không `INSERT` thẳng: tự chèn một hàng `users` là dựng
+    ra một tài khoản mà form đăng nhập không mở được.
 
-    **Không đổi mật khẩu của tài khoản đã có.** Truyền `--password` khác cho một email đang tồn
-    tại thì script dùng tài khoản cũ và nói rõ điều đó: một script nạp dữ liệu mẫu không được
-    phép thay mật khẩu của người khác.
+    **Không đổi mật khẩu của tài khoản đã có** — một script nạp dữ liệu mẫu không được phép thay
+    mật khẩu của người khác.
     """
     existing = await user_repo.get_by_email(db, email.strip().lower())
     if existing is not None:
@@ -165,18 +126,13 @@ def load_demo_cards() -> list[dict[str, Any]]:
 def demo_card_emails() -> tuple[str, ...]:
     """Khoá nhận dạng thẻ demo — đọc từ chính `cards.json` thay vì chép lại danh sách.
 
-    Chép sang đây là mở đường cho hai bên lệch nhau trong im lặng: T thêm một thẻ thứ 8 thì
-    bước chống-nạp-chồng bên dưới sẽ bỏ sót đúng thẻ đó.
+    Chép sang đây là mở đường cho hai bên lệch nhau trong im lặng.
     """
     return tuple(str(entry["email"]).lower() for entry in load_demo_cards())
 
 
 async def _workspace_of(db: AsyncSession, user: User) -> uuid.UUID:
-    """Không gian của người dùng khởi tạo. Seed luôn ghi vào đúng không gian ấy (task NEXT-05).
-
-    `ensure_user()` tạo tài khoản mới thì revision `0015` đã cho họ một không gian riêng; người
-    đã có sẵn thì lấy không gian đầu tiên họ có chân.
-    """
+    """Không gian của người dùng khởi tạo. Seed luôn ghi vào đúng không gian ấy."""
     workspace_id = await db.scalar(
         select(WorkspaceMember.workspace_id)
         .where(WorkspaceMember.user_id == user.id)
@@ -193,11 +149,8 @@ async def seed_demo(
 ) -> tuple[list[BusinessCard], list[CompanyProfile]]:
     """Dựng lại **trạng thái cuối buổi demo**: thẻ đã xác nhận + công ty + hồ sơ có nguồn.
 
-    Đi đúng đường mà giao diện đi — băm ảnh gốc, tiền xử lý, `upsert_company()` của T — chứ
-    không `INSERT` thẳng. Nhờ vậy dữ liệu seed *không phân biệt được* với dữ liệu quét thật:
-    hai thẻ Hòa Phát vẫn gộp về một công ty, cặp Samsung vẫn chỉ được gợi ý chứ không gộp, và
-    upload lại đúng tấm ảnh đó vẫn bị chặn trùng (đúng lý do `samples/demo/reset_demo.sql` tồn
-    tại — xem `docs/demo-runbook.md` mục 2 bước 5).
+    Đi đúng đường mà giao diện đi — băm ảnh gốc, tiền xử lý, `upsert_company()` — chứ không
+    `INSERT` thẳng, nên dữ liệu seed *không phân biệt được* với dữ liệu quét thật.
     """
     cards: list[BusinessCard] = []
 
@@ -235,8 +188,8 @@ async def seed_demo(
             image_path=relative_path,
             image_hash=image_hash,
             fields=fields,
-            # Gắn nhãn rõ đây là dữ liệu seed. Không bịa một `ocr_raw_json` trông như model trả
-            # về: màn hình review in thẳng khối JSON này ra, người xem phải phân biệt được.
+            # Gắn nhãn rõ đây là dữ liệu seed, không bịa một `ocr_raw_json` trông như model trả
+            # về: màn hình review in thẳng khối JSON này ra.
             ocr_raw_json={
                 "_seed": "samples/demo/cards.json",
                 "_note": "dữ liệu seed cho demo, KHÔNG phải kết quả model trả về",
@@ -274,8 +227,7 @@ async def _seed_demo_profiles(
 ) -> list[CompanyProfile]:
     """Nạp hồ sơ doanh nghiệp từ ảnh chụp kết quả enrich thật (`scripts/demo_profiles.json`).
 
-    Không có file thì **bỏ qua chứ không bịa**: hồ sơ không nguồn đúng là thứ rủi ro **R4** cấm.
-    Trạng thái demo khi đó dừng ở "đã quét, chưa có hồ sơ" — vẫn demo được phần F1 và F3.
+    Không có file thì **bỏ qua chứ không bịa**: hồ sơ không nguồn đúng là thứ rủi ro R4 cấm.
     """
     if not DEMO_PROFILES_JSON.exists():
         print(
@@ -398,10 +350,8 @@ async def existing_ids(
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """(id công ty mẫu, id danh thiếp mẫu) đang có **trong không gian này**.
 
-    Lọc theo `workspace_id` (task 12.8, đổi khoá ở `NEXT-05`): bước chống-nạp-chồng bên dưới
-    chỉ được nhìn dữ liệu của chính không gian đang nạp. Đếm toàn cục thì T nạp bộ demo cho
-    không gian của mình sẽ nhận câu "đã có dữ liệu mẫu" chỉ vì Q đã nạp cho không gian khác,
-    và `--reset` còn xoá đúng dữ liệu của bên kia.
+    Lọc theo `workspace_id`: đếm toàn cục thì nạp cho không gian này lại nhận câu "đã có dữ liệu
+    mẫu" vì không gian khác đã nạp, và `--reset` còn xoá đúng dữ liệu của bên kia.
     """
     companies = list(
         (
@@ -435,8 +385,7 @@ async def purge(
     """Xoá dữ liệu mẫu cũ **và** chunk KB của nó.
 
     Phải xoá chunk bằng tay: `kb_chunks` cố ý không có khoá ngoại (`source_id` trỏ tới hai bảng
-    khác nhau tuỳ `source_type`), nên `DELETE` bảng gốc không kéo theo gì — đúng vấn đề I-25.
-    Bỏ bước này thì trợ lý vẫn trích dẫn hồ sơ của những công ty vừa bị xoá.
+    khác nhau), nên `DELETE` bảng gốc không kéo theo gì (I-25).
     """
     source_ids = [*company_ids, *card_ids]
     if source_ids:
@@ -533,9 +482,8 @@ async def run(reset: bool, *, email: str, password: str) -> int:
 
             corpus = await seed(db, workspace_id=await _workspace_of(db, user), user_id=user.id)
 
-            # Đối chiếu lại với dữ liệu vừa tạo: nếu ai đó đổi tên công ty trong
-            # `eval_retrieval.py` mà quên sửa `SEED_COMPANY_NAMES` thì bước chống-nạp-chồng ở
-            # trên sẽ âm thầm mất tác dụng. Thà chết ở đây còn hơn để lộ ra sau vài lượt seed.
+            # Đối chiếu lại với dữ liệu vừa tạo: đổi tên công ty trong `eval_retrieval.py` mà
+            # quên sửa `SEED_COMPANY_NAMES` thì bước chống-nạp-chồng âm thầm mất tác dụng.
             created = set(
                 (
                     await db.execute(

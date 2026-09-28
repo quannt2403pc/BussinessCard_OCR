@@ -97,32 +97,18 @@ async def upsert_company(
     email: str | None = None,
     website: str | None = None,
 ) -> uuid.UUID:
-    """Tìm hoặc tạo công ty **trong phạm vi một người dùng** (task 3.8 + `workspace_id` từ D12).
+    """Tìm hoặc tạo công ty **trong phạm vi một không gian làm việc**.
 
-    ⚠️ **Q sửa hàm này ở task 12.5 dù nó thuộc quyền T** (luật nới D12, quy ước 2 — T review PR).
-    Chỉ đúng phần *hợp đồng dùng chung*: thêm `workspace_id`, lọc ứng viên và gán cột khi chèn. Lý do
-    không chờ 12.6: đây là hàm `cards.confirm` (Q) gọi mỗi lần xác nhận danh thiếp, và
-    `companies.workspace_id` đã là `NOT NULL` trong DB từ revision `0005` — thiếu tham số này thì nút
-    Xác nhận của F1 **và** `scripts/seed.py` đều không ghi nổi một dòng nào.
-    **Phần còn lại của 12.6 vẫn là của T**: `repositories/company.py`, `routers/companies.py`,
-    `services/enrich_jobs.py`, `repositories/enrich_job.py`, `routers/stats.py`, `routers/export.py`.
+    Gộp công ty **không bao giờ vượt qua ranh giới không gian**: ứng viên lấy toàn cục thì danh
+    thiếp của tổ chức A có thể bị gắn vào công ty của tổ chức B — vừa rò tên công ty của B, vừa
+    tạo ra một `company_id` mà mọi bộ lọc sau đó đều coi là không tồn tại.
 
-    Gộp công ty **không bao giờ vượt qua ranh giới không gian làm việc**: nếu ứng viên lấy toàn
-    cục thì danh thiếp của tổ chức A có thể bị gắn vào công ty của tổ chức B — vừa rò tên công ty
-    của B qua giao diện của A, vừa tạo ra một `company_id` mà mọi bộ lọc `workspace_id` sau đó
-    đều coi là không tồn tại.
+    Hai tham số, hai việc khác hẳn nhau: `workspace_id` quyết định **tìm và ghi trong phạm vi
+    nào**, còn `user_id` chỉ đi vào cột người tạo của dòng mới.
 
-    Hai tham số, hai việc khác hẳn nhau (`NEXT-05`): `workspace_id` quyết định **tìm trong phạm
-    vi nào và ghi vào phạm vi nào**, còn `user_id` chỉ đi vào cột người tạo của dòng mới. Công ty
-    tìm thấy sẵn thì `user_id` không được dùng tới — người tạo là người đầu tiên, không phải
-    người vừa xác nhận thêm một danh thiếp.
-
-    `display_name_vi` (`I-36`) là bản Việt hoá của chính `raw_name`, lấy từ
-    `business_cards.company_name_vi` — **không gọi model ở đây**, bản dịch đã có sẵn từ `EX-02`.
-    Công ty tìm thấy sẵn mà đang thiếu bản Việt thì được **lấp vào**: thẻ đầu tiên của một công
-    ty có thể là thẻ chưa dịch, và không có bước lấp này thì cái tên chữ Hán ấy nằm lại mãi dù
-    thẻ thứ hai đã có bản dịch. Đã có rồi thì không ghi đè — bản đầu là bản người dùng đã nhìn
-    thấy trong danh sách.
+    `display_name_vi` lấy từ `business_cards.company_name_vi` — **không gọi model ở đây**. Công ty
+    có sẵn mà đang thiếu bản Việt thì được **lấp vào** (thẻ đầu tiên có thể là thẻ chưa dịch);
+    đã có rồi thì không ghi đè.
     """
     display_name = " ".join(raw_name.split())[:MAX_NAME_LENGTH]
     key = normalize_company_name(raw_name)[:MAX_NAME_LENGTH]
@@ -217,10 +203,8 @@ async def _insert_company(
             display_name_vi=display_name_vi,
             aliases=[display_name],
         )
-        # Index unique đổi thành `(workspace_id, name_normalized)` ở revision `0005`; `index_elements`
-        # phải khớp **đúng** bộ cột đó, nếu không Postgres báo *no unique or exclusion constraint
-        # matching the ON CONFLICT specification* — hai người xác nhận cùng một công ty cùng lúc
-        # là gặp ngay.
+        # `index_elements` phải khớp **đúng** bộ cột của index unique, nếu không Postgres báo *no
+        # unique or exclusion constraint matching the ON CONFLICT specification*.
         .on_conflict_do_nothing(index_elements=[Company.workspace_id, Company.name_normalized])
         .returning(Company.id)
     )
@@ -244,10 +228,9 @@ async def _remember_alias(db: AsyncSession, company_id: uuid.UUID, name: str) ->
 
 
 def _vi_of(display_name: str, display_name_vi: str | None) -> str | None:
-    """Bản Việt hoá đáng lưu, hoặc `None` (`I-36`).
+    """Bản Việt hoá đáng lưu, hoặc `None`.
 
-    Trùng y hệt tên gốc thì trả `None`: tên vốn đã là tiếng Việt, mà lưu lại một bản chép y
-    nguyên thì giao diện in hai dòng giống hệt nhau — xem `display()` ở `schemas/company.py`.
+    Trùng y hệt tên gốc thì trả `None`: lưu bản chép y nguyên thì giao diện in hai dòng giống hệt.
     """
     cleaned = " ".join((display_name_vi or "").split())[:MAX_NAME_LENGTH]
     if not cleaned or cleaned.casefold() == display_name.casefold():

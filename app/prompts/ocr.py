@@ -1,54 +1,33 @@
 """Prompt trích xuất danh thiếp: JSON schema cố định, confidence từng trường, cấm suy đoán.
 
-Chủ sở hữu: Q | Task: 3.3 | xem Task.md
+Chủ sở hữu: Q | Task: 3.3
 
-Prompt được thiết kế quanh **rủi ro R3 — OCR sai với danh thiếp Hàn/Nhật/Trung hoặc ảnh mờ**
-(Plan.md mục 6). Ba lớp phòng thủ:
+Prompt thiết kế quanh **rủi ro R3 — OCR sai với danh thiếp Hàn/Nhật/Trung hoặc ảnh mờ**. Ba lớp
+phòng thủ:
 
-1. **Cấm suy đoán**: chỗ nào không đọc được thì `null`, tuyệt đối không điền giá trị "hợp lý"
-   suy ra từ tên công ty hay website. Trường trống người dùng điền được trong 10 giây; trường
-   sai trông như thật thì không ai phát hiện (chính là kịch bản hỏng của tiêu chí A3).
-2. **`confidence` từng trường**: model tự chấm điểm nó tin vào chữ mình đọc đến đâu. Màn hình
-   review (task 5.1) tô vàng trường điểm thấp để mắt người rơi vào đúng chỗ cần kiểm.
-3. **`language_detected`**: quyết định mã vùng khi chuẩn hoá số điện thoại (task 3.6) — `0912…`
-   là số Việt hay số Nhật phụ thuộc hoàn toàn vào trường này.
+1. **Cấm suy đoán** — không đọc được thì `null`, tuyệt đối không điền giá trị "hợp lý" suy ra từ
+   tên công ty hay website. Trường trống người dùng điền được trong 10 giây; trường sai trông như
+   thật thì không ai phát hiện.
+2. **`confidence` từng trường** — màn hình review tô vàng trường điểm thấp để mắt người rơi vào
+   đúng chỗ cần kiểm.
+3. **`language_detected`** — quyết định mã vùng khi chuẩn hoá số điện thoại.
 
-Cập nhật EX-05 (2026-09-22) — **bỏ giới hạn 5 ngôn ngữ**:
+Phạm vi ngôn ngữ là **không giới hạn**: mã nào đọc được thì trả mã đó (639-1, không có thì 639-3).
+Quy tắc 3 nói rõ "mọi hệ chữ viết" và nói thẳng rằng **có bước Việt hoá riêng ở sau**, để model
+không tự ý phiên âm giúp.
 
-* Schema cũ liệt kê `en | vi | ko | ja | zh` như một tập đóng, và quy tắc 3 chỉ gọi tên ba hệ
-  chữ. Thẻ tiếng Thái hay tiếng Nga vào thì model phải chọn bừa một trong năm mã — trường
-  `language_detected` sai kéo theo mã vùng số điện thoại sai (3.6) và nhãn ngôn ngữ sai trong
-  KB (6.2). Nay là **ví dụ mở**: mã nào đọc được thì trả mã đó, không có mã 2 chữ thì dùng 639-3.
-* Quy tắc 3 nói rõ "mọi hệ chữ viết" và nói thẳng rằng **có bước Việt hoá riêng ở sau**
-  (`services/translate.py`, EX-02) — để model không tự ý phiên âm giúp, đúng thứ 9.3 đo được là
-  nó đang làm đúng.
-* **Quy tắc 1, 2, 4, 5, 6 không đổi một chữ.** Đó là phần đã đo ở 9.3 và 10.8.
+Khoá JSON trùng tên cột trong bảng `business_cards` để `services/ocr.py` không phải dựng thêm một
+lớp ánh xạ tên. Đổi khoá ở đây thì phải đổi cả `app/schemas/card.py`.
 
-Khoá JSON trùng tên cột trong bảng `business_cards` (Plan.md mục 3) để `services/ocr.py` không
-phải dựng thêm một lớp ánh xạ tên. Đổi khoá ở đây thì phải đổi cả `app/schemas/card.py`.
+⚠️ Prompt có ghi "chỉ trả JSON, không bọc trong khối ```". **Đừng tin là đủ** — `gemini-3-flash`
+vẫn bọc (I-15).
 
-⚠️ Prompt có ghi "chỉ trả JSON, không bọc trong khối ```". **Đừng tin là đủ**: đo thật ở task
-2.3 cho thấy `gemini-3-flash` vẫn bọc (I-15). `services/ocr.py` bắt buộc phải gỡ hàng rào code
-trước khi `json.loads()`.
-
-Cập nhật task 9.3 (2026-09-18) — đo trên ba danh thiếp Hàn/Nhật/Trung, chạy bằng
-`python -m scripts.check_multilang_ocr`:
-
-* **Ba lớp phòng thủ ở trên đứng vững.** Chữ bản địa được giữ nguyên ở cả ba thẻ (`김민준`,
-  `田中 太郎`, `李伟`), không thẻ nào bị phiên âm sang Latin; `language_detected` đúng cả ba;
-  thẻ song ngữ Hàn–Anh lấy đúng mặt chữ Hàn như quy tắc 3 yêu cầu. **Không sửa gì ở quy tắc
-  1–3** — sửa một prompt đang đúng chỉ để "có sửa" là cách nhanh nhất làm nó hỏng.
-* **Quy tắc 4 có hai vế mâu thuẫn**, và đó là chỗ duy nhất phải sửa. Bản cũ viết *"số di động
-  **hoặc** số đứng đầu vào `phone`"* — thẻ Nhật in `TEL: 03-…` trước rồi `携帯: 090-…` sau, hai
-  vế chỉ về hai số khác nhau, model tự chọn số di động. Lựa chọn đó **hợp lý nhưng không do
-  prompt quy định**: nó là hành vi ngầm của model, đổi model hoặc đổi phiên bản là đổi theo,
-  mà `phone` lại là trường dùng để tra cứu và đối chiếu. Nay xếp thành thứ tự ưu tiên a → b,
-  và liệt kê nhãn số điện thoại của cả bốn ngôn ngữ (bản cũ chỉ có nhãn tiếng Anh, trong khi
-  thẻ Nhật/Trung ghi `携帯`/`电话`).
+⚠️ Quy tắc 4 xếp số điện thoại theo **thứ tự ưu tiên a → b** và liệt kê nhãn của nhiều ngôn ngữ.
+Bản cũ viết "số di động **hoặc** số đứng đầu" — hai vế chỉ về hai số khác nhau trên thẻ Nhật, và
+model tự chọn: hợp lý nhưng là hành vi ngầm, đổi model là đổi theo.
 """
 
-#: Bảy trường bắt buộc của tiêu chí A3 (Plan.md mục 8) — "ngày upload" do hệ thống tự ghi nên
-#: không nằm trong prompt. Dùng để đo độ phủ ở task 7.8.
+#: Bảy trường bắt buộc của tiêu chí A3 — "ngày upload" do hệ thống tự ghi nên không nằm trong prompt.
 REQUIRED_FIELDS: tuple[str, ...] = (
     "full_name",
     "job_title",
@@ -127,10 +106,10 @@ Chỉ trả về JSON."""
 
 
 def build_prompt(hint: str | None = None) -> str:
-    """Prompt gửi kèm ảnh. `hint` để task 9.3 thêm gợi ý khi tinh chỉnh theo lỗi thực tế.
+    """Prompt gửi kèm ảnh. `hint` để thêm gợi ý khi tinh chỉnh theo lỗi thực tế.
 
-    Tách thành hàm thay vì dùng thẳng hằng số vì vòng lặp đo — sửa prompt — đo lại ở task 7.8/9.3
-    cần chỗ cắm thêm ngữ cảnh mà không phải sửa chữ ký của `services/ocr.py`.
+    Tách thành hàm vì vòng lặp đo — sửa prompt — đo lại cần chỗ cắm thêm ngữ cảnh mà không phải
+    sửa chữ ký của `services/ocr.py`.
     """
     if not hint:
         return USER_PROMPT

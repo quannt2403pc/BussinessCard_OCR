@@ -1,30 +1,18 @@
 """Chấm điểm trợ lý AI theo `docs/qa-testset.md` — phép đo tiêu chí D8 (≥7/10) và A6 (≥8/10).
 
-Chủ sở hữu: Q | Task: 10.1 | xem Task.md
+Chủ sở hữu: Q | Task: 10.1
 
     python -m scripts.eval_assistant             # chấm 10 câu + 3 câu chặn + cặp nhiều lượt
     python -m scripts.eval_assistant --only 5    # chạy lại đúng một câu khi đang sửa
 
-**Vì sao mãi tới D10 mới chạy được.** Bộ câu hỏi (8.7 của T) bám vào bộ dữ liệu cố định trong
-`scripts/eval_retrieval.py::seed()`, nhưng hàm đó rollback nên chat thật không thấy. Mảnh còn
-thiếu là `scripts/seed.py` (task 9.2) — nạp đúng bộ đó và **commit**. 9.2 xong ngày 2026-09-18,
-nên đây là lần đầu 10 câu tính điểm chấm được. Trước đó D8 chỉ đo được 3 câu chặn và cặp nhiều
-lượt, và ô "Tiêu chí hoàn thành" của D8 vẫn còn treo.
+**Máy chấm làm được hai trong ba luật của bộ câu hỏi, không làm được luật còn lại.** Luật 1 (đủ
+dữ kiện) và luật 3 (trích dẫn trỏ đúng nguồn) chấm tự động được. Luật 2 (**không bịa thêm**) thì
+không — máy không biết "thành lập năm 2005" là đúng hay bịa. Vì vậy script **in nguyên văn mọi
+câu trả lời**, và câu đạt luật 1+3 đánh dấu `ĐẠT*`: dấu sao nghĩa là *chờ người xác nhận luật 2*.
 
-**Máy chấm làm được hai trong ba luật của mục 3, không làm được luật còn lại.**
-
-* Luật 1 (đủ dữ kiện bắt buộc) — chấm tự động được. So khớp bỏ dấu phụ và bỏ ký tự không phải
-  chữ số cho số điện thoại, đúng như luật cho phép.
-* Luật 3 (có trích dẫn trỏ đúng nguồn) — chấm tự động được: `citations[].source_id` so với id
-  thật của danh thiếp/công ty trong DB, tra theo email và theo tên chuẩn hoá.
-* Luật 2 (**không bịa thêm**) — *không* chấm tự động được, và giả vờ chấm được là tự lừa mình.
-  Máy không biết "thành lập năm 2005" là đúng hay bịa. Vì vậy script **in nguyên văn mọi câu
-  trả lời** để người đọc lại, và câu nào đạt luật 1+3 thì đánh dấu `ĐẠT*` — dấu sao nghĩa là
-  *chờ người xác nhận luật 2*. Kết luận cuối cùng do người ghi vào `docs/accuracy.md`.
-
-Ba câu ngoài phạm vi (mục 5) là **điều kiện chặn**: trượt một câu thì số đo không dùng để
-nghiệm thu, dù 10 câu kia đạt bao nhiêu. Ở đây chấm chặt đúng như mục 5 đòi: `citations` phải
-rỗng **và** câu trả lời không được chứa chuỗi số nào (một mã số thuế bịa luôn là chuỗi số).
+Ba câu ngoài phạm vi là **điều kiện chặn**: trượt một câu thì số đo không dùng để nghiệm thu, dù
+10 câu kia đạt bao nhiêu. Chấm chặt: `citations` phải rỗng **và** câu trả lời không chứa chuỗi số
+nào (một mã số thuế bịa luôn là chuỗi số).
 """
 
 from __future__ import annotations
@@ -43,15 +31,13 @@ if hasattr(sys.stdout, "reconfigure"):
 BASE_URL = "http://localhost:8000"
 TIMEOUT = 180.0
 
-#: Chuỗi từ 4 chữ số trở lên — dùng để bắt việc bịa mã số thuế / SĐT ở ba câu chặn. Ngưỡng 4 để
-#: một câu "không có thông tin" lỡ nhắc tới năm 2026 hay "10 công ty" không bị chấm oan.
+#: Chuỗi từ 4 chữ số trở lên — bắt việc bịa mã số thuế / SĐT ở ba câu chặn. Ngưỡng 4 để câu
+#: "không có thông tin" lỡ nhắc tới năm 2026 không bị chấm oan.
 _LONG_NUMBER = re.compile(r"\d{4,}")
 
 
-#: `đ`/`Đ` KHÔNG phải chữ `d` cộng dấu tổ hợp mà là một ký tự riêng (U+0111 / U+0110), nên
-#: `NFD` không bóc ra được — "Đại Việt" bỏ dấu kiểu ngây thơ vẫn ra "đai viet", không khớp
-#: "dai viet". Lượt đo đầu 2026-09-21 trượt oan hai câu (1 và 10) vì đúng chỗ này. Cùng họ với
-#: I-23: ở đó `to_tsvector('simple', …)` cũng không bỏ dấu tiếng Việt.
+#: `đ`/`Đ` KHÔNG phải chữ `d` cộng dấu tổ hợp mà là ký tự riêng (U+0111 / U+0110), nên `NFD`
+#: không bóc ra được — "Đại Việt" bỏ dấu kiểu ngây thơ vẫn ra "đai viet".
 _D_STROKE = str.maketrans({"đ": "d", "Đ": "d"})
 
 
@@ -229,9 +215,8 @@ REFUSALS = (
 def resolve_sources(http: httpx.Client) -> dict[str, str]:
     """Nhãn P1..C4 → UUID thật trong DB đang chạy.
 
-    Tra bằng chính API công khai chứ không nối thẳng vào Postgres: nếu `GET /api/cards` lọc sai
-    thì phép đo phải hỏng theo — đo trên một đường đi khác đường người dùng đi thì số đo không
-    nói được gì về sản phẩm.
+    Tra bằng chính API công khai chứ không nối thẳng vào Postgres: đo trên một đường đi khác
+    đường người dùng đi thì số đo không nói được gì về sản phẩm.
     """
     mapping: dict[str, str] = {}
 

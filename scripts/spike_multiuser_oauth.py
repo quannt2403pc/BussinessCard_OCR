@@ -5,35 +5,23 @@ Chủ sở hữu: Q | Task: 12.1 | Rủi ro: R8 | Kết luận ghi ở `docs/adr
     docker compose exec api python -m scripts.spike_multiuser_oauth
     docker compose exec api python -m scripts.spike_multiuser_oauth --calls 8
 
-**Câu hỏi phải trả lời.** Từ D13 mỗi người dùng tự bấm OAuth bằng Gmail của mình, nên CLIProxy sẽ
-giữ nhiều credential cùng lúc. Nếu nó tự xoay vòng giữa các credential thì lời gọi của người A có
-thể đi bằng tài khoản Google của người B — hỏng **âm thầm**, không lỗi nào báo, và làm trượt tiêu
-chí **A10**. `docs/cliproxy-notes.md` (khảo sát 1.9) không có một dòng nào về chuyện này.
+**Câu hỏi phải trả lời.** Mỗi người dùng tự bấm OAuth bằng Gmail của mình nên CLIProxy giữ nhiều
+credential cùng lúc. Nếu nó tự xoay vòng thì lời gọi của A có thể đi bằng tài khoản của B — hỏng
+**âm thầm**, không lỗi nào báo.
 
-**Cách đo — không bao giờ đọc token.** Mỗi bản ghi trong `GET /v0/management/auth-files` có sẵn
-bộ đếm `success`/`failed` riêng. Gọi model một lượt rồi so bộ đếm trước/sau là biết **đích danh**
-credential nào vừa phục vụ. Đo gián tiếp như vậy an toàn hơn hẳn việc mở file credential ra xem,
-và cũng là thứ duy nhất chạy được khi file token bị khoá quyền đọc.
+**Cách đo — không bao giờ đọc token.** Mỗi bản ghi trong `auth-files` có sẵn bộ đếm
+`success`/`failed`; gọi model một lượt rồi so bộ đếm trước/sau là biết **đích danh** credential
+nào vừa phục vụ.
 
-**Ba pha:**
+Ba pha: đếm credential → bắn N lượt *không* tiền tố để xem xoay vòng hay cố định → kiểm tiền tố
+chọn được credential không (tiền tố có thật phải trúng **chỉ** credential đó, tiền tố bịa phải bị
+từ chối).
 
-1. **Đếm credential.** Dưới 2 credential thì không có gì để nói về định tuyến — script vẫn chạy
-   pha 3 (thứ kiểm được với 1 tài khoản) rồi dừng và nói rõ còn thiếu gì.
-2. **Xoay vòng hay cố định?** Bắn N lượt gọi *không* tiền tố, quy mỗi lượt về đúng credential đã
-   phục vụ nó. Phân bố đều → `round-robin` (mặc định của CLIProxy). Dồn hết vào một credential →
-   `fill-first` hoặc session-affinity đang bật.
-3. **Có chọn được credential theo từng request không?** CLIProxy cho gắn `prefix` vào credential,
-   khi đó lời gọi tên `"<prefix>/<model>"` nhắm đúng credential ấy. Pha này kiểm hai chiều:
-   tiền tố **có thật** phải làm bộ đếm của đúng credential đó tăng (và **chỉ** nó), còn tiền tố
-   **bịa ra** phải bị từ chối.
+⚠️ Tiền tố lạ trả về đúng câu lỗi của I-03 (`400 unknown provider for model …`), câu nay có **ba**
+nguyên nhân khác hẳn nhau.
 
-⚠️ **Tiền tố lạ trả về đúng câu lỗi của I-03** — `400 unknown provider for model …`. Câu này nay
-có **ba** nguyên nhân khác hẳn nhau: chưa kết nối OAuth, sai tên model, và tiền tố không credential
-nào nhận. Đọc log mà không biết điều này thì rất dễ đi sửa nhầm chỗ.
-
-⚠️ **Gọi sai management key 5 lần là bị ban IP 30 phút** (I-05). Ban tính theo **IP nguồn**: đo
-2026-09-21 thấy host (`172.19.0.1`) bị chặn 403 tức thì trong khi container `api` (`172.19.0.6`)
-vẫn 200. Vì vậy script này **phải chạy trong container `api`**, đừng chạy từ máy thật.
+⚠️ **Phải chạy trong container `api`**: sai management key 5 lần là ban IP 30 phút, và ban tính
+theo IP nguồn (I-05).
 """
 
 from __future__ import annotations
@@ -81,9 +69,8 @@ class Proxy:
             Credential(
                 name=str(f.get("name", "")),
                 email=str(f.get("email") or f.get("account") or ""),
-                # ⚠️ `auth-files` **không trả trường `prefix`** — đo 2026-09-21: bản ghi có 26
-                # khoá, không khoá nào là prefix. Nên tiền tố phải truyền vào bằng `--prefix`,
-                # và chỉ kiểm được bằng **hành vi**, không kiểm bằng cách đọc lại cấu hình.
+                # ⚠️ `auth-files` **không trả trường `prefix`** (đo thật), nên tiền tố phải truyền
+                # bằng `--prefix` và chỉ kiểm được bằng **hành vi**.
                 prefix=None,
                 success=int(f.get("success") or 0),
                 failed=int(f.get("failed") or 0),
@@ -98,8 +85,8 @@ class Proxy:
     async def served_by(self, model: str) -> tuple[str | None, int, str]:
         """Gọi một lượt, trả `(credential đã phục vụ, mã HTTP, trích lỗi)`.
 
-        Quy về credential bằng **hiệu bộ đếm** chứ không tin bất cứ thứ gì trong response: response
-        của Gemini không nói nó đi bằng tài khoản nào — đó chính là lý do rủi ro R8 khó thấy.
+        Quy về credential bằng **hiệu bộ đếm** chứ không tin response: response của Gemini không
+        nói nó đi bằng tài khoản nào — đó chính là lý do rủi ro R8 khó thấy.
         """
         before = {c.name: c.success for c in await self.credentials()}
         code, text = await self.call(model)
@@ -127,8 +114,8 @@ async def phase_rotation(proxy: Proxy, creds: list[Credential], calls: int) -> C
 async def phase_prefix(proxy: Proxy, creds: list[Credential], prefixes: dict[str, str]) -> bool:
     """Kiểm cơ chế `prefix`. Trả True nếu chọn được credential theo từng request.
 
-    `prefixes` là ánh xạ `email -> tiền tố`, truyền qua `--prefix`. Không đọc từ `auth-files`
-    được vì endpoint đó không trả trường này — xem ghi chú trong `Proxy.credentials()`.
+    `prefixes` là ánh xạ `email -> tiền tố`, truyền qua `--prefix` vì `auth-files` không trả
+    trường này.
     """
     print("\n── Pha 3: chọn credential bằng tiền tố model ──")
 

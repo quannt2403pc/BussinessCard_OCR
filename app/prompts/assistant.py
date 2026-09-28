@@ -1,47 +1,33 @@
 """System prompt trợ lý: chỉ trả lời theo context, luôn trích dẫn nguồn.
 
-Chủ sở hữu: Q | Task: 8.1 | xem Task.md
+Chủ sở hữu: Q | Task: 8.1
 
-**File này là nơi duy nhất quyết định việc trợ lý có bịa hay không.** Đó không phải cách nói cho
-oai, mà là kết luận đo được ở task 7.4 (2026-09-17, `scripts/eval_retrieval.py`):
+**File này là nơi duy nhất quyết định việc trợ lý có bịa hay không**, và đó là kết luận đo được:
+điểm tương đồng của chunk đúng (thấp nhất 0.773) và của câu ngoài KB (cao nhất 0.819) **chồng lên
+nhau**, nên không ngưỡng điểm nào tách được hai thứ. Tầng truy hồi **luôn** trả về vài chunk, kể
+cả khi người dùng hỏi giá vàng — việc từ chối trả lời chỉ còn trông vào prompt ở đây.
 
-    chunk ĐÚNG   : tương đồng thấp nhất 0.773
-    câu NGOÀI KB : tương đồng cao nhất  0.819  ("hướng dẫn nấu phở bò")
+Câu khó nhất của bộ nghiệm thu là *"Mã số thuế của Vinamilk là gì?"*: đúng lĩnh vực, KB có một
+công ty sữa **khác**, và model *biết sẵn* đáp án từ dữ liệu huấn luyện. Quy tắc 3 sinh ra cho
+đúng câu đó.
 
-Hai phân bố **chồng lên nhau**, nên không tồn tại ngưỡng điểm nào tách được "có trong KB" với
-"ngoài KB" — xem `services/retriever.py::MIN_SIMILARITY`. Hệ quả: tầng truy hồi **luôn** trả về
-vài chunk, kể cả khi người dùng hỏi giá vàng. Việc từ chối trả lời chỉ còn trông vào prompt ở
-đây. Nâng ngưỡng cho "chắc ăn" là mất recall thật mà câu lạc đề vẫn lọt.
+Định dạng đầu ra là **văn bản thường kèm dấu `[n]`**, không phải JSON: JSON vỡ (I-15) thì mất
+**cả** câu trả lời, còn với `[n]` thì hỏng nặng nhất là trả lời đúng mà thiếu trích dẫn.
 
-`docs/qa-testset.md` (T, task 8.7) coi **3 câu ngoài phạm vi là điều kiện chặn** khi nghiệm thu:
-trượt một câu thì cả lượt đo không dùng được. Câu khó nhất là X3 *"Mã số thuế của Vinamilk là
-gì?"* — đúng lĩnh vực, KB có một công ty sữa **khác**, và model *biết sẵn* đáp án từ dữ liệu
-huấn luyện. Quy tắc 3 dưới đây sinh ra cho đúng câu đó.
-
-Định dạng đầu ra: **văn bản thường kèm dấu `[n]`**, không phải JSON. Cân nhắc đã có:
-
-- JSON (`{"answer": …, "citations": [...]}`) cho cấu trúc chặt hơn nhưng thêm một điểm hỏng —
-  I-15 đo được `gemini-3-flash` vẫn bọc `​```json` dù prompt cấm, và JSON vỡ thì mất **cả** câu
-  trả lời chứ không chỉ mất trích dẫn.
-- Với `[n]`, hỏng nặng nhất là trợ lý trả lời đúng mà không có trích dẫn nào — người dùng vẫn
-  đọc được câu trả lời, và `docs/qa-testset.md` chấm trượt câu đó nên lỗi không bị bỏ qua.
-
-Không có `[n]` nào thì `citations` rỗng, và đó là sự thật chứ không phải mặc định: hàm parse
-**không bao giờ tự gán một nguồn mà model không chỉ tới** — trích dẫn tự bịa còn tệ hơn không
-có, vì nó trông y như trích dẫn thật.
+Không có `[n]` nào thì `citations` rỗng, và đó là sự thật: hàm parse **không bao giờ tự gán một
+nguồn mà model không chỉ tới** — trích dẫn tự bịa trông y như trích dẫn thật.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-#: Câu từ chối chuẩn. Prompt yêu cầu model dùng gần đúng câu này khi ngữ cảnh không chứa đáp án;
-#: `routers/chat.py` cũng trả đúng nó khi tầng truy hồi không tìm được chunk nào (lúc đó không
-#: gọi model — không có gì để đọc thì không có gì để hỏi).
+#: Câu từ chối chuẩn. `routers/chat.py` cũng trả đúng nó khi tầng truy hồi không tìm được chunk
+#: nào — lúc đó không gọi model.
 NO_ANSWER_TEXT = "Không có thông tin này trong dữ liệu đã nhập."
 
-#: Câu nhắc khi KB rỗng hoàn toàn. Tách khỏi `NO_ANSWER_TEXT` vì hai tình huống khác hẳn nhau về
-#: việc người dùng cần làm: một bên là "hỏi cái khác", một bên là "đi nhập dữ liệu đã".
+#: Câu nhắc khi KB rỗng hoàn toàn. Tách khỏi `NO_ANSWER_TEXT` vì việc người dùng cần làm khác
+#: hẳn: một bên là "hỏi cái khác", một bên là "đi nhập dữ liệu đã".
 EMPTY_KB_TEXT = (
     "Knowledge Base chưa có dữ liệu nào. Hãy quét và xác nhận vài danh thiếp, "
     "hoặc lập hồ sơ doanh nghiệp, rồi hỏi lại."
@@ -88,9 +74,8 @@ _SOURCE_LABELS = {
 def build_context(blocks: Sequence[str]) -> str:
     """Đánh số các khối ngữ cảnh thành `[1] …`, `[2] …` — cùng hệ số hiệu mà quy tắc 4 nói tới.
 
-    Số hiệu bắt đầu từ **1**, không phải 0: model sinh văn bản cho người đọc, và không có trích
-    dẫn nào trên đời đánh số từ 0. Lệch quy ước ở đây thì model tự sửa lại thành 1 và mọi dấu
-    `[n]` trỏ lệch đúng một khối — sai âm thầm, câu trả lời vẫn trôi chảy.
+    Bắt đầu từ **1**, không phải 0: lệch quy ước thì model tự sửa lại thành 1 và mọi dấu `[n]`
+    trỏ lệch đúng một khối — sai âm thầm, câu trả lời vẫn trôi chảy.
     """
     return "\n\n".join(f"[{index}] {block.strip()}" for index, block in enumerate(blocks, start=1))
 
@@ -98,14 +83,11 @@ def build_context(blocks: Sequence[str]) -> str:
 def build_prompt(question: str, context: str, *, history: str = "") -> str:
     """Dựng prompt người dùng: lịch sử (nếu có) + ngữ cảnh + câu hỏi.
 
-    Thứ tự **ngữ cảnh trước, câu hỏi sau** là cố ý: câu hỏi nằm ngay trước chỗ model bắt đầu
-    sinh chữ, nên nó không bị vùi dưới mấy nghìn ký tự ngữ cảnh — cùng lý do `prompts/ocr.py`
-    đặt ảnh trước câu lệnh.
+    Thứ tự **ngữ cảnh trước, câu hỏi sau** là cố ý: câu hỏi nằm ngay trước chỗ model bắt đầu sinh
+    chữ nên không bị vùi dưới mấy nghìn ký tự ngữ cảnh.
 
-    `history` là các lượt trước đã rút gọn (task 8.3). Nó nằm **trên** ngữ cảnh vì nó là bối
-    cảnh phụ: quy tắc 1 chỉ tính trên NGỮ CẢNH, và lịch sử không được phép trở thành nguồn dữ
-    kiện mới — điều này ghi thẳng vào prompt bên dưới, vì nếu không thì lượt 2 của một hội thoại
-    sẽ trích dẫn lại câu trả lời của chính mình ở lượt 1 như thể đó là nguồn.
+    `history` nằm **trên** ngữ cảnh vì nó là bối cảnh phụ: quy tắc 1 chỉ tính trên NGỮ CẢNH, nếu
+    không thì lượt 2 sẽ trích dẫn lại câu trả lời của chính mình ở lượt 1 như thể đó là nguồn.
     """
     parts: list[str] = []
     if history.strip():

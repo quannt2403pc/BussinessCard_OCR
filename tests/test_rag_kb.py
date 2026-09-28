@@ -34,9 +34,8 @@ from tests.conftest import fake_vector, workspace_id_of
 
 NOW = datetime(2026, 9, 16, 8, 30, tzinfo=UTC)
 
-#: Chủ sở hữu mặc định của các factory dưới đây. Phần lớn test trong file này **chỉ
-#: serialize** (không ghi DB) nên một UUID rời là đủ; test nào ghi thật thì truyền
-#: `workspace_id=workspace_a` để khoá ngoại khớp — xem `seed()`.
+#: Chủ sở hữu mặc định của các factory dưới đây. Test nào ghi thật thì truyền `workspace_id` để
+#: khoá ngoại khớp.
 ANY_USER = uuid.uuid4()
 #: Không gian mặc định của các factory (task NEXT-05), cùng lý do như `ANY_USER`.
 ANY_WORKSPACE = uuid.uuid4()
@@ -132,12 +131,11 @@ def test_serialize_card_khong_lap_lai_ten_cong_ty_y_het():
 
 
 def test_serialize_card_ghi_ten_ngon_ngu_chu_khong_chi_ghi_ma():
-    """Chunk phải nói *bằng tiếng Việt* rằng thẻ này là tiếng Nhật (task 10.2, lỗi B-03).
+    """Chunk phải nói *bằng tiếng Việt* rằng thẻ này là tiếng Nhật (lỗi B-03).
 
-    Trước 10.2 chunk chỉ ghi `Ngôn ngữ: ja`. Đo ở 10.1 trên câu 8 của `docs/qa-testset.md`:
-    truy hồi đúng thẻ `田中 太郎` nhưng trợ lý vẫn trả "Không có thông tin này trong dữ liệu đã
-    nhập", vì không chỗ nào trong ngữ cảnh nói thẻ này là tiếng Nhật và quy tắc 1 của
-    `prompts/assistant.py` cấm model tự suy ra từ kiến thức sẵn có.
+    Chunk chỉ ghi `Ngôn ngữ: ja` thì truy hồi đúng thẻ `田中 太郎` nhưng trợ lý vẫn trả "không có
+    thông tin" — không chỗ nào trong ngữ cảnh nói thẻ này là tiếng Nhật, mà quy tắc 1 của
+    `prompts/assistant.py` cấm model tự suy ra.
     """
     _, body = kb.serialize_card(make_card(language_detected="ja"))
 
@@ -162,10 +160,8 @@ def test_serialize_card_phu_du_nam_ngon_ngu_trong_pham_vi(code: str, expected: s
 def test_serialize_card_ma_ngon_ngu_la_thi_giu_nguyen_khong_bia_ten():
     """Mã không có nhãn trong `LANGUAGE_LABELS` → ghi lại đúng mã, không đoán tên.
 
-    Trước EX-05 ca này dùng `th`: hồi đó phạm vi đóng ở 5 ngôn ngữ nên tiếng Thái đúng là "mã
-    lạ". Nay `th` đã có nhãn (EX-05 mở phạm vi ra không giới hạn và bảng nhãn dài thêm), nên ca
-    kiểm phải chuyển sang một mã thật sự chưa có nhãn — `sw` (Swahili). **Hành vi được bảo vệ
-    không đổi một chữ**: gặp mã lạ thì chép nguyên mã, tuyệt đối không bịa tên tiếng Việt cho nó.
+    Dùng `sw` (Swahili) vì `th` nay đã có nhãn. Hành vi được bảo vệ không đổi: gặp mã lạ thì chép
+    nguyên mã, tuyệt đối không bịa tên tiếng Việt cho nó.
     """
     _, body = kb.serialize_card(make_card(language_detected="sw"))
 
@@ -404,12 +400,11 @@ async def test_reindex_ghi_ca_danh_thiep_lan_ho_so(
 
 
 async def test_reindex_khong_dua_vao_expire_on_commit(db_session, user_a, active_a, embedder):
-    """Bắt đúng lỗi đã gặp khi chạy thật 2026-09-16.
+    """Bắt đúng lỗi đã gặp khi chạy thật: `MissingGreenlet` sau `commit()`.
 
-    `index_documents()` commit sau mỗi lô, và commit làm mọi object ORM hết hạn. Bản đầu của
-    `_reindex_cards()` đọc `rows[-1][0].id` **sau** lời gọi đó → SQLAlchemy nạp lại đồng bộ
-    giữa một hàm async và nổ `MissingGreenlet`. Ở app thật không thấy vì `SessionLocal` đặt
-    `expire_on_commit=False`; test này dùng session **có** hết hạn để lỗi ấy không quay lại.
+    `index_documents()` commit sau mỗi lô, và commit làm mọi object ORM hết hạn — đọc `.id` sau
+    lời gọi đó là một lượt nạp lại đồng bộ giữa hàm async. App thật không thấy vì `SessionLocal`
+    đặt `expire_on_commit=False`; test này dùng session **có** hết hạn.
     """
     await seed(db_session, user_a)
     strict = AsyncSession(

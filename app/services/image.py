@@ -1,22 +1,16 @@
 """Tiền xử lý ảnh: auto-orient, resize <=1600px, nén JPEG.
 
-Chủ sở hữu: Q | Task: 3.2 | xem Task.md
+Chủ sở hữu: Q | Task: 3.2
 
-Chạy giữa bước nhận file (task 3.1) và bước gọi model (task 3.4). Ba việc, mỗi việc một lý do
-đo được:
+Ba việc, mỗi việc một lý do đo được:
 
-1. **Auto-orient theo EXIF.** Ảnh chụp bằng điện thoại (`<input capture>`, task 4.5) rất hay có
-   `Orientation=6`: pixel nằm ngang, chỉ có thẻ EXIF nói "xoay 90°". Trình duyệt tôn trọng thẻ
-   đó nên người dùng thấy ảnh đúng chiều, còn model nhận đúng mảng pixel **nằm ngang** — chữ
-   xoay 90° làm OCR sai hàng loạt trong khi ảnh nhìn vẫn đẹp. Đây là lỗi âm thầm điển hình.
-2. **Resize cạnh dài ≤ 1600px.** Danh thiếp 12MP không cho chữ nét hơn, chỉ làm ảnh base64
-   phình lên (mỗi 1MB ảnh thành ~1.37MB trong payload) và kéo dài thời gian gọi LLM.
-3. **Nén JPEG.** Chuẩn hoá về một định dạng duy nhất để `services/ocr.py` không phải đoán
-   `mime_type`, và để ảnh lưu trong volume `uploads` nhẹ.
+1. **Auto-orient theo EXIF.** Ảnh chụp bằng điện thoại rất hay có `Orientation=6`: trình duyệt
+   tôn trọng thẻ đó nên người dùng thấy ảnh đúng chiều, còn model nhận đúng mảng pixel **nằm
+   ngang** — chữ xoay 90° làm OCR sai hàng loạt trong khi ảnh nhìn vẫn đẹp.
+2. **Resize cạnh dài ≤ 1600px** — ảnh 12MP không cho chữ nét hơn, chỉ làm payload phình.
+3. **Nén JPEG** — một định dạng duy nhất để `services/ocr.py` không phải đoán `mime_type`.
 
-Ảnh lưu xuống volume **là bản đã xử lý** — trang chi tiết (task 5.1) hiển thị đúng bản mà model
-đã nhìn, tiện đối chiếu khi đo độ chính xác (task 7.8). Bản gốc không giữ lại: demo 11 ngày,
-giữ hai bản chỉ tốn dung lượng mà không dùng vào việc gì.
+Ảnh lưu xuống volume **là bản đã xử lý**: trang chi tiết hiển thị đúng bản mà model đã nhìn.
 """
 
 from __future__ import annotations
@@ -40,8 +34,7 @@ JPEG_QUALITY = 85
 OUTPUT_MIME = "image/jpeg"
 
 #: Định dạng nhận vào. HEIC **không** có trong danh sách: Pillow không đọc được nếu thiếu
-#: `pillow-heif`, và đó là định dạng mặc định của iPhone → thông báo lỗi phải nói rõ (xem
-#: `_open`). `llm.SUPPORTED_IMAGE_TYPES` rộng hơn vì nó tả cái model nhận, không phải cái ta gửi.
+#: `pillow-heif`, mà đó là định dạng mặc định của iPhone → thông báo lỗi phải nói rõ.
 ACCEPTED_FORMATS: dict[str, str] = {
     "JPEG": "image/jpeg",
     "PNG": "image/png",
