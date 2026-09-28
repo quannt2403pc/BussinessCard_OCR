@@ -37,7 +37,7 @@ class WorkspaceIn(BaseModel):
     def collapse_spaces(cls, value: str) -> str:
         name = " ".join(value.split())
         if not name:
-            raise ValueError("Tên không gian làm việc rỗng.")
+            raise ValueError("Tên workspace rỗng.")
         return name
 
 
