@@ -281,10 +281,16 @@ async def _scan(item: BatchItem) -> None:
     if item.workspace_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.workspace_id`)
         raise BatchItemError("Mục này không biết thuộc về ai.")
 
+    # `raise` chứ không `assert`, giống hệt dòng trên. `assert` ở đây đã làm hỏng cả một lượt
+    # quét thật (I-39): nó không được `_process()` bắt như `BatchItemError`, nên nó nổ thành
+    # "Lỗi ngoài dự kiến" kèm traceback — người dùng thấy đúng một câu vô nghĩa, và `python -O`
+    # thì còn bỏ qua hẳn dòng này rồi chết ở chỗ khác.
+    if item.user_id is None:  # không xảy ra: router luôn gán (xem `BatchItem.user_id`)
+        raise BatchItemError("Mục này không biết ai bấm upload.")
+
     async with SessionLocal() as db:
         # `item.user_id`, KHÔNG phải `workspace_id`: model quét là lựa chọn cá nhân và
         # credential OAuth cũng vậy (13.2 + NEXT-05).
-        assert item.user_id is not None
         model = await user_credentials.model_for_user_id(db, item.user_id, "ocr")
     # `extract_and_translate` chứ không `extract_card`: đường batch phải ra đúng cùng một
     # bộ cột như đường upload 1 ảnh, kể cả 4 cột Việt hoá (EX-04).

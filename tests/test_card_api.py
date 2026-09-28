@@ -16,17 +16,21 @@ File này chưa phủ hết API danh thiếp và không giả vờ là đã ph�
 
 from __future__ import annotations
 
+import io
 import uuid
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
+from PIL import Image
 
+from app.core.config import settings
 from app.models.card import BusinessCard, CardStatus
 from app.models.company import Company
 from app.models.user import User
 from app.routers import cards as cards_router
 from app.schemas.card import CardUpdateIn
+from app.services import card_batch
 from tests.conftest import workspace_id_of
 
 NOW = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
@@ -232,3 +236,74 @@ async def test_so_trang_tinh_tu_tong_khong_tu_so_dong_tra_ve(db_session, user_a,
 
     assert result.total >= 3
     assert result.pages == max(1, -(-result.total // 2))
+
+
+# ------------------------------------------------------------------ xếp hàng upload nhiều ảnh
+
+
+def _anh_that(color: str = "white") -> bytes:
+    """Một ảnh PNG hợp lệ, nhỏ nhất có thể mà `image_service.preprocess()` vẫn nhận."""
+    buffer = io.BytesIO()
+    Image.new("RGB", (48, 30), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def test_stage_gan_ca_nguoi_bam_nut_chu_khong_rieng_khong_gian(
+    db_session, user_a: User, tmp_path, monkeypatch
+) -> None:
+    """Mục xếp hàng phải mang **cả hai** id — `I-39`.
+
+    `NEXT-05` tách `user_id` (ai bấm nút) khỏi `workspace_id` (dữ liệu của ai), thêm tham số
+    `user_id` vào `_stage()` nhưng **quên gán nó vào `BatchItem`**. Lô vẫn nhận 202, ảnh vẫn
+    nằm trong volume, rồi mọi ảnh chết ở nền tại bước chọn model — người dùng thấy đúng một
+    câu "Lỗi ngoài dự kiến".
+
+    Không ca nào bắt được vì `POST /api/cards/batch-upload` **chưa từng có test**: mọi test
+    của batch đều dựng `BatchItem` bằng tay và tự điền sẵn hai id, tức là kiểm phần sau đúng
+    cái chỗ bị hỏng. Ca này đi qua chính `_stage()`, chỗ duy nhất dựng `BatchItem` thật.
+    """
+    monkeypatch.setattr(settings, "upload_dir", tmp_path)
+    workspace_id = await workspace_id_of(db_session, user_a)
+
+    item = await cards_router._stage(
+        db_session,
+        UploadFile(filename="the.png", file=io.BytesIO(_anh_that())),
+        workspace_id=workspace_id,
+        user_id=user_a.id,
+    )
+
+    assert item.status is card_batch.ItemStatus.PENDING
+    assert item.workspace_id == workspace_id
+    assert item.user_id == user_a.id, "thiếu user_id thì cả lô chết ở bước chọn model"
+
+
+async def test_stage_gan_du_hai_id_ca_khi_anh_da_quet_truoc_do(
+    db_session, user_a: User, tmp_path, monkeypatch
+) -> None:
+    """Nhánh ảnh trùng cũng phải mang đủ hai id.
+
+    Nhánh này không đi qua `_scan()` nên hôm nay thiếu id cũng không nổ. Vẫn kiểm, vì một
+    `BatchItem` có `card_id` mà không biết ai tạo ra nó là một bản ghi tự mâu thuẫn — và nhánh
+    nào rồi cũng có ngày được đem đi quét lại.
+    """
+    monkeypatch.setattr(settings, "upload_dir", tmp_path)
+    workspace_id = await workspace_id_of(db_session, user_a)
+    raw = _anh_that("ivory")
+
+    first = await cards_router._stage(
+        db_session,
+        UploadFile(filename="the.png", file=io.BytesIO(raw)),
+        workspace_id=workspace_id,
+        user_id=user_a.id,
+    )
+    again = await cards_router._stage(
+        db_session,
+        UploadFile(filename="the-lan-hai.png", file=io.BytesIO(raw)),
+        workspace_id=workspace_id,
+        user_id=user_a.id,
+    )
+
+    assert again.duplicate is True
+    assert again.card_id == first.card_id
+    assert again.workspace_id == workspace_id
+    assert again.user_id == user_a.id

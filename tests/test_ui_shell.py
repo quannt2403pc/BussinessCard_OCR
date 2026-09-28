@@ -208,6 +208,39 @@ def test_sprite_co_du_cap_icon_cua_nut_phong_to() -> None:
         assert f'<symbol id="{name}"' in sprite, name
 
 
+def test_sprite_co_du_icon_trang_thai_cua_man_hinh_quet() -> None:
+    """Bốn badge của *Tiến trình quét* dựng tên icon trong JS, ngoài tầm regex `icon("…")`.
+
+    Cùng điểm mù với nút phóng to ở trên: `cards/upload.html` giữ tên icon trong bảng `BADGES`
+    rồi ghép vào `#i-${name}`, nên gõ sai tên là `<use>` trỏ vào id rỗng — không lỗi, không
+    console, chỉ là badge mất icon và không ai để ý.
+    """
+    sprite = (STATIC_DIR / "img" / "icons.svg").read_text(encoding="utf-8")
+    for name in ("i-clock", "i-spinner", "i-check-circle", "i-error"):
+        assert f'<symbol id="{name}"' in sprite, name
+
+
+def test_khong_dung_emoji_lam_icon() -> None:
+    """`docs/ui-kit.md` mục 7 chốt **một bộ icon duy nhất** (Lucide qua sprite).
+
+    Emoji là bộ thứ hai lẻn vào: nó do font hệ thống vẽ nên cùng một trạng thái ra ba hình khác
+    nhau trên Windows / macOS / Android, không nhận `currentColor` nên không đi theo tông màu
+    của badge chứa nó, và trình đọc màn hình đọc ✅ thành "dấu kiểm màu trắng đậm" ngay trước
+    chữ "xong" — lặp một lần thừa.
+
+    Bỏ qua chú thích Jinja `{# #}` và chú thích JS `//`: emoji trong đó không hiện lên màn hình,
+    và chính đoạn giải thích *vì sao không dùng emoji* lại hay có emoji làm ví dụ. Cách lọc này
+    có thể **bỏ sót** (một `//` trong chuỗi URL sẽ cắt nốt dòng), nhưng không báo nhầm — đúng
+    chiều an toàn cho một test chặn hồi quy.
+    """
+    emoji = ("⏳", "🔄", "✅", "❌", "🟢", "🔴", "⭐", "🎉", "👍", "📄", "🔍")
+    for path in sorted(TEMPLATES_DIR.rglob("*.html")):
+        text = re.sub(r"\{#.*?#\}", "", path.read_text(encoding="utf-8"), flags=re.S)
+        text = re.sub(r"//.*", "", text)
+        found = [e for e in emoji if e in text]
+        assert not found, f"{path.name}: dùng emoji làm icon {found} — xem docs/ui-kit.md mục 7"
+
+
 def test_file_cua_q_khong_con_mau_sky() -> None:
     """Task 14.8: đổi tông là việc cơ học, nhưng sót một chỗ thì nó lạc màu giữa trang."""
     for path in Q_TEMPLATES:
