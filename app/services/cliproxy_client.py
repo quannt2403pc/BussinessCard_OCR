@@ -41,6 +41,7 @@ Hai điểm dễ vấp rút ra từ bảng trên:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -161,6 +162,96 @@ class AuthStatus:
 
 
 @dataclass(frozen=True)
+class ProviderBlock:
+    """Nhà cung cấp từ chối credential, kèm việc người dùng phải làm để gỡ (I-42).
+
+    Bóc từ `AuthFile.status_message` — chuỗi JSON lỗi **nguyên văn của Google** mà CLIProxy chép
+    lại. Ba trường lấy ra đều nhằm trả lời đúng một câu: *tôi phải làm gì bây giờ.*
+    """
+
+    message: str
+    reason: str
+    action_url: str
+    action_label: str
+
+    @property
+    def one_line(self) -> str:
+        """Câu của Google, bỏ dấu chấm cuối để ghép tiếp không thành "continue.."."""
+        return (self.message or self.reason or "không rõ lý do").rstrip(". ") + "."
+
+    @property
+    def needs_verification(self) -> bool:
+        """Google đòi **xác minh tài khoản**, không phải đòi tiền.
+
+        Phân biệt chuyện này với gói cước là điều bắt buộc: CLIProxy gắn nhãn `payment_required`
+        cho mọi `403` upstream, kể cả cái này. Tin nhãn đó là bảo người dùng đi mua gói để chữa
+        một thứ chỉ cần bấm một đường link (đo thật 2026-09-28).
+        """
+        return self.reason == "VALIDATION_REQUIRED"
+
+    @classmethod
+    def parse(cls, status_message: str) -> ProviderBlock | None:
+        """`None` nếu không bóc được — đoán bừa lý do còn tệ hơn im lặng."""
+        if not status_message.strip():
+            return None
+        try:
+            error = json.loads(status_message).get("error") or {}
+        except (ValueError, AttributeError):
+            return None
+
+        message = str(error.get("message") or "").strip()
+        reason, url, label = "", "", ""
+        for detail in error.get("details") or []:
+            if not isinstance(detail, dict):
+                continue
+            reason = reason or str(detail.get("reason") or "")
+            meta = detail.get("metadata")
+            if isinstance(meta, dict):
+                url = url or str(meta.get("validation_url") or "")
+                label = label or str(meta.get("validation_url_link_text") or "")
+
+        if not message and not reason:
+            return None
+        return cls(message=message, reason=reason, action_url=url, action_label=label)
+
+
+@dataclass(frozen=True)
+class Cooldown:
+    """Một cặp *(credential, model)* mà CLIProxy đang tạm ngừng gọi (I-42).
+
+    CLIProxy ghi vào đây khi nhà cung cấp từ chối, kèm `reason` nguyên văn. Cái đáng quan tâm
+    nhất là `payment_required` (`403`): tài khoản Google đó **không có gói trả phí** cho model
+    này — một tài khoản free gặp nó ngay lời gọi đầu tiên.
+
+    Vì sao phải dựng kiểu riêng: cooldown **không** bật `disabled`, cũng **không** bật
+    `unavailable`. `AuthFile.usable` vẫn `True`, badge vẫn xanh, trong khi mọi lời gọi trả
+    `503 auth_unavailable`. Đó chính là I-42.
+    """
+
+    model: str
+    reason: str
+    remaining_seconds: int
+    http_status: int
+    retry_at: str
+
+    @classmethod
+    def from_payload(cls, item: dict[str, Any]) -> Cooldown:
+        """Chịu được khi thiếu trường — hợp đồng này dò ra bằng quan sát, không có tài liệu."""
+        return cls(
+            model=str(item.get("model_key") or item.get("model") or ""),
+            reason=str(item.get("reason") or ""),
+            remaining_seconds=int(item.get("remaining_seconds") or 0),
+            http_status=int(item.get("http_status") or 0),
+            retry_at=str(item.get("retry_at") or ""),
+        )
+
+    @property
+    def needs_payment(self) -> bool:
+        """Từ chối vì **gói cước**, không phải vì hỏng — đăng nhập lại không chữa được."""
+        return self.reason == "payment_required" or self.http_status in (402, 403)
+
+
+@dataclass(frozen=True)
 class AuthFile:
     """Một credential đã lưu trong `auth-dir` của CLIProxy.
 
@@ -173,12 +264,52 @@ class AuthFile:
     label: str
     status: str
     disabled: bool
+    cooldowns: tuple[Cooldown, ...] = ()
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def usable(self) -> bool:
-        """Credential còn dùng được — CLIProxy tự đánh dấu `disabled`/`unavailable` khi hỏng."""
+        """Credential còn dùng được — CLIProxy tự đánh dấu `disabled`/`unavailable` khi hỏng.
+
+        **Cooldown cố ý KHÔNG tính vào đây.** Credential đang nghỉ vẫn lành lặn: OAuth còn hiệu
+        lực, token còn hạn, và model khác vẫn gọi được ngay lúc này. Coi nó là "không dùng được"
+        thì badge đỏ và người dùng đi đăng nhập lại — trọn luồng dán URL của 13.7 — để chữa một
+        thứ mà đăng nhập lại không đụng tới được (I-42).
+        """
         return not self.disabled and not bool(self.raw.get("unavailable"))
+
+    def cooldown_for(self, model: str) -> Cooldown | None:
+        """Cooldown đang áp lên đúng model này, nếu có.
+
+        So khớp theo tên **đã cắt tiền tố**: lời gọi đi bằng `u<hex>/gemini-3-flash` còn CLIProxy
+        ghi cooldown theo `gemini-3-flash`. Không cắt thì không bao giờ khớp.
+        """
+        bare = model.rsplit("/", 1)[-1]
+        return next((c for c in self.cooldowns if c.model == bare), None)
+
+    @property
+    def provider_block(self) -> ProviderBlock | None:
+        """Lý do **nhà cung cấp** chặn credential này, bóc từ `status_message` (I-42).
+
+        CLIProxy nhét nguyên văn JSON lỗi của Google vào `status_message` rồi bật
+        `unavailable: true`. Đó là chỗ **duy nhất** nói đúng chuyện gì đang xảy ra — và nó còn
+        kèm sẵn đường link để người dùng tự gỡ. Trước I-42 ta vứt hết, chỉ hiện *"credential
+        không dùng được, hãy kết nối lại"* — lời khuyên sai, vì đăng nhập lại không xác minh hộ
+        tài khoản ai cả.
+
+        Đo thật 2026-09-28: `403 PERMISSION_DENIED / VALIDATION_REQUIRED —
+        "Verify your account to continue."` kèm `validation_url`.
+        """
+        return ProviderBlock.parse(str(self.raw.get("status_message") or ""))
+
+    def paid_only_models(self) -> frozenset[str]:
+        """Model mà **tài khoản này** bị từ chối vì gói cước.
+
+        Đây là lý do danh sách "Pro" không thể là hằng số trong mã: cùng một model,
+        `quanpyke@gmail.com` gọi được còn `quanpyke1@gmail.com` thì không (đo thật, I-42).
+        Thuộc tính này của **cặp** *(tài khoản, model)*, nên nó phải đọc từ credential đang dùng.
+        """
+        return frozenset(c.model for c in self.cooldowns if c.needs_payment and c.model)
 
     @classmethod
     def from_payload(cls, item: dict[str, Any]) -> AuthFile:
@@ -186,12 +317,19 @@ class AuthFile:
         name = str(item.get("name") or item.get("id") or item.get("path") or "")
         # `label` là email hiển thị; bản cũ có thể chỉ có `email`/`account`.
         label = str(item.get("label") or item.get("email") or item.get("account") or name)
+        raw_cooldowns = item.get("cooldowns")
+        cooldowns = tuple(
+            Cooldown.from_payload(c)
+            for c in (raw_cooldowns if isinstance(raw_cooldowns, list) else [])
+            if isinstance(c, dict)
+        )
         return cls(
             name=name,
             provider=str(item.get("provider") or item.get("type") or ""),
             label=label,
             status=str(item.get("status") or ""),
             disabled=bool(item.get("disabled")),
+            cooldowns=cooldowns,
             raw=item,
         )
 

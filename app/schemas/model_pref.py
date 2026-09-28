@@ -40,6 +40,14 @@ class ModelPrefsOut(BaseModel):
         "**không đổi được lựa chọn** — không có gì để đối chiếu thì lưu gì cũng là lưu mò.",
     )
     features: list[FeatureModelsOut] = Field(default_factory=list)
+    paid_only: list[str] = Field(
+        default_factory=list,
+        description="Model mà **tài khoản Google đang kết nối** bị từ chối vì gói cước — giao "
+        "diện gắn nhãn *Pro* cho chúng (I-42). Danh sách này của **cặp** *(tài khoản, model)*, "
+        "đọc từ `cooldowns` của chính credential đang dùng: cùng một model, tài khoản có gói thì "
+        "gọi được, tài khoản free thì không. Rỗng cũng có thể chỉ nghĩa là *chưa ai thử model "
+        "nào* — nó chỉ biết những model đã bị từ chối ít nhất một lần.",
+    )
 
 
 class ModelPrefsIn(BaseModel):

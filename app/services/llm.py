@@ -87,6 +87,30 @@ class LLMNotConnectedError(LLMError):
     """
 
 
+class LLMProviderBlockedError(LLMNotConnectedError):
+    """Nhà cung cấp từ chối **chính tài khoản**, và việc cần làm nằm ngoài ứng dụng (I-42).
+
+    Đo thật 2026-09-28: Google trả `403 PERMISSION_DENIED / VALIDATION_REQUIRED —
+    "Verify your account to continue."` kèm một `validation_url`. Đăng nhập lại không chữa được;
+    người dùng phải mở link đó. Câu lỗi vì thế **phải mang theo link**, nếu không nó lại là một
+    ngõ cụt nữa.
+    """
+
+
+class LLMPaymentRequiredError(LLMNotConnectedError):
+    """Model này đòi gói trả phí mà tài khoản Google đang kết nối không có (I-42).
+
+    **Kế thừa `LLMNotConnectedError` là cố ý.** Mọi chỗ đang `except LLMNotConnectedError` —
+    `routers/cards.py`, `routers/chat.py`, `card_batch.py`, `enrich_jobs.py` — xử lý đúng như
+    nhau: dừng lại, nói cho người dùng, đừng thử lại. Chỉ **câu chữ** là phải khác, vì lời
+    khuyên "bấm Kết nối AI" ở đây sai hẳn: credential hoàn toàn lành lặn, đăng nhập lại mười
+    lần cũng ra đúng tài khoản không có gói ấy.
+
+    Tách thành lớp riêng để chỗ nào cần phân biệt thì phân biệt được, mà không phải sửa một
+    dòng `except` nào đang có.
+    """
+
+
 class LLMBlockedError(LLMError):
     """Provider chặn câu trả lời (safety / recitation) — thử lại y nguyên cũng vô ích."""
 
@@ -241,10 +265,7 @@ async def _translate_error(
         # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, nhưng dán lên
         # UI thì rối. Đẩy vào log, trả cho người dùng đúng một câu và một việc cần làm.
         logger.info("CLIProxy báo thiếu credential: %s", exc.message)
-        return LLMNotConnectedError(
-            "Chưa kết nối OAuth: CLIProxy không có credential nào cho channel "
-            f"{settings.cliproxy_auth_provider!r}. Vào /settings bấm 'Kết nối AI'."
-        )
+        return await _explain_no_credential(model_name, client)
     if isinstance(exc, CliProxyResponseError):
         if exc.status_code == 400 and "unknown provider for model" in str(exc.message).lower():
             return await _explain_unknown_provider(model_name, exc, client)
@@ -293,6 +314,76 @@ async def _explain_unknown_provider(
         f"CLIProxy không định tuyến được model {model_name!r}, và cũng không đọc được danh mục "
         f"model để biết vì sao. Hai khả năng: chưa kết nối OAuth (vào /settings), hoặc LLM_MODEL "
         f"sai tên (I-03). Chi tiết: {exc.message}"
+    )
+
+
+async def _explain_no_credential(model_name: str, client: CliProxyClient | None) -> LLMError:
+    """Dịch `503 auth_unavailable` thành đúng nguyên nhân — **hai chuyện rất khác nhau** (I-42).
+
+    | Tình huống | `auth-files` nói gì |
+    |------------|---------------------|
+    | Chưa ai đăng nhập | không có file nào |
+    | Đã đăng nhập, nhưng **gói không đủ** cho model này | có file, kèm `cooldowns[reason=payment_required]` |
+
+    Trước I-42 cả hai đều ra một câu *"Chưa kết nối OAuth… bấm Kết nối AI"*. Với trường hợp thứ
+    hai đó là lời khuyên **sai**: credential lành lặn, và đăng nhập lại chỉ đưa người dùng đi
+    trọn luồng dán URL của 13.7 để quay về đúng chỗ cũ. Đo thật 2026-09-28 trên
+    `ocrximi.io.vn`: badge xanh, `disabled: false`, `unavailable: false`, mà mọi lượt gọi hỏng
+    trong 38ms.
+
+    Không tra được `auth-files` thì rơi về câu cũ — đoán bừa "tại gói cước" còn tệ hơn.
+    """
+    channel = settings.cliproxy_auth_provider
+    generic = LLMNotConnectedError(
+        f"Chưa kết nối OAuth: CLIProxy không có credential nào cho channel {channel!r}. "
+        "Vào /settings bấm 'Kết nối AI'."
+    )
+
+    try:
+        if client is not None:
+            files = await client.auth_files(channel)
+        else:
+            async with CliProxyClient() as proxy:
+                files = await proxy.auth_files(channel)
+    except CliProxyError as exc:
+        logger.info("Không đọc được auth-files để giải thích 503: %s", exc)
+        return generic
+
+    if not files:
+        return generic
+
+    bare = base_model(model_name)
+
+    # **Hỏi nhà cung cấp trước, hỏi CLIProxy sau.** `status_message` chép nguyên văn lỗi của
+    # Google nên nó nói đúng chuyện gì xảy ra và phải làm gì; `cooldowns[].reason` là nhãn
+    # CLIProxy tự đặt, và nó gắn `payment_required` cho **mọi** 403 upstream — kể cả lần đo
+    # 2026-09-28, nơi Google thật ra đòi *xác minh tài khoản* chứ không đòi tiền.
+    for auth_file in files:
+        block = auth_file.provider_block
+        if block is None:
+            continue
+        loi_khuyen = (
+            f" Mở {block.action_url} để xác minh rồi thử lại."
+            if block.needs_verification and block.action_url
+            else " Vào /settings kết nối bằng tài khoản Google khác."
+        )
+        return LLMProviderBlockedError(
+            f"Google từ chối tài khoản {auth_file.label}: {block.one_line}{loi_khuyen}"
+        )
+
+    blocked = [(f, c) for f in files if (c := f.cooldown_for(bare)) is not None]
+
+    if blocked:
+        auth_file, cooldown = blocked[0]
+        return LLMNotConnectedError(
+            f"Model {bare!r} đang tạm ngừng với tài khoản {auth_file.label} "
+            f"({cooldown.reason or 'không rõ lý do'}). Thử lại sau "
+            f"{max(cooldown.remaining_seconds, 1)} giây, hoặc chọn model khác ở /settings."
+        )
+
+    return LLMNotConnectedError(
+        f"CLIProxy có credential của {files[0].label} nhưng không phục vụ được model "
+        f"{bare!r} lúc này. Thử lại sau ít phút, hoặc chọn model khác ở /settings."
     )
 
 

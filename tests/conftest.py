@@ -31,9 +31,9 @@ import os
 import random
 import sys
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -428,6 +428,8 @@ class CliProxyStub:
     """
 
     router: respx.MockRouter
+    #: Nội dung `auth-files` hiện tại. Mặc định rỗng = chưa ai kết nối.
+    files: list[dict[str, Any]] = field(default_factory=list)
 
     def reply(self, *texts: str) -> None:
         """Model trả lần lượt từng chuỗi cho từng lời gọi `generateContent`.
@@ -451,21 +453,26 @@ class CliProxyStub:
             return_value=httpx.Response(status_code, json=json or {"error": "lỗi giả lập"})
         )
 
-    def auth_files(self, *names: str) -> None:
-        """`GET /v0/management/auth-files` — nguồn sự thật của badge kết nối (I-02)."""
-        files = [
+    def auth_files(self, *names: str, cooldowns: Sequence[dict[str, Any]] = ()) -> None:
+        """`GET /v0/management/auth-files` — nguồn sự thật của badge kết nối (I-02).
+
+        Ghi vào `files` chứ **không** đăng ký thêm route: fixture đã cắm sẵn một route đọc danh
+        sách này mỗi lần được gọi. Đăng ký hai lần thì respx giữ route **đầu tiên**, nên test
+        nào gọi `auth_files()` sau khi đã có route sẽ lặng lẽ không có tác dụng gì.
+
+        `cooldowns` dựng ca I-42: credential lành lặn nhưng Google từ chối một model vì gói cước.
+        """
+        self.files[:] = [
             {
                 "name": name,
                 "provider": settings.cliproxy_auth_provider,
                 "label": name,
                 "status": "active",
                 "disabled": False,
+                "cooldowns": list(cooldowns),
             }
             for name in names
         ]
-        self.router.get("/v0/management/auth-files").mock(
-            return_value=httpx.Response(200, json={"files": files})
-        )
 
     @property
     def calls(self) -> Any:
@@ -483,9 +490,19 @@ def gemini_payload(text: str) -> dict[str, Any]:
 
 @pytest.fixture
 def cliproxy() -> Iterator[CliProxyStub]:
-    """CLIProxy giả lập tại đúng `CLIPROXY_BASE_URL` mà `services/llm.py` sẽ gọi."""
+    """CLIProxy giả lập tại đúng `CLIPROXY_BASE_URL` mà `services/llm.py` sẽ gọi.
+
+    `auth-files` được cắm sẵn ngay từ đầu, trả về `stub.files` mỗi lần được hỏi. Từ I-42 đây là
+    **đường nóng**: `user_credentials.paid_only_models()` đọc nó trên mọi lượt gọi model để biết
+    tài khoản này bị chặn model nào vì gói cước. Không cắm sẵn thì mọi test chạm tới `model_for()`
+    đều đỏ vì một route chưa mock, chứ không phải vì điều nó muốn kiểm.
+    """
     with respx.mock(base_url=settings.cliproxy_base_url, assert_all_called=False) as router:
-        yield CliProxyStub(router)
+        stub = CliProxyStub(router)
+        router.get("/v0/management/auth-files").mock(
+            side_effect=lambda request: httpx.Response(200, json={"files": stub.files})
+        )
+        yield stub
 
 
 # --------------------------------------------------------------------------- mock embedder
