@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.user import User
 from app.repositories import model_pref as pref_repo
-from app.services import llm, model_catalog, user_credentials
+from app.services import model_catalog, user_credentials
 from app.services.cliproxy_client import AuthFile
 from tests.conftest import CliProxyStub, make_user
 from tests.test_card_api import make_card
@@ -384,7 +384,7 @@ async def test_xoa_tai_khoan_thi_lua_chon_di_theo(db_session: AsyncSession) -> N
     assert await pref_repo.get(db_session, frank_id) is None
 
 
-# --------------------------------------------------------- gói cước của tài khoản (I-42)
+# ------------------------------------------------- cooldown của credential (I-42)
 
 
 def _auth_file(name: str, *, label: str, cooldowns: list[dict[str, object]]) -> AuthFile:
@@ -402,7 +402,7 @@ def _auth_file(name: str, *, label: str, cooldowns: list[dict[str, object]]) -> 
     )
 
 
-PAYMENT_COOLDOWN: list[dict[str, object]] = [
+COOLDOWN: list[dict[str, object]] = [
     {
         "scope": "model",
         "model_key": GOOD,
@@ -415,78 +415,24 @@ PAYMENT_COOLDOWN: list[dict[str, object]] = [
 
 
 def test_cooldown_khong_lam_credential_thanh_hong() -> None:
-    """Đây là gốc của I-42: badge đọc `usable`, mà `usable` không nhìn `cooldowns`.
+    """Gốc của I-42: badge đọc `usable`, mà `usable` không nhìn `cooldowns`.
 
     Giữ nguyên hành vi ấy **có chủ đích** — credential đang nghỉ vẫn lành lặn, model khác vẫn
     gọi được. Nhưng phải có test ghim lại, vì cám dỗ "cho cooldown vào `usable` cho badge đỏ"
-    rất lớn, mà làm thế là đẩy người dùng đi đăng nhập lại để chữa chuyện gói cước.
+    rất lớn, mà làm thế là đẩy người dùng đi đăng nhập lại để chữa một thứ đăng nhập lại không
+    đụng tới được.
     """
-    auth_file = _auth_file("a.json", label="free@gmail.com", cooldowns=PAYMENT_COOLDOWN)
-
-    assert auth_file.usable is True
-    assert auth_file.paid_only_models() == frozenset({GOOD})
+    assert _auth_file("a.json", label="ai@gmail.com", cooldowns=COOLDOWN).usable is True
 
 
 def test_cooldown_khop_ca_khi_ten_model_con_tien_to() -> None:
-    """Lời gọi đi bằng `u<hex>/gemini-3-flash`, CLIProxy ghi cooldown theo `gemini-3-flash`."""
-    auth_file = _auth_file("a.json", label="free@gmail.com", cooldowns=PAYMENT_COOLDOWN)
+    """Lời gọi đi bằng `u<hex>/gemini-3-flash`, CLIProxy ghi cooldown theo `gemini-3-flash`.
+
+    Không cắt tiền tố thì không bao giờ khớp, và `llm._explain_no_credential()` sẽ bỏ sót đúng
+    cái lý do nó sinh ra để tìm.
+    """
+    auth_file = _auth_file("a.json", label="ai@gmail.com", cooldowns=COOLDOWN)
 
     assert auth_file.cooldown_for("uabc123456789/" + GOOD) is not None
     assert auth_file.cooldown_for(GOOD) is not None
     assert auth_file.cooldown_for(NO_WEB) is None
-
-
-def test_cooldown_khong_phai_vi_tien_thi_khong_tinh_la_pro() -> None:
-    """Hết quota, lỗi mạng, provider trả 500 — đều là cooldown, đều **không** phải gói cước.
-
-    Gộp chúng vào nhãn *Pro* là nói với người dùng rằng họ phải trả tiền cho một model mà họ
-    hoàn toàn gọi được, chỉ là lúc này đang trục trặc.
-    """
-    auth_file = _auth_file(
-        "a.json",
-        label="free@gmail.com",
-        cooldowns=[{"model_key": GOOD, "reason": "rate_limited", "http_status": 429}],
-    )
-
-    assert auth_file.paid_only_models() == frozenset()
-
-
-async def test_resolve_tranh_model_vuot_goi_cuoc(
-    db_session: AsyncSession, user_a: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Người dùng free chọn model *Pro* → đổi sang model khác **cùng năng lực**, không hỏng."""
-    _stub_catalogue(monkeypatch, CATALOGUE)
-    await pref_repo.save(db_session, user_a.id, {"ocr": GOOD})
-
-    khong_tranh = await model_catalog.resolve(db_session, user_a.id, "ocr")
-    co_tranh = await model_catalog.resolve(db_session, user_a.id, "ocr", avoid={GOOD})
-
-    assert khong_tranh == GOOD
-    assert co_tranh != GOOD
-    # Thay thế phải **vẫn đọc được ảnh** — hạ cấp năng lực là đổi một lỗi ồn ào lấy một lỗi câm.
-    assert model_catalog.supports(co_tranh, "ocr")
-
-
-async def test_resolve_bao_loi_khi_khong_con_model_nao_tra_noi(
-    db_session: AsyncSession, user_a: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Tài khoản không có gói cho bất kỳ model nào của chức năng đó → nói thẳng, đừng gọi bừa."""
-    _stub_catalogue(monkeypatch, CATALOGUE)
-    moi_model_deu_pro = set(model_catalog.allowed_for("enrich", CATALOGUE))
-
-    with pytest.raises(llm.LLMPaymentRequiredError):
-        await model_catalog.resolve(db_session, user_a.id, "enrich", avoid=moi_model_deu_pro)
-
-
-async def test_danh_muc_rong_thi_khong_doi_model_cua_ai(
-    db_session: AsyncSession, user_a: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Không hỏi được CLIProxy ≠ model vượt gói cước.
-
-    Cùng lối đã chốt ở nhánh *model biến mất khỏi danh mục*: đổi model của người dùng vì **ta**
-    đang mất mạng là một kiểu hỏng âm thầm hơn hẳn thứ nó định chữa.
-    """
-    _stub_catalogue(monkeypatch, [])
-    await pref_repo.save(db_session, user_a.id, {"chat": GOOD})
-
-    assert await model_catalog.resolve(db_session, user_a.id, "chat", avoid={GOOD}) == GOOD
