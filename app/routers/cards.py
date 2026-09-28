@@ -3,9 +3,9 @@
 Chủ sở hữu: Q | Task: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 12.5 | xem Task.md
 
 Router khai **đường dẫn đầy đủ** thay vì đặt `prefix="/api/cards"`, theo đúng tiền lệ
-`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn bốn trang HTML
-(`/cards`, `/cards/upload`, `/cards/batch`, `/cards/{id}`). Gom vào một router để không phải đụng
-`app/main.py` (quy ước số 4).
+`routers/integration.py`: từ task 4.4 file này phục vụ cả API (`/api/cards/*`) lẫn ba trang HTML
+(`/cards`, `/cards/upload`, `/cards/{id}`) cộng một chuyển hướng cũ (`/cards/batch`, gộp ở I-38).
+Gom vào một router để không phải đụng `app/main.py` (quy ước số 4).
 
 ⚠️ **Thứ tự khai báo route HTML là một phần của thiết kế**: `/cards/upload` và `/cards/batch` phải
 đứng trước `/cards/{card_id}`, nếu không hai chữ `upload`/`batch` sẽ rơi vào route chi tiết và
@@ -47,7 +47,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -121,28 +121,15 @@ async def cards_page(request: Request) -> HTMLResponse:
 
 @router.get("/cards/upload", response_class=HTMLResponse, tags=["ui"])
 async def cards_upload_page(request: Request) -> HTMLResponse:
-    """Màn hình kéo–thả / chụp ảnh danh thiếp (task 4.5)."""
-    return templates.TemplateResponse(
-        request,
-        "cards/upload.html",
-        {
-            "active_nav": "cards",
-            "max_upload_mb": settings.max_upload_mb,
-        },
-    )
+    """Màn hình quét danh thiếp — **một ảnh hay ba mươi ảnh đều vào đây** (task 4.5, 5.3, I-38).
 
-
-@router.get("/cards/batch", response_class=HTMLResponse, tags=["ui"])
-async def cards_batch_page(request: Request) -> HTMLResponse:
-    """Màn hình upload hàng loạt + theo dõi tiến trình (task 5.3).
-
-    **Phải khai trước `/cards/{card_id}`.** Starlette so đường dẫn theo thứ tự khai báo, đặt sau
-    thì `/cards/batch` rơi vào route chi tiết, `batch` không parse được thành UUID và người dùng
-    nhận 422 thay vì trang này.
+    Gộp từ hai màn hình cũ. Chúng chỉ khác nhau ở số ảnh người dùng định chọn, mà đó là thứ họ
+    chưa biết cho tới khi mở hộp chọn file ra — bắt chọn trước là bắt trả lời một câu hỏi của hệ
+    thống chứ không phải của họ.
     """
     return templates.TemplateResponse(
         request,
-        "cards/batch.html",
+        "cards/upload.html",
         {
             "active_nav": "cards",
             "max_upload_mb": settings.max_upload_mb,
@@ -150,6 +137,21 @@ async def cards_batch_page(request: Request) -> HTMLResponse:
             "max_concurrency": card_batch.MAX_CONCURRENCY,
         },
     )
+
+
+@router.get("/cards/batch", tags=["ui"])
+async def cards_batch_page() -> RedirectResponse:
+    """`/cards/batch` gộp vào `/cards/upload` — chuyển hướng **301** (I-38).
+
+    **Phải khai trước `/cards/{card_id}`.** Starlette so đường dẫn theo thứ tự khai báo, đặt sau
+    thì `/cards/batch` rơi vào route chi tiết, `batch` không parse được thành UUID và người dùng
+    nhận 422 thay vì trang này.
+
+    301 chứ không xoá thẳng, cùng lý do với `/dashboard` (14.6) và `/assistant` (EX-09): đường
+    dẫn này nằm trong `docs/user-guide.md`, `docs/demo-runbook.md` và trong trang đánh dấu của
+    hai người đã dùng nó suốt ba ngày. Xoá là 404 ngay giữa buổi demo.
+    """
+    return RedirectResponse("/cards/upload", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @router.get("/cards/{card_id}", response_class=HTMLResponse, tags=["ui"])
@@ -340,7 +342,7 @@ async def batch_upload_cards(
 async def get_batch_job(
     job_id: uuid.UUID, user: CurrentUser, workspace: CurrentWorkspace
 ) -> BatchJobOut:
-    """Tiến trình một lượt batch — `templates/cards/batch.html` poll endpoint này (task 5.3).
+    """Tiến trình một lượt batch — `templates/cards/upload.html` poll endpoint này (task 5.3).
 
     Job của **không gian khác** trả 404 y như job không tồn tại (task 12.5, đổi khoá ở
     `NEXT-05`): phân biệt hai ca đó là tự xác nhận "có một lượt quét mang id này, chỉ không phải
@@ -657,7 +659,7 @@ async def _stage(
 
     Đây là phần **đồng bộ** của batch nên nó chặn event loop trong lúc chạy: Pillow nén một ảnh
     mất khoảng 100ms, 50 ảnh là ~5 giây. Chấp nhận được vì trong 5 giây đó client duy nhất đang
-    chờ chính là request này — trang `/cards/batch` chỉ bắt đầu poll sau khi nhận được 202.
+    chờ chính là request này — trang `/cards/upload` chỉ bắt đầu poll sau khi nhận được 202.
     """
     filename = (upload.filename or "").strip() or "(không có tên file)"
 

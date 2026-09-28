@@ -23,7 +23,8 @@
     <h1 class="text-2xl font-semibold text-brand-ink">Danh thiếp đã quét</h1>
   </div>
   <div class="ml-auto flex items-center gap-2">
-    <a href="/cards/batch" class="btn">{{ icon("upload") }} Hàng loạt</a>
+    {# Một nút, không hai: I-38 gộp hai màn hình quét làm một. *Quét mới* nhận từ một ảnh tới
+       cả loạt trong cùng một lượt chọn, nên nút *Hàng loạt* không còn gì để làm. #}
     <a href="/cards/upload" class="btn-primary">{{ icon("scan") }} Quét mới</a>
   </div>
 </div>
