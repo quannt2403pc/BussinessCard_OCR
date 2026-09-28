@@ -168,11 +168,19 @@
   const DB_NAME = "bizcard-batch";
   const STORE = "queue";
 
+  // Badge = màu **+ icon + chữ**, đúng khuôn `companies/list.html` đang dùng. Chỉ-màu thì người
+  // mù màu đỏ–lục không tách được "Lỗi" với "Xong"; emoji thì lại là bộ icon thứ hai trên cùng
+  // một trang, mà `docs/ui-kit.md` mục 7 chốt **một bộ duy nhất** (Lucide qua sprite).
+  //
+  // Emoji ở đây còn tệ hơn chuyện đồng bộ: nó do font hệ thống vẽ, nên cùng một trạng thái ra
+  // ba hình khác nhau trên Windows, macOS và Android, không nhận `currentColor` để đi theo tông
+  // màu của badge, và trình đọc màn hình đọc ✅ thành "dấu kiểm màu trắng đậm" ngay trước chữ
+  // "xong" — lặp một lần thừa.
   const BADGES = {
-    pending: ["⏳ chờ",      "bg-slate-50 text-slate-600 ring-slate-200"],
-    running: ["🔄 đang quét", "bg-brand-50 text-brand-700 ring-brand-100"],
-    done:    ["✅ xong",      "bg-emerald-50 text-emerald-700 ring-emerald-200"],
-    error:   ["❌ lỗi",       "bg-rose-50 text-rose-700 ring-rose-200"],
+    pending: ["Đang chờ",  "bg-slate-50 text-slate-600 ring-slate-200",      "clock"],
+    running: ["Đang quét…", "bg-brand-50 text-brand-700 ring-brand-100",      "spinner"],
+    done:    ["Xong",      "bg-emerald-50 text-emerald-700 ring-emerald-200", "check-circle"],
+    error:   ["Lỗi",       "bg-rose-50 text-rose-700 ring-rose-200",          "error"],
   };
 
   const QUEUE_LABELS = {
@@ -191,6 +199,50 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = text;
     return node;
+  }
+
+  /** Một `<span>` gồm icon sprite + chữ.
+
+      `innerHTML` chỉ dựng đúng thẻ `<svg>` từ `name` — một hằng số trong file này, không phải
+      dữ liệu người dùng; `label` thì vào bằng `createTextNode`. Ranh giới ấy phải giữ: ngay
+      dưới đây `renderRow()` ghi tên file do người dùng đặt.
+
+      Icon `aria-hidden` vì chữ ngay cạnh đã nói đủ — đọc thêm tên icon là lặp (`_macros.html`). */
+  const spriteSvg = (name) =>
+    `<svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="/static/img/icons.svg?v={{ asset_v }}#i-${name}"/></svg>`;
+
+  function iconText(name, className, text) {
+    const box = el("span", className);
+    box.innerHTML = spriteSvg(name);
+    box.append(document.createTextNode(text));
+    return box;
+  }
+
+  /** Một ô đếm của khối *Tiến trình quét*: icon · số · nhãn.
+
+      Số tách khỏi nhãn thay vì nhét chung một chuỗi `${n} xong`, vì hai lý do đo được:
+
+      - Khoảng trắng thường ở cỡ `text-xs` chỉ rộng **2px**, nên "1 xong" hiện ra dính thành
+        "1xong". Tách ra thì khoảng cách do `gap-1.5` quyết định, không do font.
+      - `tabular-nums`: ba ô này vẽ lại **mỗi 1,5 giây** theo nhịp poll. Chữ số không cùng bề
+        rộng thì cả hàng nhích ngang mỗi lần một ảnh quét xong — chuyển động không mang nghĩa
+        gì, chỉ làm mắt bị kéo khỏi chỗ đáng nhìn. */
+  function count(name, tone, value, label) {
+    const box = el("span", `inline-flex items-center gap-1.5 ${tone}`);
+    box.innerHTML = spriteSvg(name);
+    box.append(el("span", "font-medium tabular-nums", String(value)));
+    box.append(el("span", null, label));
+    return box;
+  }
+
+  function badge(entry, fallback) {
+    const [label, tone, name] = entry
+      || [fallback, "bg-slate-50 text-slate-600 ring-slate-200", "info"];
+    return iconText(
+      name,
+      `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`,
+      label,
+    );
   }
 
   function message(text, kind, retry) {
@@ -291,10 +343,8 @@
     const tr = el("tr", "align-top");
     tr.append(el("td", "px-4 py-3 font-medium text-slate-800", item.filename));
 
-    const [label, tone] = BADGES[item.status] || [item.status, "bg-slate-50 text-slate-600 ring-slate-200"];
     const state = el("td", "px-4 py-3");
-    state.append(el("span",
-      `inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`, label));
+    state.append(badge(BADGES[item.status], item.status));
     if (item.attempts > 1 && item.status !== "error") {
       // Retry đã cứu được ảnh này. Hiện ra vì nhiều dòng "thử lại lần 2" là dấu hiệu sớm của
       // rate limit (R5) — biết trước thì còn giảm số ảnh mỗi lượt.
@@ -359,9 +409,9 @@
       : `Đang chạy — ${settled}/${job.total} ảnh`;
 
     $("job-counts").replaceChildren(
-      el("span", "text-emerald-700", `✅ ${job.done} xong`),
-      el("span", "text-brand-700", `🔄 ${job.running} đang quét`),
-      el("span", "text-rose-700", `❌ ${job.failed} lỗi`),
+      count("check-circle", "text-emerald-700", job.done, "xong"),
+      count("spinner", "text-brand-700", job.running, "đang quét"),
+      count("error", "text-rose-700", job.failed, "lỗi"),
     );
 
     if (job.aborted_reason) message(job.aborted_reason, "error");

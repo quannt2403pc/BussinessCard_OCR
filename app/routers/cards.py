@@ -679,6 +679,7 @@ async def _stage(
         return card_batch.BatchItem(
             filename=filename,
             workspace_id=workspace_id,
+            user_id=user_id,
             card_id=existing.id,
             status=card_batch.ItemStatus.DONE,
             duplicate=True,
@@ -711,14 +712,20 @@ async def _stage(
         return card_batch.BatchItem(
             filename=filename,
             workspace_id=workspace_id,
+            user_id=user_id,
             card_id=raced.id,
             status=card_batch.ItemStatus.DONE,
             duplicate=True,
         )
 
+    # `user_id` phải đi kèm, không chỉ `workspace_id`: lượt quét ở nền dùng credential OAuth và
+    # model của **chính người bấm nút** (13.2 + NEXT-05), mà lúc đó request đã trả 202 xong nên
+    # không còn cookie phiên nào để hỏi lại. Thiếu nó thì `_scan()` chết ở bước chọn model và cả
+    # lô hỏng — đúng lỗi I-39.
     return card_batch.BatchItem(
         filename=filename,
         workspace_id=workspace_id,
+        user_id=user_id,
         card_id=card.id,
         image_path=settings.upload_dir / relative_path,
         status=card_batch.ItemStatus.PENDING,
