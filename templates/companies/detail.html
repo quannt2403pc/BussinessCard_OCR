@@ -628,10 +628,17 @@
 
     const who = el("td", "px-4 py-2");
     // Link ngược card ↔ company: từ hồ sơ công ty mở thẳng tấm danh thiếp gốc (task 7.9).
-    const open = el("a", "link font-medium text-brand-700 hover:underline", card.full_name || "(chưa có tên)");
+    // I-37: bản Việt hoá trước, bản gốc làm chú thích nhỏ — đúng khuôn `cards/list.html` đang
+    // dùng. Bảng này trộn `田中 太郎`, `김민준` và `Nguyễn Văn A` thì không đọc lướt được dòng
+    // nào, mà đọc lướt chính là việc người ta làm với danh sách liên hệ của một công ty.
+    const open = el("a", "link font-medium text-brand-700 hover:underline",
+      card.full_name_vi || card.full_name || "(chưa có tên)");
     open.href = `/cards/${card.id}`;
     who.append(open);
-    who.append(el("div", "text-xs text-slate-500", card.job_title || "—"));
+    if (card.full_name_vi && card.full_name) {
+      who.append(el("div", "text-xs text-muted", card.full_name));
+    }
+    who.append(el("div", "text-xs text-slate-500", card.job_title_vi || card.job_title || "—"));
     tr.append(who);
 
     const contact = el("td", "px-4 py-2");

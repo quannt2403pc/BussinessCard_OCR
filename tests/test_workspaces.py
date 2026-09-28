@@ -307,20 +307,63 @@ async def test_inviting_someone_already_inside_is_409(
 # --------------------------------------------------------- quản trị cuối cùng
 
 
-async def test_the_last_admin_cannot_leave_or_demote_themselves(
+async def test_the_last_admin_cannot_leave(
     app_client: ClientFactory, db_session: AsyncSession, user_a: User, teammate: User
 ) -> None:
     """Không đường nào đưa một tổ chức về trạng thái không ai mời được ai nữa."""
     workspace_id = await workspace_id_of(db_session, user_a)
     async with app_client(user_a) as http:
+        left = await http.delete(f"/api/workspaces/{workspace_id}/members/{user_a.id}")
+
+    assert left.status_code == 409
+    member = await db_session.get(WorkspaceMember, (workspace_id, user_a.id))
+    assert member is not None and member.role == Role.ADMIN
+
+
+async def test_an_admin_cannot_change_their_own_role(
+    app_client: ClientFactory, db_session: AsyncSession, user_a: User, teammate: User
+) -> None:
+    """`I-37`: tự hạ vai là cú bấm không có đường lùi — mất quyền xong không tự nâng lại được.
+
+    `403` chứ không `409`: đây là việc **không ai được làm**, kể cả khi workspace còn quản trị
+    khác — khác hẳn `409` của *quản trị cuối cùng*, vốn chỉ là một trạng thái tạm thời gỡ được
+    bằng cách nâng thêm người.
+    """
+    workspace_id = await workspace_id_of(db_session, user_a)
+    async with app_client(user_a) as http:
+        # Đã có quản trị thứ hai, nên luật "còn ít nhất một quản trị" KHÔNG phải thứ đang chặn.
+        await http.patch(
+            f"/api/workspaces/{workspace_id}/members/{teammate.id}", json={"role": "admin"}
+        )
         demoted = await http.patch(
             f"/api/workspaces/{workspace_id}/members/{user_a.id}", json={"role": "member"}
         )
-        left = await http.delete(f"/api/workspaces/{workspace_id}/members/{user_a.id}")
+        promoted = await http.patch(
+            f"/api/workspaces/{workspace_id}/members/{user_a.id}", json={"role": "admin"}
+        )
 
-    assert (demoted.status_code, left.status_code) == (409, 409)
+    assert (demoted.status_code, promoted.status_code) == (403, 403)
     member = await db_session.get(WorkspaceMember, (workspace_id, user_a.id))
     assert member is not None and member.role == Role.ADMIN
+
+
+async def test_another_admin_can_change_your_role_for_you(
+    app_client: ClientFactory, db_session: AsyncSession, user_a: User, teammate: User
+) -> None:
+    """Mặt kia của `I-37`: chặn tự đổi **không được** biến thành chặn cả việc đổi cho nhau."""
+    workspace_id = await workspace_id_of(db_session, user_a)
+    async with app_client(user_a) as http:
+        await http.patch(
+            f"/api/workspaces/{workspace_id}/members/{teammate.id}", json={"role": "admin"}
+        )
+    async with app_client(teammate) as http:
+        demoted = await http.patch(
+            f"/api/workspaces/{workspace_id}/members/{user_a.id}", json={"role": "viewer"}
+        )
+
+    assert demoted.status_code == 200
+    member = await db_session.get(WorkspaceMember, (workspace_id, user_a.id))
+    assert member is not None and member.role == Role.VIEWER
 
 
 async def test_a_second_admin_unlocks_leaving(

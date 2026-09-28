@@ -52,6 +52,7 @@ Session = Annotated[AsyncSession, Depends(get_db)]
 
 LAST_ADMIN_DETAIL = "Workspace phải còn ít nhất một quản trị."
 NOT_A_MEMBER_DETAIL = "Người này không ở trong workspace."
+SELF_ROLE_DETAIL = "Không tự đổi vai trò của mình được. Nhờ một quản trị khác đổi giúp."
 
 
 @router.get("/workspaces", response_class=HTMLResponse, tags=["ui"])
@@ -242,8 +243,19 @@ async def change_role(
     user: CurrentUser,
     workspace: AdminWorkspace,
 ) -> MemberOut:
-    """Đổi vai trò một thành viên. `409` nếu đó là quản trị cuối cùng đang tự hạ vai mình."""
+    """Đổi vai trò một thành viên — **người khác**, không phải chính mình (`I-37`).
+
+    Quản trị tự hạ vai mình xuống *thành viên* là một cú bấm **không có đường lùi**: ngay sau đó
+    họ mất luôn quyền tự nâng lại, và nếu là quản trị duy nhất thì cả tổ chức không còn ai mời
+    được ai. Luật "còn ít nhất một quản trị" chỉ chặn được trường hợp cuối cùng ấy, không chặn
+    được một tổ chức hai quản trị mà một người bấm nhầm.
+
+    Rời hẳn khỏi workspace thì vẫn làm được bằng `DELETE .../members/{id}` — đó là một việc
+    khác, người bấm biết rõ mình đang đi ra, và vẫn được mời lại.
+    """
     _require_active(workspace_id, workspace.id)
+    if member_id == user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SELF_ROLE_DETAIL)
     target = await _member_or_404(db, workspace_id, member_id)
     if not await workspace_repo.set_role(
         db, workspace_id=workspace_id, user_id=member_id, role=payload.role
