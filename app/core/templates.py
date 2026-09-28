@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
+from app.core.config import settings
 from app.core.security import template_context
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -91,3 +92,8 @@ templates = Jinja2Templates(
 #: mà macro đã import thì không nhìn thấy context của trang gọi nó. Sprite icon nằm trong macro
 #: nên chỉ có đường này.
 templates.env.globals["asset_v"] = ASSET_VERSION
+
+#: `base.html` ẩn liên kết *API* khi Swagger bị tắt (I-43). Global chứ không truyền qua
+#: từng `TemplateResponse`: menu tài khoản nằm trong `base.html` nên **mọi** trang đều
+#: cần giá trị này, mà thêm một khoá vào 14 chỗ render là 14 cơ hội quên một chỗ.
+templates.env.globals["docs_enabled"] = settings.docs_enabled

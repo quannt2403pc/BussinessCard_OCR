@@ -249,3 +249,33 @@ async def test_truy_hoi_kb_khong_voi_sang_du_lieu_cua_khong_gian_khac(
 
     assert hits_b, "tiền đề của test: chunk của B có thật và tìm được"
     assert hits_a == []
+
+
+# ------------------------------------------------------------------ Swagger không lộ ra web (I-43)
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+async def test_swagger_tat_han_khi_khong_phai_may_dev(db_session, user_a: User, path: str) -> None:
+    """Ba đường Swagger phải **không tồn tại** khi `DEBUG=false`, không chỉ bị chặn.
+
+    Trước I-43 chúng nằm sau cổng đăng nhập và thế là đủ — hồi hệ thống còn chạy localhost. Từ
+    D13 nó chạy trên `ocrximi.io.vn`, nơi **ai đăng ký một tài khoản cũng là "đã đăng nhập"**,
+    nên cổng ấy không còn là ranh giới đáng tin. Kiểm bằng client **đã đăng nhập** chính vì lý
+    do đó: chưa đăng nhập thì middleware trả 303 và ta không phân biệt được "đã tắt" với "chỉ
+    đang bị chặn".
+
+    `/openapi.json` nằm trong danh sách cùng hai cái kia, và nó mới là cái đáng giấu nhất: tắt
+    mỗi `/docs` thì giao diện đọc biến mất còn **toàn bộ lược đồ API vẫn tải về được**.
+    """
+    async with api_client(db_session, user_a) as client:
+        response = await client.get(path, headers=HTML_HEADERS)
+
+    assert response.status_code == 404, f"{path} vẫn mở khi DEBUG=false"
+
+
+async def test_menu_tai_khoan_khong_con_lien_ket_api(db_session, user_a: User) -> None:
+    """Tắt route mà để nguyên liên kết là dựng một mục dẫn tới 404 trong menu của mọi người."""
+    async with api_client(db_session, user_a) as client:
+        html = (await client.get("/cards", headers=HTML_HEADERS)).text
+
+    assert 'href="/docs"' not in html

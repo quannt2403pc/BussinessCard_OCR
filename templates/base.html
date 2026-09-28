@@ -145,9 +145,14 @@
             <a href="/workspaces" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("users", "sm") }} Workspace
             </a>
+            {# Liên kết Swagger chỉ hiện khi `DEBUG=true` (I-43). Trên `ocrximi.io.vn` ba đường
+               `/docs`, `/redoc`, `/openapi.json` bị tắt hẳn ở `app/main.py`, nên để nguyên mục
+               này là dựng một liên kết cụt ngay trong menu tài khoản của mọi người dùng thật. #}
+            {% if docs_enabled %}
             <a href="/docs" class="link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-surface">
               {{ icon("file", "sm") }} API
             </a>
+            {% endif %}
             {# POST chứ không phải link: đăng xuất là hành động đổi trạng thái, mà `GET` thì mọi thứ
                prefetch trước một liên kết đều đăng xuất người dùng hộ họ. #}
             <form method="post" action="/auth/logout">

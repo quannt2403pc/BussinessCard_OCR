@@ -25,6 +25,18 @@ class Settings(BaseSettings):
     # --- Ứng dụng ---
     app_name: str = "BusinessCard_OCR"
     debug: bool = False
+    #: Swagger (`/docs`, `/redoc`, `/openapi.json`) có được dựng không — **mặc định tắt** (I-43).
+    #:
+    #: Cờ **riêng**, không suy từ `debug`. Hai lý do:
+    #:
+    #: * `docker-compose.yml` để `DEBUG` mặc định `false` **ngay trên máy dev**, nên buộc vào
+    #:   `debug` là tắt Swagger ở đúng chỗ người ta cần nó nhất;
+    #: * bật `DEBUG` chỉ để đọc tài liệu API là đổi lấy cả trang lỗi chi tiết và log ồn —
+    #:   một cái giá không liên quan gì tới việc muốn làm.
+    #:
+    #: Mặc định `false` để **production an toàn khi không ai khai gì**: quên bật là mất tài
+    #: liệu, quên tắt là lộ toàn bộ bề mặt API. Hai cái quên đó không ngang giá nhau.
+    docs_enabled: bool = False
     #: Mức log gốc (task 9.5): DEBUG | INFO | WARNING | ERROR. DEBUG in thêm dòng access của
     #: `/health` và `/static/*` — hữu ích khi soi healthcheck, ồn khi chạy lâu.
     log_level: str = "INFO"

@@ -87,6 +87,9 @@ services:
       # cookie phiên gửi qua HTTP, hoặc trang lỗi phơi traceback ra Internet.
       SESSION_COOKIE_SECURE: "true"
       DEBUG: "false"
+      # Ep cung, khong doc tu .env (I-43): mot dong `DOCS_ENABLED=true` bi quen lai trong
+      # .env cua may chu la lo toan bo be mat API ra Internet.
+      DOCS_ENABLED: "false"
       # Bí mật thì ngược lại: bắt buộc `.env` phải có, không mặc định.
       DATABASE_URL: "${DATABASE_URL:?thieu DATABASE_URL trong .env}"
       SECRET_KEY: "${SECRET_KEY:?thieu SECRET_KEY trong .env - sinh bang python3 -c import secrets, print token_urlsafe 48}"
