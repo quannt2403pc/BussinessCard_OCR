@@ -77,6 +77,8 @@ services:
       # --- Vận hành (task 9.5 / 9.2) ---
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DEBUG: ${DEBUG:-false}
+      # Swagger tat mac dinh (I-43). Dat DOCS_ENABLED=true trong .env khi can tra API.
+      DOCS_ENABLED: ${DOCS_ENABLED:-false}
       # Entrypoint chạy `alembic upgrade head` trước uvicorn. Đặt 0 khi cố ý muốn lên với
       # schema hiện tại (ví dụ đang gỡ lỗi một migration hỏng).
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}

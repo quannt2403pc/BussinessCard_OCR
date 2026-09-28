@@ -43,11 +43,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+# Swagger chỉ sống trên máy dev (I-43).
+#
+# `/docs`, `/redoc` và `/openapi.json` vốn **đã** nằm sau cổng đăng nhập (`core/security.py`,
+# A8) — khách vãng lai không xem được. Nhưng từ D13 hệ thống chạy trên `ocrximi.io.vn` và ai
+# đăng ký một tài khoản cũng là "đã đăng nhập", nên cổng ấy không còn là ranh giới đáng tin.
+# `/openapi.json` mô tả **toàn bộ bề mặt API** — mọi đường dẫn, mọi tham số, mọi hình dạng
+# body. Đó là bản đồ dò tìm dọn sẵn cho người muốn thử phá.
+#
+# Tắt theo `DEBUG` chứ không tắt hẳn: `Task.md` quy ước số 9 chốt Swagger là **nguồn tài liệu
+# API chính** của dự án sau D1 (`docs/api.md` cố ý không cập nhật tay). Tắt sạch là lấy mất
+# thứ cả hai người đang dùng để tra, để đổi lấy một thứ mà `.env` của production vốn đã lo.
+#
+# ⚠️ `openapi_url=None` phải đi kèm: để lại mỗi `/openapi.json` thì `/docs` chỉ là một trang
+# HTML rỗng, còn **toàn bộ lược đồ vẫn tải về được** — đúng thứ cần giấu, chỉ là không còn
+# giao diện đọc nó.
+_docs_enabled = settings.docs_enabled
+
 app = FastAPI(
     title=settings.app_name,
     description="Số hoá danh thiếp & hồ sơ doanh nghiệp đối tác — bản demo localhost.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 # Cổng đăng nhập (task 12.4): chặn mọi đường dẫn ngoài `/auth/*`, `/static/*`, `/health`.
