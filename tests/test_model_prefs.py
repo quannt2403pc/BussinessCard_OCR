@@ -392,6 +392,9 @@ def _auth_file(name: str, *, label: str, cooldowns: list[dict[str, object]]) -> 
             "disabled": False,
             "unavailable": False,
             "cooldowns": cooldowns,
+            # Có `project_id` để ca này chỉ kiểm đúng **một** chuyện là cooldown. Thiếu nó thì
+            # `usable` hoá `False` vì lý do khác hẳn (I-47) và test không còn nói lên điều gì.
+            "project_id": "aicode-consumers",
         }
     )
 

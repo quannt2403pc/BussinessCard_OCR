@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     cliproxy_base_url: str = "http://cliproxy:8317"
     cliproxy_mgmt_key: str = ""
     cliproxy_auth_provider: str = "antigravity"
+    #: Project Google gán cho credential mới khi tự nó không có (I-47).
+    #:
+    #: **Vì sao cần**: từ khoảng 2026-09-29 Google trả `UNSUPPORTED_CLIENT` cho `free-tier` của
+    #: OAuth client mà Antigravity dùng, nên `loadCodeAssist` **không còn cấp project** cho tài
+    #: khoản mới đăng nhập. Không có `project_id` thì **mọi** lời gọi trả
+    #: `400 antigravity auth missing project_id`. Tài khoản đăng nhập trước mốc đó vẫn chạy vì
+    #: giá trị cũ còn nằm trong file credential — đó là lý do lỗi chỉ lộ ra với người mới.
+    #:
+    #: `aicode-consumers` là project **dùng chung của Google cho tài khoản cá nhân**, không phải
+    #: của riêng ai: đo 2026-09-29 thấy cả hai tài khoản đang chạy được đều mang đúng giá trị này.
+    #: Để rỗng thì thôi không gán — dành cho ai muốn dùng GCP project riêng.
+    cliproxy_project_id: str = "aicode-consumers"
     #: Phải là model CÓ THẬT trong channel `antigravity` — kiểm bằng
     #: `GET /v0/management/model-definitions/antigravity`. Model của channel khác sẽ không chạy.
     llm_model: str = "gemini-3-flash"
