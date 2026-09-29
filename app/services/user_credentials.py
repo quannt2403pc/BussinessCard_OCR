@@ -11,6 +11,7 @@ from app.services import model_catalog
 from app.services.cliproxy_client import (
     AuthFile,
     CliProxyClient,
+    CliProxyError,
     CliProxyResponseError,
 )
 from app.services.llm import LLMNotConnectedError
@@ -107,7 +108,13 @@ def forget_session(state: str) -> None:
 
 
 def pick_new_file(files: Sequence[AuthFile], before: dict[str, str] | None) -> AuthFile | None:
-    usable = [f for f in files if f.usable]
+    """Credential vừa xuất hiện sau lượt OAuth này.
+
+    Lọc bằng `alive` chứ **không** phải `usable` (I-47): credential mới tinh thường chưa có
+    `project_id` — `claim()` gán ngay sau đây. Dùng `usable` thì không cái nào lọt qua và người
+    dùng không kết nối nổi, dù luồng OAuth vừa chạy hoàn hảo.
+    """
+    usable = [f for f in files if f.alive]
     if before is not None:
         usable = [f for f in usable if before.get(f.name) != _stamp(f)]
     return max(usable, key=_stamp, default=None)
@@ -131,6 +138,7 @@ async def claim(db: AsyncSession, user: User, proxy: CliProxyClient, state: str)
         raise CredentialTakenError(chosen.label)
 
     await proxy.set_prefix(chosen.name, credential_prefix(user.id))
+    await _ensure_project_id(proxy, chosen)
     previous = user.cliproxy_auth_file
     if previous and previous != chosen.name:
         await _delete_quietly(proxy, previous)
@@ -147,6 +155,31 @@ async def release(db: AsyncSession, user: User, proxy: CliProxyClient) -> list[s
     user.cliproxy_auth_file = None
     await db.commit()
     return [name]
+
+
+async def _ensure_project_id(proxy: CliProxyClient, auth_file: AuthFile) -> None:
+    """Credential vừa nhận mà thiếu `project_id` thì gán cho nó (I-47).
+
+    Làm ngay lúc `claim()` chứ không đợi tới lời gọi model đầu tiên: người dùng vừa đi hết luồng
+    OAuth của 13.7 — mở tab Google, đồng ý, chép URL về dán — và phần thưởng cho tất cả công ấy
+    **không được phép** là một câu `400` ở lần quét đầu tiên.
+
+    Hỏng thì bỏ qua, không ném: credential đã lấy được là việc chính và nó đã xong. Gán hụt thì
+    lời gọi sau vẫn báo đúng lý do (`llm._translate_error`), còn ném ở đây là vứt cả lượt đăng
+    nhập vừa rồi đi vì một bước phụ.
+    """
+    if not settings.cliproxy_project_id or not auth_file.missing_project_id:
+        return
+    try:
+        await proxy.set_project_id(auth_file.name, settings.cliproxy_project_id)
+    except CliProxyError as exc:
+        logger.warning("Không gán được project_id cho %s: %s", auth_file.name, exc)
+    else:
+        logger.info(
+            "Gán project_id %r cho credential %s (I-47)",
+            settings.cliproxy_project_id,
+            auth_file.name,
+        )
 
 
 async def _delete_quietly(proxy: CliProxyClient, name: str) -> None:

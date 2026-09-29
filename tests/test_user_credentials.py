@@ -64,6 +64,10 @@ class FakeProxy:
             "status": "active",
             "disabled": False,
             "modtime": f"2026-09-22T10:00:{self.clock:02d}Z",
+            # `None` chứ không bỏ trống khoá: CLIProxy thật **luôn** khai `project_id` trong
+            # `auth-files`, để `null` khi Google không cấp (đo 2026-09-29, I-47). Bỏ khoá đi thì
+            # fake dựng ra một hình dạng không tồn tại, và test hoá thành kiểm chính nó.
+            "project_id": None,
         }
         self.prefixes.pop(name, None)
         self.oauth = "ok"
@@ -83,8 +87,17 @@ class FakeProxy:
         return httpx.Response(200, json={"status": self.oauth})
 
     def _patch(self, request: httpx.Request) -> httpx.Response:
+        """`PATCH /auth-files/fields` nhận **một khoá mỗi lượt**: `prefix` hoặc `project_id`.
+
+        Ghi thẳng vào `files` cho `project_id` (I-47) vì lần đọc `auth-files` sau đó phải thấy
+        giá trị mới — đúng như CLIProxy thật: nó ghi vào file rồi nạp lại.
+        """
         body = json.loads(request.content)
-        self.prefixes[body["name"]] = body["prefix"]
+        name = body["name"]
+        if "prefix" in body:
+            self.prefixes[name] = body["prefix"]
+        if "project_id" in body:
+            self.files[name]["project_id"] = body["project_id"]
         return httpx.Response(200, json={"status": "ok"})
 
     def _delete(self, request: httpx.Request) -> httpx.Response:
@@ -326,3 +339,76 @@ async def test_scan_and_translate_both_use_the_owner_prefix(cliproxy: CliProxySt
 
     assert result.card_fields()["full_name_vi"] == "Tanaka Taro"
     assert generate_paths(cliproxy) == [f"/v1beta/models/{model}:generateContent"] * 2
+
+
+# --------------------------------------------------- project_id của credential (I-47)
+
+
+def test_thieu_project_id_thi_credential_khong_dung_duoc() -> None:
+    """Gốc của I-47: credential thiếu `project_id` → **mọi** lời gọi trả `400`, mà badge vẫn xanh.
+
+    Trước I-47 `usable` chỉ xét `disabled`/`unavailable`, nên TS-02 ghi nhận từ 2026-09-18 rằng
+    badge báo *Đã kết nối* trong khi không gọi được gì. Nay `usable` biết chuyện đó.
+    """
+    thieu = AuthFile.from_payload({"name": "a.json", "status": "active", "project_id": None})
+    co = AuthFile.from_payload({"name": "b.json", "status": "active", "project_id": "p-123"})
+
+    assert thieu.missing_project_id is True
+    assert thieu.usable is False
+    assert co.missing_project_id is False
+    assert co.usable is True
+
+
+def test_vang_khoa_project_id_cung_la_thieu() -> None:
+    """CLIProxy **bỏ hẳn khoá** khi Google không cấp project, chứ không để `null`.
+
+    Bản đầu của I-47 coi *vắng khoá* là "không biết gì" nên bản vá **không bao giờ chạy** và lỗi
+    y nguyên. Cái sai đến từ phép đo: `raw.get()` trả `None` cho cả *vắng khoá* lẫn *khoá rỗng*,
+    nhìn vào thì tưởng CLIProxy luôn khai trường ấy. Ca này ghim lại hình dạng thật:
+
+        chidientu75@gmail.com   "project_id" in raw → False
+        quanpyke1@gmail.com     "project_id" in raw → True
+    """
+    vang_khoa = AuthFile.from_payload({"name": "a.json", "status": "active"})
+
+    assert "project_id" not in vang_khoa.raw
+    assert vang_khoa.missing_project_id is True
+    assert vang_khoa.usable is False
+    # Vẫn chọn được lúc `claim()` — đó là việc của `alive`, và là lý do hai thuộc tính này tách nhau.
+    assert vang_khoa.alive is True
+
+
+def test_credential_moi_thieu_project_id_van_chon_duoc() -> None:
+    """`claim()` phải chọn được credential vừa OAuth xong, rồi mới vá `project_id` cho nó.
+
+    Lọc bằng `usable` ở bước chọn là tự khoá mình: credential mới tinh thường **chưa** có
+    `project_id`, nên không cái nào lọt qua và người dùng không kết nối nổi dù luồng OAuth vừa
+    chạy hoàn hảo. Đó là lý do có `alive` tách khỏi `usable`.
+    """
+    moi = AuthFile.from_payload({"name": "a.json", "status": "active", "project_id": None})
+
+    assert moi.alive is True
+    assert user_credentials.pick_new_file([moi], None) is moi
+
+
+async def test_ket_noi_tu_gan_project_id_cho_credential_moi(
+    app_client: ClientFactory, proxy: FakeProxy, alice: User
+) -> None:
+    """Đường đi thật của I-47: đăng nhập xong là credential dùng được ngay.
+
+    Từ ~2026-09-29 Google trả `UNSUPPORTED_CLIENT` cho `free-tier` của OAuth client Antigravity,
+    nên `loadCodeAssist` **không còn cấp project** cho tài khoản mới đăng nhập. Không vá thì
+    người dùng đi hết luồng OAuth của 13.7 — mở tab Google, đồng ý, chép URL về dán — để nhận
+    về một câu `400` ở lần quét đầu tiên.
+
+    Kiểm qua HTTP chứ không gọi thẳng `claim()`: chỗ dễ hỏng là **thứ tự** trong luồng kết nối,
+    và chỉ đi trọn đường mới thấy.
+    """
+    async with app_client(alice) as http:
+        await connect(http, proxy, "moi@gmail.com")
+        status = (await http.get("/api/integration/status")).json()
+
+    name = f"{PROVIDER}-moi@gmail.com.json"
+    assert proxy.files[name]["project_id"] == settings.cliproxy_project_id
+    # Vá xong thì badge phải xanh ngay — đó mới là điều người dùng thấy.
+    assert status["connected"] is True

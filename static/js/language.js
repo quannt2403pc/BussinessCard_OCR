@@ -1,4 +1,4 @@
-/** Nhãn ngôn ngữ dùng chung: mã ISO 639-1 -> cờ + tên tiếng Việt. Chủ sở hữu: Q | Task: I-47 */
+/** Nhãn ngôn ngữ dùng chung: mã ISO 639-1 -> cờ + tên tiếng Việt. Chủ sở hữu: Q | Task: I-48 */
 (function (global) {
   "use strict";
 

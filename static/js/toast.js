@@ -8,7 +8,11 @@
  *
  *     toastShow(box, "Đã lưu.", "success");
  *     toastShow(box, "Tải ảnh không xong. Thử lại.", "error", () => upload(file));
+ *     toastShow(box, "Chưa xác thực.", "error", {href: "https://…", label: "Xác thực ngay"});
  *     toastClear(box);
+ *
+ * Tham số cuối nhận **hàm** (dựng nút *Thử lại*) hoặc **`{href, label}`** (dựng một liên kết —
+ * dùng khi việc cần làm nằm ngoài ứng dụng, I-47).
  *
  * `box` phải có `aria-live` trong markup (`polite` cho tin thường, `assertive` cho lỗi). Không có
  * thì trình đọc màn hình im lặng trước đúng thứ người dùng đang chờ.
@@ -68,6 +72,27 @@
         retry();
       });
       box.appendChild(again);
+    } else if (retry && retry.href) {
+      // Việc cần làm nằm **ngoài** ứng dụng — hiện tại chỉ có một: mở trang xác thực tài khoản
+      // của Google (I-47). Nút "Thử lại" vô nghĩa ở đây: bấm bao nhiêu lần cũng hỏng cho tới khi
+      // người dùng làm xong việc bên kia.
+      //
+      // Chỉ nhận `https:`. URL đi qua ba lớp (Google → CLIProxy → backend) mới tới đây, và một
+      // `javascript:` lọt vào là chạy được ngay trên trang đang giữ token OAuth.
+      let safe = null;
+      try {
+        if (new URL(retry.href, location.origin).protocol === "https:") safe = retry.href;
+      } catch (err) { /* không parse được thì bỏ, chữ vẫn hiện */ }
+
+      if (safe) {
+        const link = document.createElement("a");
+        link.href = safe;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";  // thiếu `noopener` thì tab mới nắm được `window.opener`
+        link.className = "btn shrink-0";
+        link.textContent = retry.label || "Mở";
+        box.appendChild(link);
+      }
     }
 
     const delay = AUTO_HIDE[ALIAS[kind] || kind];

@@ -120,8 +120,17 @@ class CallbackProxy:
         return httpx.Response(200, json={"status": "ok"})
 
     def _patch(self, request: httpx.Request) -> httpx.Response:
+        """`PATCH /auth-files/fields` nhận **một khoá mỗi lượt**: `prefix` hoặc `project_id`.
+
+        Từ I-47, `claim()` gọi endpoint này **hai lần** — gán tiền tố rồi gán project. Giả định
+        "lượt nào cũng có `prefix`" là `KeyError` ở lượt thứ hai.
+        """
         body = json.loads(request.content)
-        self.prefixes[body["name"]] = body["prefix"]
+        name = body["name"]
+        if "prefix" in body:
+            self.prefixes[name] = body["prefix"]
+        if "project_id" in body:
+            self.files[name]["project_id"] = body["project_id"]
         return httpx.Response(200, json={"status": "ok"})
 
     def _delete(self, request: httpx.Request) -> httpx.Response:
@@ -140,6 +149,8 @@ class CallbackProxy:
             "status": "active",
             "disabled": False,
             "modtime": f"2026-09-22T10:00:{self.clock:02d}Z",
+            # Không khai `project_id`: đó đúng là hình dạng CLIProxy trả về khi Google không cấp
+            # project — nó **bỏ hẳn khoá**, không để `null` (đo 2026-09-29, I-47).
         }
 
 

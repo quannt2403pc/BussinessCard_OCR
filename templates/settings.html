@@ -263,13 +263,37 @@
     toastClear(dlgMessage);
   }
 
-  function setDetail(text) {
-    if (text) {
-      statusDetail.textContent = text;
-      statusDetail.classList.remove("hidden");
-    } else {
+  /**
+   * Dòng lý do dưới badge. `actionUrl` có thì gắn thêm một chữ *đây* bấm được (I-47).
+   *
+   * URL do Google trả về, đi qua backend rồi xuống đây — **vẫn kiểm `https:` trước khi đặt vào
+   * `href`**. Không kiểm thì một `javascript:` lọt vào là chạy được ngay trên trang này, và
+   * trang này là chỗ có token OAuth. Rẻ hơn nhiều so với việc phải tin cả một chuỗi hệ thống.
+   */
+  function setDetail(text, actionUrl) {
+    if (!text) {
       statusDetail.classList.add("hidden");
+      return;
     }
+    statusDetail.replaceChildren(document.createTextNode(text));
+
+    let safe = null;
+    try {
+      if (actionUrl && new URL(actionUrl, location.origin).protocol === "https:") safe = actionUrl;
+    } catch (err) { /* URL không parse được thì thôi, chỉ hiện chữ */ }
+
+    if (safe) {
+      statusDetail.append(document.createTextNode(" "));
+      const link = document.createElement("a");
+      link.href = safe;
+      link.target = "_blank";
+      // `noopener` vì tab mở ra nắm được `window.opener` nếu thiếu.
+      link.rel = "noopener noreferrer";
+      link.className = "link font-medium underline underline-offset-2";
+      link.textContent = "Bấm vào đây để xác thực tài khoản";
+      statusDetail.append(link);
+    }
+    statusDetail.classList.remove("hidden");
   }
 
   function resetDisconnectButton() {
@@ -406,7 +430,7 @@
         return data;
       }
 
-      setDetail(data.detail);
+      setDetail(data.detail, data.action_url);
       if (data.connected) {
         setBadge("connected");
         accountBox.classList.remove("hidden");
@@ -790,6 +814,13 @@
       const data = await api("/api/integration/test", { method: "POST" });
       if (data.ok) {
         showMessage(data.model + " trả lời sau " + data.elapsed_ms + "ms: " + data.text, "ok");
+      } else if (data.action_url) {
+        // Câu ngắn + một nút dẫn thẳng tới việc cần làm. Không ghép URL vào câu chữ: nó dài
+        // 300 ký tự và người dùng sẽ phải bôi đen rồi chép tay (I-47).
+        showMessage(data.detail, "error", {
+          href: data.action_url,
+          label: "Bấm vào đây để xác thực tài khoản",
+        });
       } else {
         showMessage("Gọi thử thất bại: " + data.detail, "error");
       }
