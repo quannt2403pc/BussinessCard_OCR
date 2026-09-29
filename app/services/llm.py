@@ -75,8 +75,15 @@ class LLMProviderBlockedError(LLMNotConnectedError):
     """Nhà cung cấp từ chối **chính tài khoản**, và việc cần làm nằm ngoài ứng dụng (I-42).
 
     Google trả `403 VALIDATION_REQUIRED` kèm một `validation_url`; đăng nhập lại không chữa được.
-    Câu lỗi vì thế **phải mang theo link**, nếu không nó lại là một ngõ cụt nữa.
+
+    `action_url` đi **riêng** khỏi câu chữ (I-45). Nhét URL vào giữa câu thì giao diện chỉ còn
+    cách in nguyên một chuỗi 300 ký tự ra màn hình — người dùng phải bôi đen rồi chép tay. Tách
+    ra thì trang dựng được một chữ *đây* bấm thẳng.
     """
+
+    def __init__(self, message: str, *, action_url: str = "") -> None:
+        super().__init__(message)
+        self.action_url = action_url
 
 
 class LLMBlockedError(LLMError):
@@ -221,17 +228,29 @@ async def _translate_error(
     chạy được lẫn bốn nhánh hỏng.
     """
     if isinstance(exc, CliProxyAuthError):
-        return LLMNotConnectedError(
-            "CLIProxy từ chối credential đang có (401/403) — token hỏng hoặc hết hạn. "
-            "Vào /settings bấm 'Kết nối AI' để đăng nhập lại."
-        )
+        # **Hỏi lý do trước khi kết luận** (I-45). `401/403` gộp hai chuyện khác hẳn nhau: token
+        # thật sự hỏng (đăng nhập lại là xong) và Google chặn tài khoản chờ xác thực (đăng nhập
+        # lại **không** chữa được gì). Đo 2026-09-29: lần gọi **đầu tiên** của một tài khoản chưa
+        # xác thực rơi thẳng vào đây, nên nó nhận đúng câu sai đường — chỉ từ lần thứ hai, khi
+        # CLIProxy đã đánh dấu credential `unavailable` và chuyển sang trả `503`, mới ra câu đúng.
+        return await _explain_blocked_or_stale(model_name, client)
     if isinstance(exc, CliProxyNoCredentialError):
         # Nguyên văn của CLIProxy kèm cả body 401 của Google — hữu ích khi debug, rối trên UI.
         logger.info("CLIProxy báo thiếu credential: %s", exc.message)
         return await _explain_no_credential(model_name, client)
     if isinstance(exc, CliProxyResponseError):
-        if exc.status_code == 400 and "unknown provider for model" in str(exc.message).lower():
+        loi = str(exc.message).lower()
+        if exc.status_code == 400 and "unknown provider for model" in loi:
             return await _explain_unknown_provider(model_name, exc, client)
+        if exc.status_code == 400 and "missing project_id" in loi:
+            # Nguyên văn (`antigravity auth missing project_id: no project_id in response`) nói
+            # đúng chuyện gì hỏng nhưng không nói **phải làm gì**, mà đây là lỗi người dùng tự
+            # gỡ được trong một phút — chỉ cần biết đường (I-45, TS-02).
+            return LLMNotConnectedError(
+                "Tài khoản Google này không dùng được với AI: Google không cấp `project_id` "
+                "cho nó. Thường gặp với tài khoản do trường hay công ty cấp. Vào /settings bấm "
+                "'Ngắt kết nối' rồi kết nối lại bằng một tài khoản Gmail cá nhân."
+            )
         return LLMError(f"CLIProxy từ chối lời gọi model: {exc.message}")
     return LLMError(f"Không gọi được model qua CLIProxy: {exc.message}")
 
@@ -272,24 +291,75 @@ async def _explain_unknown_provider(
     )
 
 
+async def _explain_blocked_or_stale(model_name: str, client: CliProxyClient | None) -> LLMError:
+    """`401/403` từ CLIProxy: token hỏng, hay Google đang chặn tài khoản? (I-45)
+
+    Hai câu trả lời dẫn tới hai việc khác hẳn nhau, nên phải đọc `auth-files` mới biết. Không
+    đọc được thì rơi về câu chung — đoán bừa "tài khoản bị chặn" khi thật ra chỉ hết hạn token
+    là đẩy người dùng đi tìm một trang xác thực không tồn tại.
+    """
+    blocked = await _provider_block(client)
+    if blocked is not None:
+        return blocked
+    return LLMNotConnectedError(
+        "CLIProxy từ chối credential đang có (401/403) — token hỏng hoặc hết hạn. "
+        "Vào /settings bấm 'Kết nối AI' để đăng nhập lại."
+    )
+
+
+async def _provider_block(client: CliProxyClient | None) -> LLMError | None:
+    """Credential nào đang bị **nhà cung cấp** chặn? `None` nếu không có, hoặc không tra được."""
+    try:
+        if client is not None:
+            files = await client.auth_files(settings.cliproxy_auth_provider)
+        else:
+            async with CliProxyClient() as proxy:
+                files = await proxy.auth_files(settings.cliproxy_auth_provider)
+    except CliProxyError as exc:
+        logger.info("Không đọc được auth-files để giải thích lỗi: %s", exc)
+        return None
+
+    for auth_file in files:
+        block = auth_file.provider_block
+        if block is None:
+            continue
+        if block.needs_verification:
+            return LLMProviderBlockedError(
+                "Tài khoản của bạn chưa được Google xác thực.",
+                action_url=block.action_url,
+            )
+        return LLMProviderBlockedError(
+            f"Google từ chối tài khoản {auth_file.label}: {block.one_line} "
+            "Vào /settings kết nối bằng tài khoản Google khác."
+        )
+    return None
+
+
 async def _explain_no_credential(model_name: str, client: CliProxyClient | None) -> LLMError:
-    """Dịch `503 auth_unavailable` thành đúng nguyên nhân — **hai chuyện rất khác nhau** (I-42).
+    """Dịch `503 auth_unavailable` thành đúng nguyên nhân — **ba chuyện rất khác nhau** (I-42).
 
-    | Tình huống | `auth-files` nói gì |
-    |------------|---------------------|
-    | Chưa ai đăng nhập | không có file nào |
-    | Đã đăng nhập, nhưng **gói không đủ** cho model này | có file, kèm `cooldowns[…]` |
+    | Tình huống | Dấu hiệu | Việc người dùng phải làm |
+    |------------|----------|--------------------------|
+    | Chưa ai đăng nhập | `auth-files` rỗng | bấm *Kết nối AI* |
+    | Google chặn tài khoản | `status_message` có lỗi | mở link xác thực — **đăng nhập lại vô ích** |
+    | Model đang bị tạm ngừng | `cooldowns[…]` | đợi, hoặc chọn model khác |
 
-    Gộp cả hai thành "chưa kết nối OAuth" là lời khuyên **sai** cho ca thứ hai: credential lành
-    lặn, đăng nhập lại chỉ đưa người dùng đi một vòng để quay về đúng chỗ cũ.
+    Gộp cả ba thành "chưa kết nối OAuth" là lời khuyên sai cho hai ca sau.
 
-    Không tra được `auth-files` thì rơi về câu cũ — đoán bừa còn tệ hơn.
+    Không tra được `auth-files` thì rơi về câu chung — đoán bừa còn tệ hơn.
     """
     channel = settings.cliproxy_auth_provider
     generic = LLMNotConnectedError(
         f"Chưa kết nối OAuth: CLIProxy không có credential nào cho channel {channel!r}. "
         "Vào /settings bấm 'Kết nối AI'."
     )
+
+    # **Hỏi nhà cung cấp trước, hỏi CLIProxy sau**: `status_message` chép nguyên văn lỗi của
+    # Google nên nói đúng chuyện gì xảy ra; `cooldowns[].reason` là nhãn CLIProxy tự đặt và nó
+    # gắn `payment_required` cho **mọi** 403 upstream (I-42).
+    blocked = await _provider_block(client)
+    if blocked is not None:
+        return blocked
 
     try:
         if client is not None:
@@ -305,27 +375,9 @@ async def _explain_no_credential(model_name: str, client: CliProxyClient | None)
         return generic
 
     bare = base_model(model_name)
-
-    # **Hỏi nhà cung cấp trước, hỏi CLIProxy sau.** `status_message` chép nguyên văn lỗi của
-    # Google nên nói đúng chuyện gì xảy ra; `cooldowns[].reason` là nhãn CLIProxy tự đặt và nó
-    # gắn `payment_required` cho **mọi** 403 upstream.
-    for auth_file in files:
-        block = auth_file.provider_block
-        if block is None:
-            continue
-        loi_khuyen = (
-            f" Mở {block.action_url} để xác minh rồi thử lại."
-            if block.needs_verification and block.action_url
-            else " Vào /settings kết nối bằng tài khoản Google khác."
-        )
-        return LLMProviderBlockedError(
-            f"Google từ chối tài khoản {auth_file.label}: {block.one_line}{loi_khuyen}"
-        )
-
-    blocked = [(f, c) for f in files if (c := f.cooldown_for(bare)) is not None]
-
-    if blocked:
-        auth_file, cooldown = blocked[0]
+    blocked_models = [(f, c) for f in files if (c := f.cooldown_for(bare)) is not None]
+    if blocked_models:
+        auth_file, cooldown = blocked_models[0]
         return LLMNotConnectedError(
             f"Model {bare!r} đang tạm ngừng với tài khoản {auth_file.label} "
             f"({cooldown.reason or 'không rõ lý do'}). Thử lại sau "

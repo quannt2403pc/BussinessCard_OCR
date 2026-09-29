@@ -80,6 +80,8 @@ class IntegrationStatusOut(BaseModel):
     reachable: bool = True
     from_cache: bool = False
     detail: str | None = None
+    #: Như `ConnectionTestOut.action_url` — badge cũng cần chữ *đây* bấm được (I-45).
+    action_url: str | None = None
     last_checked_at: datetime | None = None
 
 
@@ -129,6 +131,10 @@ class ConnectionTestOut(BaseModel):
     model: str
     text: str | None = None
     detail: str | None = None
+    #: Việc người dùng phải tự làm ở nơi khác để gỡ lỗi này — hiện tại chỉ có một: mở trang xác
+    #: thực tài khoản của Google (I-45). Tách khỏi `detail` để giao diện dựng được một chữ *đây*
+    #: bấm thẳng, thay vì in cả URL 300 ký tự ra màn hình bắt người dùng chép tay.
+    action_url: str | None = None
     elapsed_ms: int
 
 
@@ -197,18 +203,29 @@ async def get_status(
     row = await _save_cache(db, user.id, provider, connected=bool(usable), account_label=label)
 
     detail = None
+    action_url = None
     if files and not usable:
         # Có credential nhưng CLIProxy đánh dấu hỏng — badge phải đỏ, kèm lý do.
         # I-42: Google chặn bằng `403 VALIDATION_REQUIRED` kèm sẵn link xác minh. Đăng nhập lại
         # mười lần cũng ra đúng tài khoản chưa xác minh ấy; thứ người dùng cần là đường link kia.
         block = next((b for f in files if (b := f.provider_block) is not None), None)
-        if block is not None:
-            viec_can_lam = (
-                f" Mở {block.action_url} để xác minh rồi bấm Làm mới."
-                if block.needs_verification and block.action_url
-                else " Kết nối bằng tài khoản Google khác."
+        if block is not None and block.needs_verification:
+            detail = "Tài khoản của bạn chưa được Google xác thực."
+            action_url = block.action_url or None
+        elif block is not None:
+            detail = (
+                f"Google từ chối tài khoản này: {block.one_line} "
+                "Kết nối bằng tài khoản Google khác."
             )
-            detail = f"Google từ chối tài khoản này: {block.one_line}{viec_can_lam}"
+        elif any(f.missing_project_id for f in files):
+            # I-45: badge **xanh** trong khi mọi lời gọi trả 400 — TS-02 ghi nhận từ 2026-09-18
+            # và đề xuất "badge dựa trên lời gọi thử gần nhất". Không cần tới mức đó:
+            # `project_id` nằm sẵn trong `auth-files`, đọc là biết, không tốn một lượt gọi model.
+            detail = (
+                "Tài khoản Google này không dùng được với AI: Google không cấp `project_id` "
+                "cho nó. Thường gặp với tài khoản do trường hay công ty cấp. Bấm 'Ngắt kết nối' "
+                "rồi kết nối lại bằng một tài khoản Gmail cá nhân."
+            )
         else:
             detail = "Credential đã lưu nhưng CLIProxy đánh dấu không dùng được. Hãy kết nối lại."
 
@@ -222,6 +239,7 @@ async def get_status(
         model_available=(settings.llm_model in models) if models else None,
         reachable=True,
         detail=detail,
+        action_url=action_url,
         last_checked_at=row.last_checked_at,
     )
 
@@ -404,6 +422,7 @@ async def test_connection(user: CurrentUser) -> ConnectionTestOut:
             ok=False,
             model=settings.llm_model,
             detail=str(exc),
+            action_url=getattr(exc, "action_url", None) or None,
             elapsed_ms=_elapsed_ms(started),
         )
     return ConnectionTestOut(

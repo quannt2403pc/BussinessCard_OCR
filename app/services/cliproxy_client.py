@@ -229,14 +229,58 @@ class AuthFile:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
+    def missing_project_id(self) -> bool:
+        """Credential không có `project_id` → **mọi** lời gọi model trả `400` (I-45, TS-02).
+
+        Đo thật 2026-09-29: `quannt2403pc@gmail.com` có `project_id: null` trong khi hai tài
+        khoản kia có `"aicode-consumers"`; CLIProxy ghi
+        `antigravity: failed to fetch project ID: no project_id in response` rồi trả
+        `400 antigravity auth missing project_id`. Gặp lần đầu 2026-09-18 với một tài khoản
+        Google Workspace (`docs/user-guide.md` mục 9).
+
+        ⚠️ **Vắng khoá cũng là thiếu.** Bản đầu của I-45 phân biệt *trường vắng mặt* với *trường
+        rỗng* và coi vắng mặt là "không biết gì" — nghe hợp lý, nhưng **sai với CLIProxy thật**:
+        nó **bỏ hẳn khoá** khi Google không cấp project, chứ không để `null`. Đo lại 2026-09-29:
+
+            chidientu75@gmail.com   "project_id" in raw → False   (Google không cấp)
+            quanpyke1@gmail.com     "project_id" in raw → True    ("aicode-consumers")
+
+        Cái sai ban đầu đến từ chính phép đo: `raw.get("project_id")` trả `None` cho **cả hai**
+        trường hợp, nên nhìn vào kết quả thì tưởng CLIProxy luôn khai trường ấy. Hậu quả: bản vá
+        không bao giờ chạy và lỗi y nguyên.
+
+        Rủi ro của chiều ngược lại — một bản CLIProxy nào đó thôi không khai trường này nữa —
+        **tự lành**: `_ensure_project_id()` sẽ gán giá trị ngay lúc `claim()`, và từ đó khoá có
+        mặt. Giữa hai kiểu sai, sai này rẻ hơn hẳn kiểu sai kia.
+        """
+        return not str(self.raw.get("project_id") or "").strip()
+
+    @property
+    def alive(self) -> bool:
+        """Credential còn sống theo đánh giá của **CLIProxy**, chưa xét `project_id` (I-45).
+
+        Tách khỏi `usable` vì `claim()` cần đúng nghĩa này: credential vừa OAuth xong thường
+        **chưa** có `project_id` — chính `claim()` sẽ gán ngay sau đó. Lọc bằng `usable` ở bước
+        chọn thì không credential nào được chọn và người dùng không kết nối nổi, dù mọi thứ vừa
+        chạy trơn tru.
+        """
+        return not self.disabled and not bool(self.raw.get("unavailable"))
+
+    @property
     def usable(self) -> bool:
         """Credential còn dùng được — CLIProxy tự đánh dấu `disabled`/`unavailable` khi hỏng.
 
         **Cooldown cố ý KHÔNG tính vào đây**: credential đang nghỉ vẫn lành lặn và model khác vẫn
         gọi được ngay lúc này. Coi nó là "không dùng được" thì người dùng đi đăng nhập lại để
         chữa một thứ mà đăng nhập lại không đụng tới được (I-42).
+
+        **Thiếu `project_id` thì ngược lại, tính vào đây** (I-45) — và sự khác biệt ấy là có lý
+        do: cooldown tự hết sau vài phút, còn thiếu `project_id` thì hỏng vĩnh viễn với tài
+        khoản đó, mà cách chữa **đúng là** đăng nhập lại bằng tài khoản khác. Badge đỏ nói
+        chính xác việc cần làm; badge xanh — như trước I-45 — để người dùng ngồi thử lại mãi
+        một thứ không bao giờ chạy.
         """
-        return not self.disabled and not bool(self.raw.get("unavailable"))
+        return self.alive and not self.missing_project_id
 
     def cooldown_for(self, model: str) -> Cooldown | None:
         """Cooldown đang áp lên đúng model này, nếu có.
@@ -562,6 +606,19 @@ class CliProxyClient:
         if not name.strip():
             raise ValueError("set_prefix() bắt buộc có `name`.")
         await self.request("PATCH", "/auth-files/fields", json={"name": name, "prefix": prefix})
+
+    async def set_project_id(self, name: str, project_id: str) -> None:
+        """Gán `project_id` cho một credential (I-45).
+
+        Cùng endpoint `PATCH /auth-files/fields` mà `set_prefix()` dùng — hợp đồng dò ra bằng
+        thực nghiệm ở 12.1, nay hoá ra nhận thêm cả khoá này. Đo thật 2026-09-29: PATCH xong
+        thì lời gọi chuyển từ `400 missing project_id` sang lỗi kế tiếp, tức Google đã nhận.
+        """
+        if not name.strip():
+            raise ValueError("set_project_id() bắt buộc có `name`.")
+        await self.request(
+            "PATCH", "/auth-files/fields", json={"name": name, "project_id": project_id}
+        )
 
     async def disconnect(self, provider: str | None = None) -> list[str]:
         """Ngắt kết nối: xoá mọi credential của provider. Trả tên các file đã xoá.
