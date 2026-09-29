@@ -13,7 +13,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.workspace import require_workspace
 from app.models.user import User
+from app.models.workspace import Role, Workspace, WorkspaceMember
 from app.routers import auth as auth_router
 from app.schemas.user import WeakPasswordError, check_password, normalize_email
 from app.services import auth
@@ -166,6 +168,70 @@ async def test_register_signs_in_with_hardened_cookie(
     assert stored is not None
     assert stored.password_hash.startswith("$argon2")
     assert PASSWORD not in stored.password_hash
+
+
+async def test_register_creates_a_personal_workspace(
+    db_session: AsyncSession, client: httpx.AsyncClient
+) -> None:
+    """`I-45`: đăng ký xong phải có workspace ngay, nếu không cả ứng dụng trả `409`.
+
+    ⚠️ Ca này cố ý đi qua **đúng endpoint `POST /auth/register`**, không qua `make_user()` của
+    `conftest`. Lỗi gốc lọt được chính vì fixture ấy tự tạo workspace: 747 test vẫn xanh trong
+    khi luồng đăng ký thật để người dùng lại với một tài khoản không mở nổi trang nào.
+    """
+    await register(client, email="an@example.com")
+
+    user = await db_session.scalar(select(User).where(User.email == "an@example.com"))
+    assert user is not None
+    assert user.active_workspace_id is not None, "đăng ký xong mà không có workspace đang mở"
+
+    member = await db_session.get(WorkspaceMember, (user.active_workspace_id, user.id))
+    assert member is not None
+    assert member.role == Role.ADMIN  # người tạo tài khoản là quản trị workspace của chính mình
+
+    workspace = await db_session.get(Workspace, user.active_workspace_id)
+    assert workspace is not None
+    assert workspace.name == "Nguyễn Văn An"  # tên hiển thị, đã gộp khoảng trắng
+
+
+async def test_register_without_display_name_uses_the_email_prefix(
+    db_session: AsyncSession, client: httpx.AsyncClient
+) -> None:
+    """Không nhập tên thì lấy phần trước `@` — **đúng từng chữ** quy tắc backfill của `0015`."""
+    response = await client.post(
+        "/auth/register",
+        data={
+            "email": "minh.an@example.com",
+            "password": PASSWORD,
+            "password_confirm": PASSWORD,
+            "display_name": "   ",
+            "next": "/",
+        },
+    )
+    assert response.status_code == 303
+
+    user = await db_session.scalar(select(User).where(User.email == "minh.an@example.com"))
+    assert user is not None and user.active_workspace_id is not None
+    workspace = await db_session.get(Workspace, user.active_workspace_id)
+    assert workspace is not None and workspace.name == "minh.an"
+
+
+async def test_a_brand_new_account_can_open_the_data_pages(
+    db_session: AsyncSession, client: httpx.AsyncClient
+) -> None:
+    """Mặt đối diện của `I-45`: đo bằng `require_workspace`, thứ đã trả `409` trên hệ thật.
+
+    Kiểm thẳng dependency thay vì gọi HTTP: app nhỏ trong file này chỉ gắn router `auth`, nên
+    không có `/api/cards` để gọi — mà `require_workspace` mới đúng là chỗ sinh ra `409`.
+    """
+    await register(client, email="an@example.com")
+    user = await db_session.scalar(select(User).where(User.email == "an@example.com"))
+    assert user is not None
+
+    active = await require_workspace(user, db_session)
+
+    assert active.name == "Nguyễn Văn An"
+    assert active.is_admin and active.can_write
 
 
 async def test_register_duplicate_email_case_insensitive(

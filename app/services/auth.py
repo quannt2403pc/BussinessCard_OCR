@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.user import User
+from app.models.workspace import WORKSPACE_NAME_MAX_LENGTH
 from app.repositories import user as user_repo
+from app.repositories import workspace as workspace_repo
 from app.schemas.user import check_password, clean_display_name, normalize_email
 
 SESSION_COOKIE = "bizcard_session"
@@ -117,14 +119,38 @@ def safe_next(target: str | None) -> str:
 async def register(
     db: AsyncSession, *, email: str, password: str, display_name: str | None = None
 ) -> User:
+    """Tạo tài khoản, **kèm luôn một workspace riêng mang tên người đó** (`I-45`).
+
+    Từ `NEXT-05` mọi dữ liệu thuộc về workspace, nên tài khoản không có workspace thì
+    `core/workspace.py::require_workspace` trả `409` ở gần như mọi đường: danh thiếp, công ty,
+    số liệu, trợ lý. Revision `0015` đã vá cho những tài khoản **có sẵn lúc chạy migration**,
+    nhưng chỗ này thì không — nên mọi người đăng ký sau đó rơi vào một ứng dụng không dùng được.
+
+    Tạo ngay tại đây chứ không đợi người dùng tự bấm: người vừa đăng ký chưa biết "workspace" là
+    gì, mà thứ họ gặp đầu tiên lại là một trang báo lỗi.
+    """
     email = normalize_email(email)
     check_password(password, email)
-    return await user_repo.create(
+    user = await user_repo.create(
         db,
         email=email,
         password_hash=hash_password(password),
         display_name=clean_display_name(display_name),
     )
+    await workspace_repo.create(db, name=personal_workspace_name(user), owner_id=user.id)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+def personal_workspace_name(user: User) -> str:
+    """Tên workspace mặc định của một người: tên hiển thị, không có thì phần trước `@` của email.
+
+    Giống **từng chữ** quy tắc backfill của revision `0015`, để tài khoản cũ và tài khoản mới
+    không ra hai kiểu tên khác nhau cho cùng một thứ.
+    """
+    name = (user.display_name or "").strip() or user.email.split("@", 1)[0]
+    return name[:WORKSPACE_NAME_MAX_LENGTH]
 
 
 async def authenticate(db: AsyncSession, email: str, password: str) -> User | None:
