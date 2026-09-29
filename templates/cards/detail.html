@@ -142,6 +142,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', path='js/language.js') }}?v={{ asset_v }}"></script>
 <script>
 (() => {
   "use strict";
@@ -275,8 +276,21 @@
     cell.append(note);
 
     if (spec.vi) cell.append(buildViInput(spec));
+    if (spec.type === "lang") cell.append(buildLanguageHint(input));
 
     return cell;
+  }
+
+  const hintRefreshers = [];
+
+  function buildLanguageHint(input) {
+    const hint = el("p", "mt-1 text-xs text-slate-600");
+    const refresh = () => { hint.replaceChildren(languageElement(input.value)); };
+    input.addEventListener("input", refresh);
+    input.addEventListener("change", refresh);
+    hintRefreshers.push(refresh);
+    refresh();
+    return hint;
   }
 
   /** Ô nhập bản Việt hoá, nhỏ hơn và nhạt hơn ô gốc — nó là bản phụ, không phải bản thay thế. */
@@ -307,9 +321,10 @@
     // và một ô <select> sẽ âm thầm đổi nó thành giá trị khác.
     const list = document.createElement("datalist");
     list.id = "lang-list";
-    for (const code of ["vi", "en", "ja", "ko", "zh"]) {
+    for (const item of languageOptions()) {
       const opt = document.createElement("option");
-      opt.value = code;
+      opt.value = item.code;
+      opt.label = item.label;
       list.append(opt);
     }
     $("fields").append(list);
@@ -329,6 +344,8 @@
       input.value = value == null ? "" : String(value);
       loaded[name] = input.value;
     }
+
+    for (const refresh of hintRefreshers) refresh();
 
     for (const spec of FIELDS) {
       const input = inputs.get(spec.name);

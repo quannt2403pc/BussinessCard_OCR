@@ -47,11 +47,6 @@
       <select id="f-language" name="language"
               class="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none">
         <option value="">Tất cả</option>
-        <option value="vi">vi — Việt</option>
-        <option value="en">en — Anh</option>
-        <option value="ja">ja — Nhật</option>
-        <option value="ko">ko — Hàn</option>
-        <option value="zh">zh — Trung</option>
       </select>
     </label>
 
@@ -72,6 +67,7 @@
         <th class="px-4 py-3">Công ty</th>
         <th class="px-4 py-3">Liên hệ</th>
         <th class="px-4 py-3">Trạng thái</th>
+        <th class="px-4 py-3">Ngôn ngữ</th>
         <th class="px-4 py-3">Ngày quét</th>
         <th class="px-4 py-3"></th>
       </tr>
@@ -90,6 +86,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', path='js/language.js') }}?v={{ asset_v }}"></script>
 <script>
 (() => {
   "use strict";
@@ -215,10 +212,11 @@
 
     const state = el("td", "px-4 py-3");
     state.append(statusBadge(card.status));
-    if (card.language_detected) {
-      state.append(el("div", "mt-1 text-xs text-muted", card.language_detected));
-    }
     tr.append(state);
+
+    const language = el("td", "px-4 py-3 text-sm text-slate-700");
+    language.append(languageElement(card.language_detected));
+    tr.append(language);
 
     tr.append(el("td", "px-4 py-3 text-xs text-slate-500", formatDate(card.uploaded_at)));
 
@@ -362,6 +360,17 @@
   // giá trị không khớp option nào, trình duyệt im lặng đặt về rỗng, còn `query()` vẫn gửi nó
   // xuống API và nhận 400 — trang hiện "Không tải được danh sách" cho một thứ người dùng không
   // gõ. Giá trị lạ thì bỏ qua, coi như không có bộ lọc.
+  function addLanguageOption(code, label) {
+    const option = document.createElement("option");
+    option.value = code;
+    option.textContent = label;
+    $("f-language").append(option);
+  }
+
+  function fillLanguageFilter() {
+    for (const item of languageOptions()) addLanguageOption(item.code, item.label);
+  }
+
   function applyUrlFilters() {
     const params = new URLSearchParams(location.search);
     const text = (params.get("q") || "").trim();
@@ -371,6 +380,10 @@
       const value = params.get(key);
       if (!value) continue;
       const select = $(id);
+      if (id === "f-language" && ![...select.options].some((option) => option.value === value)) {
+        const info = describeLanguage(value);
+        if (info && info.name !== value.toUpperCase()) addLanguageOption(value, languageLabel(value));
+      }
       if ([...select.options].some((option) => option.value === value)) {
         select.value = value;
       }
@@ -396,6 +409,7 @@
     setTimeout(syncUrl, 0);
   });
 
+  fillLanguageFilter();
   applyUrlFilters();
   load();
 })();
