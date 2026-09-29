@@ -12,7 +12,7 @@
  *     toastClear(box);
  *
  * Tham số cuối nhận **hàm** (dựng nút *Thử lại*) hoặc **`{href, label}`** (dựng một liên kết —
- * dùng khi việc cần làm nằm ngoài ứng dụng, I-45).
+ * dùng khi việc cần làm nằm ngoài ứng dụng, I-47).
  *
  * `box` phải có `aria-live` trong markup (`polite` cho tin thường, `assertive` cho lỗi). Không có
  * thì trình đọc màn hình im lặng trước đúng thứ người dùng đang chờ.
@@ -74,7 +74,7 @@
       box.appendChild(again);
     } else if (retry && retry.href) {
       // Việc cần làm nằm **ngoài** ứng dụng — hiện tại chỉ có một: mở trang xác thực tài khoản
-      // của Google (I-45). Nút "Thử lại" vô nghĩa ở đây: bấm bao nhiêu lần cũng hỏng cho tới khi
+      // của Google (I-47). Nút "Thử lại" vô nghĩa ở đây: bấm bao nhiêu lần cũng hỏng cho tới khi
       // người dùng làm xong việc bên kia.
       //
       // Chỉ nhận `https:`. URL đi qua ba lớp (Google → CLIProxy → backend) mới tới đây, và một

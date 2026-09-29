@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     cliproxy_base_url: str = "http://cliproxy:8317"
     cliproxy_mgmt_key: str = ""
     cliproxy_auth_provider: str = "antigravity"
-    #: Project Google gán cho credential mới khi tự nó không có (I-45).
+    #: Project Google gán cho credential mới khi tự nó không có (I-47).
     #:
     #: **Vì sao cần**: từ khoảng 2026-09-29 Google trả `UNSUPPORTED_CLIENT` cho `free-tier` của
     #: OAuth client mà Antigravity dùng, nên `loadCodeAssist` **không còn cấp project** cho tài

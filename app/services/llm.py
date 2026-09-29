@@ -76,7 +76,7 @@ class LLMProviderBlockedError(LLMNotConnectedError):
 
     Google trả `403 VALIDATION_REQUIRED` kèm một `validation_url`; đăng nhập lại không chữa được.
 
-    `action_url` đi **riêng** khỏi câu chữ (I-45). Nhét URL vào giữa câu thì giao diện chỉ còn
+    `action_url` đi **riêng** khỏi câu chữ (I-47). Nhét URL vào giữa câu thì giao diện chỉ còn
     cách in nguyên một chuỗi 300 ký tự ra màn hình — người dùng phải bôi đen rồi chép tay. Tách
     ra thì trang dựng được một chữ *đây* bấm thẳng.
     """
@@ -228,7 +228,7 @@ async def _translate_error(
     chạy được lẫn bốn nhánh hỏng.
     """
     if isinstance(exc, CliProxyAuthError):
-        # **Hỏi lý do trước khi kết luận** (I-45). `401/403` gộp hai chuyện khác hẳn nhau: token
+        # **Hỏi lý do trước khi kết luận** (I-47). `401/403` gộp hai chuyện khác hẳn nhau: token
         # thật sự hỏng (đăng nhập lại là xong) và Google chặn tài khoản chờ xác thực (đăng nhập
         # lại **không** chữa được gì). Đo 2026-09-29: lần gọi **đầu tiên** của một tài khoản chưa
         # xác thực rơi thẳng vào đây, nên nó nhận đúng câu sai đường — chỉ từ lần thứ hai, khi
@@ -245,7 +245,7 @@ async def _translate_error(
         if exc.status_code == 400 and "missing project_id" in loi:
             # Nguyên văn (`antigravity auth missing project_id: no project_id in response`) nói
             # đúng chuyện gì hỏng nhưng không nói **phải làm gì**, mà đây là lỗi người dùng tự
-            # gỡ được trong một phút — chỉ cần biết đường (I-45, TS-02).
+            # gỡ được trong một phút — chỉ cần biết đường (I-47, TS-02).
             return LLMNotConnectedError(
                 "Tài khoản Google này không dùng được với AI: Google không cấp `project_id` "
                 "cho nó. Thường gặp với tài khoản do trường hay công ty cấp. Vào /settings bấm "
@@ -292,7 +292,7 @@ async def _explain_unknown_provider(
 
 
 async def _explain_blocked_or_stale(model_name: str, client: CliProxyClient | None) -> LLMError:
-    """`401/403` từ CLIProxy: token hỏng, hay Google đang chặn tài khoản? (I-45)
+    """`401/403` từ CLIProxy: token hỏng, hay Google đang chặn tài khoản? (I-47)
 
     Hai câu trả lời dẫn tới hai việc khác hẳn nhau, nên phải đọc `auth-files` mới biết. Không
     đọc được thì rơi về câu chung — đoán bừa "tài khoản bị chặn" khi thật ra chỉ hết hạn token

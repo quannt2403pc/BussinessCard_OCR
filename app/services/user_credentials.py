@@ -110,7 +110,7 @@ def forget_session(state: str) -> None:
 def pick_new_file(files: Sequence[AuthFile], before: dict[str, str] | None) -> AuthFile | None:
     """Credential vừa xuất hiện sau lượt OAuth này.
 
-    Lọc bằng `alive` chứ **không** phải `usable` (I-45): credential mới tinh thường chưa có
+    Lọc bằng `alive` chứ **không** phải `usable` (I-47): credential mới tinh thường chưa có
     `project_id` — `claim()` gán ngay sau đây. Dùng `usable` thì không cái nào lọt qua và người
     dùng không kết nối nổi, dù luồng OAuth vừa chạy hoàn hảo.
     """
@@ -158,7 +158,7 @@ async def release(db: AsyncSession, user: User, proxy: CliProxyClient) -> list[s
 
 
 async def _ensure_project_id(proxy: CliProxyClient, auth_file: AuthFile) -> None:
-    """Credential vừa nhận mà thiếu `project_id` thì gán cho nó (I-45).
+    """Credential vừa nhận mà thiếu `project_id` thì gán cho nó (I-47).
 
     Làm ngay lúc `claim()` chứ không đợi tới lời gọi model đầu tiên: người dùng vừa đi hết luồng
     OAuth của 13.7 — mở tab Google, đồng ý, chép URL về dán — và phần thưởng cho tất cả công ấy
@@ -176,7 +176,7 @@ async def _ensure_project_id(proxy: CliProxyClient, auth_file: AuthFile) -> None
         logger.warning("Không gán được project_id cho %s: %s", auth_file.name, exc)
     else:
         logger.info(
-            "Gán project_id %r cho credential %s (I-45)",
+            "Gán project_id %r cho credential %s (I-47)",
             settings.cliproxy_project_id,
             auth_file.name,
         )

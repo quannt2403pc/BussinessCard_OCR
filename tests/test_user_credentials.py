@@ -65,7 +65,7 @@ class FakeProxy:
             "disabled": False,
             "modtime": f"2026-09-22T10:00:{self.clock:02d}Z",
             # `None` chứ không bỏ trống khoá: CLIProxy thật **luôn** khai `project_id` trong
-            # `auth-files`, để `null` khi Google không cấp (đo 2026-09-29, I-45). Bỏ khoá đi thì
+            # `auth-files`, để `null` khi Google không cấp (đo 2026-09-29, I-47). Bỏ khoá đi thì
             # fake dựng ra một hình dạng không tồn tại, và test hoá thành kiểm chính nó.
             "project_id": None,
         }
@@ -89,7 +89,7 @@ class FakeProxy:
     def _patch(self, request: httpx.Request) -> httpx.Response:
         """`PATCH /auth-files/fields` nhận **một khoá mỗi lượt**: `prefix` hoặc `project_id`.
 
-        Ghi thẳng vào `files` cho `project_id` (I-45) vì lần đọc `auth-files` sau đó phải thấy
+        Ghi thẳng vào `files` cho `project_id` (I-47) vì lần đọc `auth-files` sau đó phải thấy
         giá trị mới — đúng như CLIProxy thật: nó ghi vào file rồi nạp lại.
         """
         body = json.loads(request.content)
@@ -341,13 +341,13 @@ async def test_scan_and_translate_both_use_the_owner_prefix(cliproxy: CliProxySt
     assert generate_paths(cliproxy) == [f"/v1beta/models/{model}:generateContent"] * 2
 
 
-# --------------------------------------------------- project_id của credential (I-45)
+# --------------------------------------------------- project_id của credential (I-47)
 
 
 def test_thieu_project_id_thi_credential_khong_dung_duoc() -> None:
-    """Gốc của I-45: credential thiếu `project_id` → **mọi** lời gọi trả `400`, mà badge vẫn xanh.
+    """Gốc của I-47: credential thiếu `project_id` → **mọi** lời gọi trả `400`, mà badge vẫn xanh.
 
-    Trước I-45 `usable` chỉ xét `disabled`/`unavailable`, nên TS-02 ghi nhận từ 2026-09-18 rằng
+    Trước I-47 `usable` chỉ xét `disabled`/`unavailable`, nên TS-02 ghi nhận từ 2026-09-18 rằng
     badge báo *Đã kết nối* trong khi không gọi được gì. Nay `usable` biết chuyện đó.
     """
     thieu = AuthFile.from_payload({"name": "a.json", "status": "active", "project_id": None})
@@ -362,7 +362,7 @@ def test_thieu_project_id_thi_credential_khong_dung_duoc() -> None:
 def test_vang_khoa_project_id_cung_la_thieu() -> None:
     """CLIProxy **bỏ hẳn khoá** khi Google không cấp project, chứ không để `null`.
 
-    Bản đầu của I-45 coi *vắng khoá* là "không biết gì" nên bản vá **không bao giờ chạy** và lỗi
+    Bản đầu của I-47 coi *vắng khoá* là "không biết gì" nên bản vá **không bao giờ chạy** và lỗi
     y nguyên. Cái sai đến từ phép đo: `raw.get()` trả `None` cho cả *vắng khoá* lẫn *khoá rỗng*,
     nhìn vào thì tưởng CLIProxy luôn khai trường ấy. Ca này ghim lại hình dạng thật:
 
@@ -394,7 +394,7 @@ def test_credential_moi_thieu_project_id_van_chon_duoc() -> None:
 async def test_ket_noi_tu_gan_project_id_cho_credential_moi(
     app_client: ClientFactory, proxy: FakeProxy, alice: User
 ) -> None:
-    """Đường đi thật của I-45: đăng nhập xong là credential dùng được ngay.
+    """Đường đi thật của I-47: đăng nhập xong là credential dùng được ngay.
 
     Từ ~2026-09-29 Google trả `UNSUPPORTED_CLIENT` cho `free-tier` của OAuth client Antigravity,
     nên `loadCodeAssist` **không còn cấp project** cho tài khoản mới đăng nhập. Không vá thì

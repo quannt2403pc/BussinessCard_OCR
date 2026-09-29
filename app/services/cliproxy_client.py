@@ -230,7 +230,7 @@ class AuthFile:
 
     @property
     def missing_project_id(self) -> bool:
-        """Credential không có `project_id` → **mọi** lời gọi model trả `400` (I-45, TS-02).
+        """Credential không có `project_id` → **mọi** lời gọi model trả `400` (I-47, TS-02).
 
         Đo thật 2026-09-29: `quannt2403pc@gmail.com` có `project_id: null` trong khi hai tài
         khoản kia có `"aicode-consumers"`; CLIProxy ghi
@@ -238,7 +238,7 @@ class AuthFile:
         `400 antigravity auth missing project_id`. Gặp lần đầu 2026-09-18 với một tài khoản
         Google Workspace (`docs/user-guide.md` mục 9).
 
-        ⚠️ **Vắng khoá cũng là thiếu.** Bản đầu của I-45 phân biệt *trường vắng mặt* với *trường
+        ⚠️ **Vắng khoá cũng là thiếu.** Bản đầu của I-47 phân biệt *trường vắng mặt* với *trường
         rỗng* và coi vắng mặt là "không biết gì" — nghe hợp lý, nhưng **sai với CLIProxy thật**:
         nó **bỏ hẳn khoá** khi Google không cấp project, chứ không để `null`. Đo lại 2026-09-29:
 
@@ -257,7 +257,7 @@ class AuthFile:
 
     @property
     def alive(self) -> bool:
-        """Credential còn sống theo đánh giá của **CLIProxy**, chưa xét `project_id` (I-45).
+        """Credential còn sống theo đánh giá của **CLIProxy**, chưa xét `project_id` (I-47).
 
         Tách khỏi `usable` vì `claim()` cần đúng nghĩa này: credential vừa OAuth xong thường
         **chưa** có `project_id` — chính `claim()` sẽ gán ngay sau đó. Lọc bằng `usable` ở bước
@@ -274,10 +274,10 @@ class AuthFile:
         gọi được ngay lúc này. Coi nó là "không dùng được" thì người dùng đi đăng nhập lại để
         chữa một thứ mà đăng nhập lại không đụng tới được (I-42).
 
-        **Thiếu `project_id` thì ngược lại, tính vào đây** (I-45) — và sự khác biệt ấy là có lý
+        **Thiếu `project_id` thì ngược lại, tính vào đây** (I-47) — và sự khác biệt ấy là có lý
         do: cooldown tự hết sau vài phút, còn thiếu `project_id` thì hỏng vĩnh viễn với tài
         khoản đó, mà cách chữa **đúng là** đăng nhập lại bằng tài khoản khác. Badge đỏ nói
-        chính xác việc cần làm; badge xanh — như trước I-45 — để người dùng ngồi thử lại mãi
+        chính xác việc cần làm; badge xanh — như trước I-47 — để người dùng ngồi thử lại mãi
         một thứ không bao giờ chạy.
         """
         return self.alive and not self.missing_project_id
@@ -608,7 +608,7 @@ class CliProxyClient:
         await self.request("PATCH", "/auth-files/fields", json={"name": name, "prefix": prefix})
 
     async def set_project_id(self, name: str, project_id: str) -> None:
-        """Gán `project_id` cho một credential (I-45).
+        """Gán `project_id` cho một credential (I-47).
 
         Cùng endpoint `PATCH /auth-files/fields` mà `set_prefix()` dùng — hợp đồng dò ra bằng
         thực nghiệm ở 12.1, nay hoá ra nhận thêm cả khoá này. Đo thật 2026-09-29: PATCH xong

@@ -80,7 +80,7 @@ class IntegrationStatusOut(BaseModel):
     reachable: bool = True
     from_cache: bool = False
     detail: str | None = None
-    #: Như `ConnectionTestOut.action_url` — badge cũng cần chữ *đây* bấm được (I-45).
+    #: Như `ConnectionTestOut.action_url` — badge cũng cần chữ *đây* bấm được (I-47).
     action_url: str | None = None
     last_checked_at: datetime | None = None
 
@@ -132,7 +132,7 @@ class ConnectionTestOut(BaseModel):
     text: str | None = None
     detail: str | None = None
     #: Việc người dùng phải tự làm ở nơi khác để gỡ lỗi này — hiện tại chỉ có một: mở trang xác
-    #: thực tài khoản của Google (I-45). Tách khỏi `detail` để giao diện dựng được một chữ *đây*
+    #: thực tài khoản của Google (I-47). Tách khỏi `detail` để giao diện dựng được một chữ *đây*
     #: bấm thẳng, thay vì in cả URL 300 ký tự ra màn hình bắt người dùng chép tay.
     action_url: str | None = None
     elapsed_ms: int
@@ -218,7 +218,7 @@ async def get_status(
                 "Kết nối bằng tài khoản Google khác."
             )
         elif any(f.missing_project_id for f in files):
-            # I-45: badge **xanh** trong khi mọi lời gọi trả 400 — TS-02 ghi nhận từ 2026-09-18
+            # I-47: badge **xanh** trong khi mọi lời gọi trả 400 — TS-02 ghi nhận từ 2026-09-18
             # và đề xuất "badge dựa trên lời gọi thử gần nhất". Không cần tới mức đó:
             # `project_id` nằm sẵn trong `auth-files`, đọc là biết, không tốn một lượt gọi model.
             detail = (
